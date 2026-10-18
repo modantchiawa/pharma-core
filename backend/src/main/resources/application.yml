@@ -1,0 +1,79 @@
+spring:
+  application:
+    name: pharma-core
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pharmacore}
+    username: ${DB_APP_USER:pharmacore_app_login}
+    password: ${DB_APP_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:30}
+      # Guarantees Row-Level Security applies even if the login role is privileged.
+      connection-init-sql: SET ROLE pharmacore_app
+  flyway:
+    # Migrations run with the schema owner, never with the application role.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/pharmacore}
+    user: ${DB_MIGRATION_USER:pharmacore_owner}
+    password: ${DB_MIGRATION_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+  cache:
+    cache-names: actors
+    caffeine:
+      spec: maximumSize=20000,expireAfterWrite=60s
+  servlet:
+    multipart:
+      max-file-size: 512KB
+      max-request-size: 1MB
+
+server:
+  shutdown: graceful
+  error:
+    include-message: never
+
+logging:
+  structured:
+    format:
+      console: ecs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+pharmacore:
+  security:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:4200}
+    issuers:
+      - uri: ${OIDC_PLATFORM_ISSUER:http://localhost:8180/realms/pharmacore-platform}
+        kind: PLATFORM
+        audience: pharmacore-api
+      - uri: ${OIDC_PHARMACY_ISSUER:http://localhost:8180/realms/pharmacore-pharmacies}
+        kind: TENANT
+        audience: pharmacore-api
+  network:
+    queries-per-minute: 30
+    reservation-ttl: PT4H
+  messaging:
+    broker-relay:
+      enabled: false
+      host: localhost
+      port: 61613
+      login: guest
+      passcode: guest

@@ -1,0 +1,59 @@
+package com.pharmacore.shared.security;
+
+import java.util.List;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+@Configuration(proxyBeanMethods = false)
+@EnableMethodSecurity
+class SecurityConfiguration {
+
+    @Bean
+    SecurityFilterChain apiSecurity(HttpSecurity http, BearerTokenAuthenticator authenticator) throws Exception {
+        return http
+                .csrf(csrf -> csrf.disable())
+                .cors(cors -> { })
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .headers(headers -> headers
+                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'none'; frame-ancestors 'none'"))
+                        .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+                        // STOMP authenticates the CONNECT frame itself (see StompAuthenticationInterceptor)
+                        .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/api/platform/**").hasAuthority(BearerTokenAuthenticator.PLATFORM_ADMIN_AUTHORITY)
+                        .anyRequest().authenticated())
+                .oauth2ResourceServer(oauth -> oauth.authenticationManagerResolver(request -> authenticator))
+                .addFilterAfter(new TenantContextFilter(), BearerTokenAuthenticationFilter.class)
+                .build();
+    }
+
+    @Bean
+    TrustedIssuerRegistry trustedIssuerRegistry(SecurityProperties properties) {
+        return new OidcTrustedIssuerRegistry(properties);
+    }
+
+    @Bean
+    CorsConfigurationSource corsConfigurationSource(SecurityProperties properties) {
+        var cors = new CorsConfiguration();
+        cors.setAllowedOrigins(properties.allowedOrigins());
+        cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key", TenantContextFilter.CORRELATION_HEADER));
+        cors.setExposedHeaders(List.of(TenantContextFilter.CORRELATION_HEADER, "ETag"));
+        cors.setMaxAge(3600L);
+        var source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", cors);
+        return source;
+    }
+}
