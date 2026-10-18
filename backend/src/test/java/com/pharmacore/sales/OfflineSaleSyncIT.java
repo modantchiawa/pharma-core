@@ -25,6 +25,7 @@ class OfflineSaleSyncIT extends IntegrationTest {
 
         var first = call(post("/api/v1/pos/sync/sales"), pharmacy.ownerToken(), batch)
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcomes[0].type").value("ACCEPTED"))
                 .andExpect(jsonPath("$.outcomes[0].clientSaleId").value(clientSaleId.toString()))
                 .andExpect(jsonPath("$.outcomes[0].saleId").exists())
                 .andExpect(jsonPath("$.outcomes[0].anomalies").isEmpty());
@@ -33,6 +34,7 @@ class OfflineSaleSyncIT extends IntegrationTest {
         // The terminal lost the response and pushes the same journal again
         call(post("/api/v1/pos/sync/sales"), pharmacy.ownerToken(), batch)
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcomes[0].type").value("DUPLICATE"))
                 .andExpect(jsonPath("$.outcomes[0].saleId").value(saleId))
                 .andExpect(jsonPath("$.outcomes[0].anomalies").doesNotExist());
 

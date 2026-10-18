@@ -1,0 +1,35 @@
+@import 'tailwindcss';
+
+/* Brand palette injected at runtime by BrandingService (white-label). */
+:root {
+  --brand-primary: #0f766e;
+  --brand-secondary: #134e4a;
+  --brand-accent: #f59e0b;
+  --brand-on-primary: #ffffff;
+}
+
+@theme inline {
+  --color-brand: var(--brand-primary);
+  --color-brand-dark: var(--brand-secondary);
+  --color-accent: var(--brand-accent);
+  --color-on-brand: var(--brand-on-primary);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+}

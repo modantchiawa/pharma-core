@@ -79,6 +79,10 @@ CREATE POLICY p_reader ON pharmacy_config FOR SELECT TO pharmacore_network_reade
 CREATE POLICY p_reader ON stock FOR SELECT TO pharmacore_network_reader USING (true);
 CREATE POLICY p_reader ON stock_lot FOR SELECT TO pharmacore_network_reader USING (true);
 
+-- Transférer la propriété d'une fonction exige CREATE sur le schéma pour le nouveau
+-- propriétaire : accordé le temps de la migration seulement (révoqué plus bas).
+GRANT CREATE ON SCHEMA public TO pharmacore_network_reader;
+
 CREATE FUNCTION app_member_networks() RETURNS SETOF uuid
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path = public, pg_temp AS
@@ -183,6 +187,8 @@ WHERE mine.tenant_id = app_current_tenant()
 ORDER BY n.name, c.display_name
 $$;
 ALTER FUNCTION network_directory() OWNER TO pharmacore_network_reader;
+
+REVOKE CREATE ON SCHEMA public FROM pharmacore_network_reader;
 
 REVOKE ALL ON FUNCTION network_directory() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION network_directory() TO pharmacore_app;

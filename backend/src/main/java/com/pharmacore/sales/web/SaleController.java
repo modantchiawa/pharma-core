@@ -1,5 +1,6 @@
 package com.pharmacore.sales.web;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pharmacore.sales.application.SaleManagementService;
 import com.pharmacore.sales.application.SaleRecordingService;
 import com.pharmacore.sales.application.SaleSyncService;
@@ -50,7 +51,7 @@ class SaleController {
     /** Live sale: rules enforced, 201 when stored, 200 when already stored (idempotent retry). */
     @PostMapping("/api/v1/sales")
     @PreAuthorize("hasAuthority('SALE_CREATE')")
-    ResponseEntity<SaleOutcome> record(@Valid @RequestBody SaleRequest request) {
+    ResponseEntity<OutcomeResponse> record(@Valid @RequestBody SaleRequest request) {
         SaleOutcome outcome = recording.record(request.toDraft(SaleOrigin.ONLINE));
         HttpStatus status = switch (outcome) {
             case SaleOutcome.Accepted _ -> HttpStatus.CREATED;
@@ -58,7 +59,7 @@ class SaleController {
             case SaleOutcome.Rejected _ -> HttpStatus.UNPROCESSABLE_CONTENT;
             case SaleOutcome.Retry _ -> HttpStatus.SERVICE_UNAVAILABLE;
         };
-        return ResponseEntity.status(status).body(outcome);
+        return ResponseEntity.status(status).body(OutcomeResponse.of(outcome));
     }
 
     /** Offline journal replay: always 200 with one outcome per sale. */
@@ -68,7 +69,7 @@ class SaleController {
         var outcomes = sync.synchronize(request.sales().stream()
                 .map(sale -> sale.toDraft(SaleOrigin.OFFLINE_REPLAY))
                 .toList());
-        return new SyncResponse(Instant.now(), outcomes);
+        return new SyncResponse(Instant.now(), outcomes.stream().map(OutcomeResponse::of).toList());
     }
 
     @PostMapping("/api/v1/pos/heartbeat")
@@ -111,7 +112,26 @@ class SaleController {
         return SaleSummary.of(management.review(saleId, request.reason()));
     }
 
-    record SyncResponse(Instant serverTime, List<SaleOutcome> outcomes) {
+    record SyncResponse(Instant serverTime, List<OutcomeResponse> outcomes) {
+    }
+
+    /** Flat wire form of the sealed {@link SaleOutcome}, discriminated by {@code type}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record OutcomeResponse(String type, UUID clientSaleId, UUID saleId, Long ordonnancierNumber,
+                           Set<SaleAnomaly> anomalies, String code, Set<SaleAnomaly> violations, String message) {
+
+        static OutcomeResponse of(SaleOutcome outcome) {
+            return switch (outcome) {
+                case SaleOutcome.Accepted a -> new OutcomeResponse("ACCEPTED", a.clientSaleId(), a.saleId(),
+                        a.ordonnancierNumber(), a.anomalies(), null, null, null);
+                case SaleOutcome.Duplicate d -> new OutcomeResponse("DUPLICATE", d.clientSaleId(), d.saleId(),
+                        null, null, null, null, null);
+                case SaleOutcome.Rejected r -> new OutcomeResponse("REJECTED", r.clientSaleId(), null, null, null,
+                        r.code(), r.violations(), r.message());
+                case SaleOutcome.Retry r -> new OutcomeResponse("RETRY", r.clientSaleId(), null, null, null, null,
+                        null, r.message());
+            };
+        }
     }
 
     record SaleSummary(UUID id, UUID clientSaleId, String ticketNumber, String terminalId, SaleOrigin origin,

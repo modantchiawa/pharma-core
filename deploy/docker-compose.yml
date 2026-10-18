@@ -1,0 +1,30 @@
+# Environnement local : PostgreSQL (rôles de production, sans superutilisateur applicatif)
+# et RabbitMQ (relais STOMP pour la messagerie multi-nœuds).
+# Les secrets sont lus depuis un fichier .env non versionné (voir .env.example).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?}
+      PHARMACORE_OWNER_PASSWORD: ${DB_MIGRATION_PASSWORD:?}
+      PHARMACORE_APP_PASSWORD: ${DB_APP_PASSWORD:?}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/00-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql.inc:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pharmacore"]
+      interval: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    command: sh -c "rabbitmq-plugins enable --offline rabbitmq_stomp && rabbitmq-server"
+    ports:
+      - "61613:61613"
+      - "15672:15672"
+
+volumes:
+  pgdata:
