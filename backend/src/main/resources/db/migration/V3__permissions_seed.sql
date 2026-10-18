@@ -1,0 +1,26 @@
+-- Référentiel des permissions fines (miroir de com.pharmacore.identity.domain.Permission).
+-- La cohérence est vérifiée au démarrage par PermissionCatalogVerifier.
+INSERT INTO permission (code, category, description) VALUES
+    ('SALE_CREATE',               'SALES',     'Enregistrer une vente au comptoir'),
+    ('SALE_VIEW',                 'SALES',     'Consulter l''historique des ventes'),
+    ('SALE_CANCEL',               'SALES',     'Annuler une vente'),
+    ('SALE_DISCOUNT_OVERRIDE',    'SALES',     'Accorder une remise au-delà du plafond du rôle'),
+    ('SALE_PRICE_OVERRIDE',       'SALES',     'Modifier le prix de vente au comptoir'),
+    ('SALE_REVIEW',               'SALES',     'Traiter les ventes hors-ligne en anomalie'),
+    ('PRESCRIPTION_DISPENSE',     'SALES',     'Délivrer des médicaments listés (listes I et II)'),
+    ('NARCOTIC_DISPENSE',         'SALES',     'Délivrer des stupéfiants'),
+    ('STOCK_VIEW',                'STOCK',     'Consulter les stocks'),
+    ('STOCK_RECEIVE',             'STOCK',     'Réceptionner des lots'),
+    ('STOCK_ADJUST',              'STOCK',     'Ajuster les stocks (inventaire, casse, péremption)'),
+    ('STOCK_PRICE_MANAGE',        'STOCK',     'Définir les prix de vente et seuils de réapprovisionnement'),
+    ('NETWORK_STOCK_QUERY',       'NETWORK',   'Consulter la disponibilité chez les pharmacies partenaires'),
+    ('NETWORK_TRANSFER_REQUEST',  'NETWORK',   'Demander une réservation inter-pharmacies'),
+    ('NETWORK_TRANSFER_RESPOND',  'NETWORK',   'Accepter ou refuser une réservation inter-pharmacies'),
+    ('NETWORK_CHAT',              'NETWORK',   'Utiliser la messagerie inter-pharmacies'),
+    ('GUARD_VIEW',                'NETWORK',   'Consulter le planning des gardes'),
+    ('GUARD_MANAGE',              'NETWORK',   'Gérer le planning des gardes (pharmacie coordinatrice)'),
+    ('CONFIG_BRANDING_MANAGE',    'ADMIN',     'Gérer l''identité visuelle et les mentions légales'),
+    ('USER_MANAGE',               'ADMIN',     'Gérer les utilisateurs de la pharmacie'),
+    ('ROLE_MANAGE',               'ADMIN',     'Gérer les rôles et la matrice de permissions'),
+    ('AUDIT_VIEW',                'ADMIN',     'Consulter le journal d''audit'),
+    ('REPORT_VIEW',               'ADMIN',     'Consulter les tableaux de bord et rapports');
