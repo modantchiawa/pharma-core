@@ -8,6 +8,17 @@ export const routes: Routes = [
     loadComponent: () => import('./features/auth/login-page').then((m) => m.LoginPage),
   },
   {
+    path: 'public',
+    title: 'Pharmacies et disponibilités',
+    loadComponent: () =>
+      import('./features/public/public-directory-page').then((m) => m.PublicDirectoryPage),
+  },
+  {
+    path: 'setup',
+    title: 'Installation du serveur',
+    loadComponent: () => import('./features/hub/hub-setup-page').then((m) => m.HubSetupPage),
+  },
+  {
     path: 'auth/callback',
     loadComponent: () =>
       import('./features/auth/auth-callback-page').then((m) => m.AuthCallbackPage),

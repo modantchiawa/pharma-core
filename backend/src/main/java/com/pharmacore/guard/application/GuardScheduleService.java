@@ -1,5 +1,6 @@
 package com.pharmacore.guard.application;
 
+import com.pharmacore.guard.domain.GuardShareText;
 import com.pharmacore.guard.persistence.GuardScheduleEntity;
 import com.pharmacore.guard.persistence.GuardScheduleRepository;
 import com.pharmacore.guard.persistence.GuardType;
@@ -9,9 +10,12 @@ import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
+import com.pharmacore.tenant.persistence.TenantRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,15 +30,43 @@ public class GuardScheduleService {
 
     private final GuardScheduleRepository guards;
     private final NetworkDirectoryService directory;
+    private final TenantRepository tenants;
     private final AuditTrail audit;
     private final Clock clock;
 
-    public GuardScheduleService(GuardScheduleRepository guards, NetworkDirectoryService directory, AuditTrail audit,
-                                Clock clock) {
+    public GuardScheduleService(GuardScheduleRepository guards, NetworkDirectoryService directory,
+                                TenantRepository tenants, AuditTrail audit, Clock clock) {
         this.guards = guards;
         this.directory = directory;
+        this.tenants = tenants;
         this.audit = audit;
         this.clock = clock;
+    }
+
+    /** The day's roster as a message to forward (WhatsApp, SMS), in the pharmacy's time zone. */
+    @Transactional
+    public ShareText shareText(UUID networkId, LocalDate date) {
+        ZoneId zone = tenants.findById(TenantContext.requireTenant().value())
+                .map(tenant -> ZoneId.of(tenant.timeZone()))
+                .orElse(ZoneId.of("UTC"));
+        Instant from = date.atStartOfDay(zone).toInstant();
+        Instant to = date.plusDays(1).atStartOfDay(zone).toInstant();
+        List<GuardSlot> slots = roster(networkId, from, to);
+        String scope = networkId == null ? null : directory.directory().stream()
+                .filter(e -> e.networkId().equals(networkId))
+                .map(e -> e.region() == null || e.region().isBlank() ? e.networkName() : e.region())
+                .findFirst()
+                .orElse(null);
+        String text = GuardShareText.render(scope, date, zone, slots.stream()
+                .map(s -> new GuardShareText.Entry(s.pharmacyName(), s.city(), s.phone(), s.type().name(),
+                        s.startsAt(), s.endsAt()))
+                .toList());
+        audit.record("GUARD_ROSTER_SHARED", "GUARD", networkId == null ? "all" : networkId, Map.of(
+                "date", date.toString(), "slots", Integer.toString(slots.size())));
+        return new ShareText(date, zone.getId(), slots.size(), text);
+    }
+
+    public record ShareText(LocalDate date, String timeZone, int slots, String text) {
     }
 
     @Transactional(readOnly = true)
