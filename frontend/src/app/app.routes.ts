@@ -46,6 +46,19 @@ export const routes: Routes = [
           import('./features/pos/cash-session-page').then((m) => m.CashSessionPage),
       },
       {
+        path: 'cash/payments',
+        title: 'Rapprochement des paiements',
+        canActivate: [permissionGuard('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE')],
+        loadComponent: () => import('./features/pos/payments-page').then((m) => m.PaymentsPage),
+      },
+      {
+        path: 'inventory/counts',
+        title: 'Inventaire',
+        canActivate: [permissionGuard('STOCK_COUNT', 'STOCK_COUNT_VALIDATE', 'STOCK_VIEW')],
+        loadComponent: () =>
+          import('./features/inventory/stock-count-page').then((m) => m.StockCountPage),
+      },
+      {
         path: 'customers',
         title: 'Clients',
         canActivate: [permissionGuard('CUSTOMER_MANAGE', 'SALE_CREATE')],

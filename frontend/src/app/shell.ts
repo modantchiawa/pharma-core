@@ -18,6 +18,12 @@ const PHARMACY_NAV: NavItem[] = [
   { path: '/cash', label: 'Caisse', permissions: ['CASH_SESSION_MANAGE', 'REPORT_VIEW'] },
   { path: '/customers', label: 'Clients', permissions: ['CUSTOMER_MANAGE'] },
   { path: '/inventory', label: 'Stocks', permissions: ['STOCK_VIEW'] },
+  {
+    path: '/inventory/counts',
+    label: 'Inventaire',
+    permissions: ['STOCK_COUNT', 'STOCK_COUNT_VALIDATE'],
+  },
+  { path: '/cash/payments', label: 'Paiements', permissions: ['PAYMENT_RECONCILE'] },
   { path: '/procurement', label: 'Commandes', permissions: ['PROCUREMENT_VIEW'] },
   { path: '/accounting', label: 'Compta', permissions: ['ACCOUNTING_VIEW'] },
   {

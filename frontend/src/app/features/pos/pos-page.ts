@@ -21,6 +21,7 @@ import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { SaleOutboxService } from '../../core/offline/sale-outbox.service';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { uuidv7 } from '../../core/util/uuid';
+import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { CartStore, discountPercent } from './cart.store';
 import { Receipt, ReceiptData } from './receipt';
@@ -428,7 +429,8 @@ export class PosPage {
   }
 
   protected async scan(): Promise<void> {
-    const term = this.term.trim();
+    // A GS1 DataMatrix (boxes with lot and expiry) is looked up by the EAN it carries
+    const term = parseGs1(this.term.trim())?.ean13 ?? this.term.trim();
     if (!term) {
       return;
     }

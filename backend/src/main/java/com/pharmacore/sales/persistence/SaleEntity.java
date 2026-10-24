@@ -131,6 +131,12 @@ public class SaleEntity {
     @Column(name = "certification_error")
     private String certificationError;
 
+    @Column(name = "approved_by")
+    private UUID approvedBy;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
     @JoinColumn(name = "sale_id", nullable = false, updatable = false)
     @OrderBy("lineNo")
@@ -195,6 +201,25 @@ public class SaleEntity {
 
     public void markReviewed() {
         this.reviewRequired = false;
+    }
+
+    /** A supervisor signed off the cancellation (amount above the threshold or drawer already closed). */
+    public void approve(UUID supervisorId, Instant now) {
+        this.approvedBy = supervisorId;
+        this.approvedAt = now;
+    }
+
+    /** Flags the sale for the pharmacist's review (e.g. an operator rejected one of its payments). */
+    public void requireReview() {
+        this.reviewRequired = true;
+    }
+
+    public UUID approvedBy() {
+        return approvedBy;
+    }
+
+    public Instant approvedAt() {
+        return approvedAt;
     }
 
     public void certified(String code, String qrPayload, Instant at) {

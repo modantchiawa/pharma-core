@@ -205,6 +205,28 @@ public class LocalAuthService {
         return temporary;
     }
 
+    /**
+     * Supervisor sign-off at the counter: checks a colleague's PIN without opening a session.
+     * Failures count towards the lockout exactly like a PIN login.
+     *
+     * @return the verified user, whose permissions the caller then checks
+     */
+    public AppUserEntity verifyPin(String email, String pin) {
+        Instant now = clock.instant();
+        var user = users.findByEmailIgnoreCase(email == null ? "" : email.trim())
+                .filter(AppUserEntity::active)
+                .orElseThrow(LocalAuthService::badCredentials);
+        if (user.isLocked(now)) {
+            throw new BusinessRuleException("account-locked", "Compte superviseur verrouillé, réessayez dans quelques minutes");
+        }
+        if (pin == null || user.pinHash() == null || !encoder.matches(pin, user.pinHash())) {
+            recordFailure(user.id(), "SUPERVISOR_PIN_FAILED", "approval", now);
+            throw badCredentials();
+        }
+        user.recordSuccess();
+        return user;
+    }
+
     /** Used at provisioning: hashes a temporary password for a user being created. */
     public String hashTemporary(String temporaryPassword) {
         return encoder.encode(temporaryPassword);

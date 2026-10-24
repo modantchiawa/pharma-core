@@ -62,6 +62,24 @@ public class CashSessionEntity {
     @Column(length = 500)
     private String notes;
 
+    @Column(name = "closing_requires_approval", nullable = false)
+    private boolean closingRequiresApproval;
+
+    @Column(name = "approved_by")
+    private UUID approvedBy;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
+    @Column(name = "approval_note", length = 500)
+    private String approvalNote;
+
+    @Column(name = "previous_report_hash", length = 64)
+    private String previousReportHash;
+
+    @Column(name = "report_hash", length = 64)
+    private String reportHash;
+
     @Version
     private long version;
 
@@ -88,6 +106,49 @@ public class CashSessionEntity {
         this.countedCashCents = countedCents;
         this.differenceCents = countedCents - expectedCents;
         this.notes = notes;
+    }
+
+    /** Difference above the pharmacy's tolerance: a supervisor must sign the Z report. */
+    public void requireApproval() {
+        this.closingRequiresApproval = true;
+    }
+
+    public void approve(UUID supervisorId, String note, Instant now) {
+        if (status != Status.CLOSED) {
+            throw new IllegalStateException("Only a closed session can be approved");
+        }
+        this.approvedBy = supervisorId;
+        this.approvedAt = now;
+        this.approvalNote = note;
+    }
+
+    public void chain(String previousReportHash, String reportHash) {
+        this.previousReportHash = previousReportHash;
+        this.reportHash = reportHash;
+    }
+
+    public boolean closingRequiresApproval() {
+        return closingRequiresApproval;
+    }
+
+    public UUID approvedBy() {
+        return approvedBy;
+    }
+
+    public Instant approvedAt() {
+        return approvedAt;
+    }
+
+    public String approvalNote() {
+        return approvalNote;
+    }
+
+    public String previousReportHash() {
+        return previousReportHash;
+    }
+
+    public String reportHash() {
+        return reportHash;
     }
 
     public UUID id() {
