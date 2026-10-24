@@ -289,3 +289,34 @@ export interface BalanceRow {
   creditCents: number;
   balanceCents: number;
 }
+
+export interface Dashboard {
+  period: { from: string; to: string };
+  sales: {
+    count: number;
+    netCents: number;
+    averageBasketCents: number;
+    marginCents: number;
+    previousCount: number;
+    previousNetCents: number;
+    cancelledCount: number;
+  };
+  daily: { date: string; netCents: number; count: number }[];
+  payments: { method: string; provider: string | null; amountCents: number }[];
+  topProducts: {
+    productId: string;
+    cip13: string;
+    designation: string;
+    quantity: number;
+    netCents: number;
+  }[];
+  stock: {
+    valueAtCostCents: number;
+    expiringWithin90DaysCents: number;
+    expiringLots: number;
+    belowThreshold: number;
+    shortfallProducts: number;
+  };
+  receivables: { customerCreditCents: number; debtors: number };
+  cash: { sessionsClosed: number; differenceCents: number; expensesCents: number };
+}

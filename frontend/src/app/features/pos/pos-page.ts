@@ -73,8 +73,17 @@ import { Receipt, ReceiptData } from './receipt';
                   >
                   <span
                     >{{ product.unitPriceCents | money }} · stock
-                    {{ product.availableQuantity }}</span
-                  >
+                    {{ product.availableQuantity }}
+                    @if (product.availableQuantity === 0 && product.dci) {
+                      <button
+                        type="button"
+                        class="ml-2 rounded border px-2 text-xs"
+                        (mousedown)="$event.stopPropagation(); showAlternatives(product)"
+                      >
+                        Équivalents
+                      </button>
+                    }
+                  </span>
                 </li>
               }
             </ul>
@@ -424,6 +433,18 @@ export class PosPage {
     this.highlighted.set(0);
     this.results.set(
       term.trim().length >= 2 && !/^\d+$/.test(term) ? await this.catalog.search(term) : [],
+    );
+  }
+
+  /** Replaces the result list with the substitutes of an out-of-stock product (same DCI). */
+  protected async showAlternatives(product: CachedProduct): Promise<void> {
+    const substitutes = await this.catalog.alternatives(product);
+    this.highlighted.set(0);
+    this.results.set(substitutes);
+    this.message.set(
+      substitutes.length === 0
+        ? `Aucun équivalent de ${product.designation} (${product.dci}) au catalogue`
+        : `${substitutes.length} équivalent(s) de ${product.designation} — même DCI ${product.dci}`,
     );
   }
 

@@ -20,6 +20,7 @@ const PHARMACY_NAV: NavItem[] = [
   { path: '/inventory', label: 'Stocks', permissions: ['STOCK_VIEW'] },
   { path: '/procurement', label: 'Commandes', permissions: ['PROCUREMENT_VIEW'] },
   { path: '/accounting', label: 'Compta', permissions: ['ACCOUNTING_VIEW'] },
+  { path: '/dashboard', label: 'Pilotage', permissions: ['DASHBOARD_VIEW', 'REPORT_VIEW'] },
   {
     path: '/network',
     label: 'Réseau',

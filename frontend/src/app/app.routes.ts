@@ -60,6 +60,13 @@ export const routes: Routes = [
           import('./features/procurement/order-sheet-page').then((m) => m.OrderSheetPage),
       },
       {
+        path: 'dashboard',
+        title: 'Pilotage',
+        canActivate: [permissionGuard('DASHBOARD_VIEW', 'REPORT_VIEW')],
+        loadComponent: () =>
+          import('./features/dashboard/dashboard-page').then((m) => m.DashboardPage),
+      },
+      {
         path: 'accounting',
         title: 'Comptabilité',
         canActivate: [permissionGuard('ACCOUNTING_VIEW')],
