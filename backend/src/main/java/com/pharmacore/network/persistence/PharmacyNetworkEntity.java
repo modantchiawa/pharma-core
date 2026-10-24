@@ -30,6 +30,9 @@ public class PharmacyNetworkEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "publish_guards", nullable = false)
+    private boolean publishGuards;
+
     protected PharmacyNetworkEntity() {
     }
 
@@ -50,11 +53,23 @@ public class PharmacyNetworkEntity {
         return name;
     }
 
+    public String region() {
+        return region;
+    }
+
     public UUID coordinatorTenantId() {
         return coordinatorTenantId;
     }
 
     public int quantityCap() {
         return quantityCap;
+    }
+
+    public boolean publishGuards() {
+        return publishGuards;
+    }
+
+    public void publishGuards(boolean publish) {
+        this.publishGuards = publish;
     }
 }

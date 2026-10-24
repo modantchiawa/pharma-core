@@ -319,4 +319,114 @@ export interface Dashboard {
   };
   receivables: { customerCreditCents: number; debtors: number };
   cash: { sessionsClosed: number; differenceCents: number; expensesCents: number };
+
+// ---------------------------------------------------------------- annuaire public et réseau
+
+export type PublicAvailabilityLevel = 'IN_STOCK' | 'LOW';
+
+export interface PublicPharmacy {
+  tenantId: string;
+  slug: string;
+  pharmacyName: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  openingHours: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  sharesAvailability: boolean;
+}
+
+export interface PublicPharmacyAvailability {
+  tenantId: string;
+  pharmacyName: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  level: PublicAvailabilityLevel;
+}
+
+export interface PublicProductAvailability {
+  product: { id: string; cip13: string; designation: string; dci: string | null };
+  pharmacies: PublicPharmacyAvailability[];
+}
+
+export interface PublicGuardSlot {
+  slotId: string;
+  networkName: string;
+  type: 'NIGHT' | 'SUNDAY' | 'PUBLIC_HOLIDAY' | 'EXTENDED_DAY';
+  startsAt: string;
+  endsAt: string;
+  tenantId: string;
+  pharmacyName: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  timeZone: string | null;
+}
+
+export interface PublicSharing {
+  publicListing: boolean;
+  publicAvailability: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  openingHours: string | null;
+  whatsapp: string | null;
+}
+
+export interface NetworkSettings {
+  networkId: string;
+  name: string;
+  region: string | null;
+  coordinator: boolean;
+  quantityCap: number;
+  publishGuards: boolean;
+}
+
+export type NetworkAvailabilityLevel = 'OUT_OF_STOCK' | 'LOW' | 'AVAILABLE';
+
+export interface PartnerAvailability {
+  tenantId: string;
+  pharmacyName: string;
+  city: string | null;
+  phone: string | null;
+  networkId: string;
+  networkName: string;
+  level: NetworkAvailabilityLevel;
+  quantity: number;
+  capped: boolean;
+}
+
+export interface ProductPartners {
+  productId: string;
+  cip13: string;
+  designation: string;
+  dci: string | null;
+  partners: PartnerAvailability[];
+}
+
+export interface PartnerProduct {
+  productId: string;
+  cip13: string;
+  designation: string;
+  dci: string | null;
+  networkId: string;
+  networkName: string;
+  level: NetworkAvailabilityLevel;
+  quantity: number;
+  capped: boolean;
+}
+
+export interface GuardShareText {
+  date: string;
+  timeZone: string;
+  slots: number;
+  text: string;
 }

@@ -2,11 +2,13 @@ package com.pharmacore.guard.web;
 
 import com.pharmacore.guard.application.GuardScheduleService;
 import com.pharmacore.guard.application.GuardScheduleService.GuardSlot;
+import com.pharmacore.guard.application.GuardScheduleService.ShareText;
 import com.pharmacore.guard.persistence.GuardType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -45,6 +47,13 @@ class GuardScheduleController {
     @PreAuthorize("hasAuthority('GUARD_VIEW')")
     List<GuardSlot> onDutyNow(@RequestParam(required = false) UUID networkId) {
         return guards.onDutyNow(networkId);
+    }
+
+    @GetMapping("/share-text")
+    @PreAuthorize("hasAuthority('GUARD_VIEW')")
+    ShareText shareText(@RequestParam(required = false) UUID networkId,
+                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return guards.shareText(networkId, date);
     }
 
     @PostMapping

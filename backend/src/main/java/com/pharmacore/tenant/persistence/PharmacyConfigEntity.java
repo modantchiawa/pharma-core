@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.annotations.TenantId;
@@ -72,6 +73,24 @@ public class PharmacyConfigEntity {
     @Column(name = "logo_asset_id")
     private UUID logoAssetId;
 
+    @Column(name = "public_listing", nullable = false)
+    private boolean publicListing;
+
+    @Column(name = "public_availability", nullable = false)
+    private boolean publicAvailability;
+
+    @Column(precision = 9, scale = 6)
+    private BigDecimal latitude;
+
+    @Column(precision = 9, scale = 6)
+    private BigDecimal longitude;
+
+    @Column(name = "opening_hours", length = 300)
+    private String openingHours;
+
+    @Column(length = 30)
+    private String whatsapp;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
@@ -116,6 +135,22 @@ public class PharmacyConfigEntity {
         this.updatedAt = now;
     }
 
+    /** What the pharmacy chooses to expose in the public directory. */
+    public void updatePublicSharing(PublicSharing sharing, Instant now) {
+        this.publicListing = sharing.publicListing();
+        // Availability can only be published by a listed pharmacy
+        this.publicAvailability = sharing.publicListing() && sharing.publicAvailability();
+        this.latitude = sharing.latitude();
+        this.longitude = sharing.longitude();
+        this.openingHours = sharing.openingHours();
+        this.whatsapp = sharing.whatsapp();
+        this.updatedAt = now;
+    }
+
+    public PublicSharing publicSharing() {
+        return new PublicSharing(publicListing, publicAvailability, latitude, longitude, openingHours, whatsapp);
+    }
+
     public Branding branding() {
         return new Branding(displayName, addressLine1, addressLine2, postalCode, city, countryCode, phone, email,
                 legalIdentifier, finessNumber, ordonnancierPrefix, primaryColor, secondaryColor, accentColor,
@@ -155,5 +190,14 @@ public class PharmacyConfigEntity {
                            String accentColor,
                            String receiptHeader,
                            String receiptFooter) {
+    }
+
+    /** Public directory settings of the pharmacy. */
+    public record PublicSharing(boolean publicListing,
+                                boolean publicAvailability,
+                                BigDecimal latitude,
+                                BigDecimal longitude,
+                                String openingHours,
+                                String whatsapp) {
     }
 }

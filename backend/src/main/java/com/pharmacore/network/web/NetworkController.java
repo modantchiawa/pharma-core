@@ -2,8 +2,11 @@ package com.pharmacore.network.web;
 
 import com.pharmacore.network.application.NetworkDirectoryService;
 import com.pharmacore.network.application.NetworkDirectoryService.DirectoryEntry;
+import com.pharmacore.network.application.NetworkDirectoryService.NetworkSettings;
 import com.pharmacore.network.application.NetworkStockQueryService;
 import com.pharmacore.network.application.NetworkStockQueryService.PartnerAvailability;
+import com.pharmacore.network.application.NetworkStockQueryService.PartnerProduct;
+import com.pharmacore.network.application.NetworkStockQueryService.ProductPartners;
 import com.pharmacore.network.application.RateLimitExceededException;
 import com.pharmacore.network.application.TransferService;
 import com.pharmacore.network.application.TransferService.TransferView;
@@ -60,10 +63,36 @@ class NetworkController {
         directory.setStockSharing(networkId, request.share());
     }
 
+    @GetMapping("/api/v1/network/networks")
+    @PreAuthorize("hasAnyAuthority('NETWORK_STOCK_QUERY', 'NETWORK_CHAT', 'GUARD_VIEW', 'GUARD_MANAGE')")
+    List<NetworkSettings> networks() {
+        return directory.networks();
+    }
+
+    @PutMapping("/api/v1/network/{networkId}/guards-publication")
+    @PreAuthorize("hasAuthority('GUARD_MANAGE')")
+    NetworkSettings guardsPublication(@PathVariable UUID networkId, @RequestBody PublicationRequest request) {
+        return directory.setGuardsPublication(networkId, request.publish());
+    }
+
     @GetMapping("/api/v1/network/stock/{productId}")
     @PreAuthorize("hasAuthority('NETWORK_STOCK_QUERY')")
     List<PartnerAvailability> availability(@PathVariable UUID productId) {
         return stockQuery.availability(productId);
+    }
+
+    /** Who has it: every matching product with the partners holding it. */
+    @GetMapping("/api/v1/network/stock")
+    @PreAuthorize("hasAuthority('NETWORK_STOCK_QUERY')")
+    List<ProductPartners> search(@RequestParam String q) {
+        return stockQuery.search(q);
+    }
+
+    /** What this partner has among the matching products. */
+    @GetMapping("/api/v1/network/pharmacies/{tenantId}/stock")
+    @PreAuthorize("hasAuthority('NETWORK_STOCK_QUERY')")
+    List<PartnerProduct> partnerStock(@PathVariable UUID tenantId, @RequestParam String q) {
+        return stockQuery.partnerStock(tenantId, q);
     }
 
     @GetMapping("/api/v1/network/transfers")
@@ -119,6 +148,9 @@ class NetworkController {
     }
 
     record SharingRequest(boolean share) {
+    }
+
+    record PublicationRequest(boolean publish) {
     }
 
     record TransferRequest(@NotNull UUID networkId,
