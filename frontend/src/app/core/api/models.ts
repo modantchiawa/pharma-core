@@ -673,3 +673,55 @@ export interface RegisterEntry {
   cashier: string;
   prescriptionId: string | null;
 }
+
+// ---------------------------------------------------------------- impression
+
+export type PaperFormat = 'MM58' | 'MM80' | 'A4';
+export type PrinterMode = 'BROWSER' | 'ESCPOS_NETWORK' | 'ESCPOS_SHARED';
+
+export interface PrinterSettings {
+  terminalId: string;
+  mode: PrinterMode;
+  paper: PaperFormat;
+  address: string | null;
+  widthChars: 32 | 42 | 48;
+  copies: number;
+  cut: boolean;
+  drawerKick: boolean;
+  autoPrint: boolean;
+  invoicePaper: 'A4' | 'NONE';
+  configured: boolean;
+}
+
+export interface PrintResult {
+  saleId: string | null;
+  terminalId: string;
+  mode: PrinterMode;
+  copies: number;
+  bytes: number;
+}
+
+export interface TerminalTicketRequest {
+  ticketNumber: string;
+  occurredAt: string;
+  cashier: string;
+  customer: {
+    displayName: string;
+    phone: string | null;
+    address: string | null;
+    policy: string | null;
+  } | null;
+  lines: {
+    designation: string;
+    quantity: number;
+    unitPriceCents: number;
+    discountCents: number;
+    vatRate: number;
+  }[];
+  discountCents: number;
+  netCents: number;
+  payments: { label: string; amountCents: number }[];
+  changeDueCents: number;
+  vat: { rate: number; totalTtcCents: number; vatCents: number }[];
+  offline: boolean;
+}

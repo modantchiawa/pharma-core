@@ -163,6 +163,12 @@ export const routes: Routes = [
           import('./features/admin/branding-settings-page').then((m) => m.BrandingSettingsPage),
       },
       {
+        path: 'admin/printers',
+        title: 'Imprimantes',
+        canActivate: [permissionGuard('PRINTER_MANAGE')],
+        loadComponent: () => import('./features/admin/printers-page').then((m) => m.PrintersPage),
+      },
+      {
         path: 'admin/roles',
         title: 'Rôles et droits',
         canActivate: [permissionGuard('ROLE_MANAGE')],

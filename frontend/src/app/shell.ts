@@ -46,6 +46,7 @@ const PHARMACY_NAV: NavItem[] = [
   { path: '/chat', label: 'Messagerie', permissions: ['NETWORK_CHAT'] },
   { path: '/admin/branding', label: 'Identité', permissions: ['CONFIG_BRANDING_MANAGE'] },
   { path: '/admin/roles', label: 'Droits', permissions: ['ROLE_MANAGE'] },
+  { path: '/admin/printers', label: 'Imprimantes', permissions: ['PRINTER_MANAGE'] },
   { path: '/admin/hub', label: 'Serveur', permissions: ['HUB_ADMIN'] },
 ];
 
