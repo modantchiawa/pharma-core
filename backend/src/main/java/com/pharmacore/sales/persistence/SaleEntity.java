@@ -131,6 +131,10 @@ public class SaleEntity {
     @Column(name = "certification_error")
     private String certificationError;
 
+    /** Renewable prescription on file this dispensing counts against. */
+    @Column(name = "prescription_id")
+    private UUID prescriptionId;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
     @JoinColumn(name = "sale_id", nullable = false, updatable = false)
     @OrderBy("lineNo")
@@ -195,6 +199,25 @@ public class SaleEntity {
 
     public void markReviewed() {
         this.reviewRequired = false;
+    }
+
+    public void attachPrescription(UUID prescriptionId) {
+        if (this.prescriptionId != null && !this.prescriptionId.equals(prescriptionId)) {
+            throw new IllegalStateException("Sale already attached to another prescription");
+        }
+        this.prescriptionId = prescriptionId;
+    }
+
+    public UUID prescriptionId() {
+        return prescriptionId;
+    }
+
+    public String prescriberName() {
+        return prescriberName;
+    }
+
+    public String patientReference() {
+        return patientReference;
     }
 
     public void certified(String code, String qrPayload, Instant at) {

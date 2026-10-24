@@ -1,9 +1,12 @@
 package com.pharmacore.sales.domain;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * A sale as captured by the POS terminal. {@code clientSaleId} is generated on the terminal
@@ -58,19 +61,40 @@ public record SaleDraft(UUID clientSaleId,
         }
     }
 
-    /** @param provider mobile money operator or card scheme, free text matched against the configured list */
+    /**
+     * @param provider mobile money operator or card scheme, free text matched against the configured list
+     * @param policyId insurance policy covering a {@link PaymentMethod#THIRD_PARTY_PAYER} share
+     */
     public record Payment(PaymentMethod method, long amountCents, String thirdPartyCode, String reference,
-                          String provider) {
+                          String provider, UUID policyId) {
 
         public Payment {
             Objects.requireNonNull(method, "method");
             if (amountCents <= 0) {
                 throw new IllegalArgumentException("Payment amount must be positive");
             }
+            if (policyId != null && method != PaymentMethod.THIRD_PARTY_PAYER) {
+                throw new IllegalArgumentException("Only a third-party payer share references a policy");
+            }
+        }
+
+        public Payment(PaymentMethod method, long amountCents, String thirdPartyCode, String reference,
+                       String provider) {
+            this(method, amountCents, thirdPartyCode, reference, provider, null);
+        }
+
+        public boolean coveredByPolicy() {
+            return method == PaymentMethod.THIRD_PARTY_PAYER && policyId != null;
         }
     }
 
-    public record Prescription(String prescriberName, String prescriberRpps, String patientReference) {
+    /** @param prescriptionId renewable prescription on file the dispensing is attached to (optional) */
+    public record Prescription(String prescriberName, String prescriberRpps, String patientReference,
+                               UUID prescriptionId) {
+
+        public Prescription(String prescriberName, String prescriberRpps, String patientReference) {
+            this(prescriberName, prescriberRpps, patientReference, null);
+        }
     }
 
     public long grossCents() {
@@ -95,5 +119,16 @@ public record SaleDraft(UUID clientSaleId,
 
     public boolean onCredit() {
         return creditCents() > 0;
+    }
+
+    /** Third-party payer share declared for each policy referenced by the payments. */
+    public Map<UUID, Long> insuredSharesByPolicy() {
+        return payments.stream().filter(Payment::coveredByPolicy)
+                .collect(Collectors.groupingBy(Payment::policyId, LinkedHashMap::new,
+                        Collectors.summingLong(Payment::amountCents)));
+    }
+
+    public UUID prescriptionId() {
+        return prescription == null ? null : prescription.prescriptionId();
     }
 }

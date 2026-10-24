@@ -4,7 +4,9 @@ import com.pharmacore.accounting.application.AccountingPoster;
 import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.catalog.persistence.ProductEntity;
 import com.pharmacore.customers.application.CustomerService;
+import com.pharmacore.insurance.application.InsuranceCoverageResolver;
 import com.pharmacore.inventory.application.TenantCalendar;
+import com.pharmacore.prescription.application.PrescriptionService;
 import com.pharmacore.sales.application.certification.CertificationService;
 import com.pharmacore.catalog.persistence.ProductRepository;
 import com.pharmacore.inventory.application.StockLedger;
@@ -30,6 +32,7 @@ import com.pharmacore.sales.persistence.TenantSequenceRepository;
 import com.pharmacore.shared.audit.AuditTrail;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -61,6 +64,8 @@ public class SaleRecordingService {
     private final CashSessionService cashSessions;
     private final AccountingPoster accounting;
     private final CertificationService certification;
+    private final InsuranceCoverageResolver coverage;
+    private final PrescriptionService prescriptions;
     private final TenantCalendar calendar;
     private final AuditTrail audit;
     private final Clock clock;
@@ -69,7 +74,10 @@ public class SaleRecordingService {
                                 StockLedger ledger, TenantSequenceRepository sequences, SellerProfiles sellers,
                                 CustomerService customers, CashSessionService cashSessions,
                                 AccountingPoster accounting, CertificationService certification,
+                                InsuranceCoverageResolver coverage, PrescriptionService prescriptions,
                                 TenantCalendar calendar, AuditTrail audit, Clock clock) {
+        this.coverage = coverage;
+        this.prescriptions = prescriptions;
         this.sales = sales;
         this.products = products;
         this.stocks = stocks;
@@ -106,9 +114,15 @@ public class SaleRecordingService {
                         product.listing(), product.active())));
 
         Instant now = clock.instant();
+        LocalDate today = calendar.today();
         SellerProfile seller = sellers.resolve(draft.cashierUserId());
+        InsuranceCoverageResolver.Resolution insured = coverage.resolve(draft, today);
         Set<SaleAnomaly> anomalies = EnumSet.noneOf(SaleAnomaly.class);
-        anomalies.addAll(SaleRules.evaluate(draft, facts, seller, now));
+        anomalies.addAll(SaleRules.evaluate(draft, facts, seller, now, insured.contexts()));
+        if (draft.prescriptionId() != null
+                && prescriptions.refusalReason(draft.prescriptionId(), draft.customerId(), today).isPresent()) {
+            anomalies.add(SaleAnomaly.PRESCRIPTION_RENEWAL_REFUSED);
+        }
         if (draft.onCredit() && draft.customerId() != null && !anomalies.contains(SaleAnomaly.CREDIT_NOT_ALLOWED)
                 && !customers.addCredit(draft.customerId(), draft.creditCents())) {
             anomalies.add(SaleAnomaly.CREDIT_LIMIT_EXCEEDED);
@@ -122,12 +136,13 @@ public class SaleRecordingService {
                 yield new SaleOutcome.Rejected(draft.clientSaleId(), "sale-rule-violation",
                         reject.violations(), "The sale violates business rules: " + reject.violations());
             }
-            case SaleDecision.Accept accept -> persist(draft, catalog, seller, accept.anomalies(), now);
+            case SaleDecision.Accept accept -> persist(draft, catalog, seller, accept.anomalies(), insured, now, today);
         };
     }
 
     private SaleOutcome persist(SaleDraft draft, Map<UUID, ProductEntity> catalog, SellerProfile seller,
-                                Set<SaleAnomaly> ruleAnomalies, Instant now) {
+                                Set<SaleAnomaly> ruleAnomalies, InsuranceCoverageResolver.Resolution insured,
+                                Instant now, LocalDate today) {
         UUID saleId = UUID.randomUUID();
         Map<UUID, Integer> quantities = draft.lines().stream()
                 .collect(Collectors.toMap(SaleDraft.Line::productId, SaleDraft.Line::quantity, Integer::sum,
@@ -164,9 +179,16 @@ public class SaleRecordingService {
         }
         draft.payments().forEach(payment -> sale.addPayment(new SalePaymentEntity(payment.method(),
                 payment.amountCents(), payment.thirdPartyCode(), payment.reference(), payment.provider(),
-                payment.method().isCustomerAccount() ? draft.customerId() : null)));
-        sales.save(sale);
-        accounting.post(Postings.sale(sale, calendar.today()), "SALE", sale.id());
+                payment.method().isCustomerAccount() ? draft.customerId() : null,
+                payment.policyId() == null ? null : insured.insurerByPolicy().get(payment.policyId()),
+                payment.policyId())));
+        // save() merges an entity with an assigned id: later changes must go to the managed copy
+        SaleEntity managed = sales.save(sale);
+        // A refused renewal keeps the (offline) sale for review but does not consume the prescription
+        if (draft.prescriptionId() != null && !anomalies.contains(SaleAnomaly.PRESCRIPTION_RENEWAL_REFUSED)) {
+            prescriptions.recordDispensing(draft.prescriptionId(), managed, today);
+        }
+        accounting.post(Postings.sale(sale, today, insured.accountByPolicy()), "SALE", sale.id());
 
         audit.record("SALE_RECORDED", "SALE", sale.id(), Map.of(
                 "clientSaleId", draft.clientSaleId().toString(),

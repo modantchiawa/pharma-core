@@ -10,6 +10,8 @@ import com.pharmacore.sales.persistence.SaleEntity;
 import com.pharmacore.sales.persistence.SaleLineEntity;
 import com.pharmacore.sales.persistence.SalePaymentEntity;
 import java.time.LocalDate;
+import java.util.Map;
+import java.util.UUID;
 
 /** The accounting meaning of each business event, as pure functions over the entities. */
 public final class Postings {
@@ -23,6 +25,14 @@ public final class Postings {
      * entry always balances and the discrepancy stays visible.
      */
     public static EntryDraft sale(SaleEntity sale, LocalDate date) {
+        return sale(sale, date, Map.of());
+    }
+
+    /**
+     * @param insurerAccountsByPolicy receivable sub-account of the insurer covering each policy;
+     *                                a third-party share on an unlisted policy lands on 4112
+     */
+    public static EntryDraft sale(SaleEntity sale, LocalDate date, Map<UUID, String> insurerAccountsByPolicy) {
         var entry = EntryDraft.builder(Journal.VT, date, "Vente " + sale.ticketNumber());
         long vat = 0;
         for (SaleLineEntity line : sale.lines()) {
@@ -30,8 +40,9 @@ public final class Postings {
         }
         long revenue = sale.totalNetCents() - vat;
         for (SalePaymentEntity payment : sale.payments()) {
-            entry.debit(Accounts.settlementAccount(payment.method()), payment.amountCents(),
-                    paymentLabel(payment.method(), payment.provider()));
+            String account = payment.policyId() == null ? Accounts.settlementAccount(payment.method())
+                    : insurerAccountsByPolicy.getOrDefault(payment.policyId(), Accounts.THIRD_PARTY_PAYERS);
+            entry.debit(account, payment.amountCents(), paymentLabel(payment.method(), payment.provider()));
         }
         long received = sale.payments().stream().mapToLong(SalePaymentEntity::amountCents).sum();
         long gap = sale.totalNetCents() - received;
@@ -50,6 +61,16 @@ public final class Postings {
         return EntryDraft.builder(journalFor(method), date, "Règlement client " + customerName)
                 .debit(Accounts.settlementAccount(method), amountCents, paymentLabel(method, provider))
                 .credit(Accounts.CUSTOMERS, amountCents, "Créance client")
+                .build();
+    }
+
+    /** Settlement of a statement by the insurer: money in, insurer receivable down. */
+    public static EntryDraft insurerPayment(long amountCents, PaymentMethod method, String provider,
+                                            String insurerName, String insurerAccount, String statementNumber,
+                                            LocalDate date) {
+        return EntryDraft.builder(journalFor(method), date, "Règlement " + insurerName + " bordereau " + statementNumber)
+                .debit(Accounts.settlementAccount(method), amountCents, paymentLabel(method, provider))
+                .credit(insurerAccount, amountCents, "Créance tiers payant " + insurerName)
                 .build();
     }
 

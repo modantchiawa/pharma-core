@@ -10,7 +10,13 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { Customer, MOBILE_MONEY_PROVIDERS, PaymentMethod } from '../../core/api/models';
+import {
+  Customer,
+  InsurancePolicy,
+  MOBILE_MONEY_PROVIDERS,
+  PaymentMethod,
+  Prescription,
+} from '../../core/api/models';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { PermissionService } from '../../core/auth/permission.service';
@@ -171,6 +177,22 @@ import { Receipt, ReceiptData } from './receipt';
         @if (cart.requiresPrescription()) {
           <fieldset class="rounded border p-2">
             <legend class="px-1 text-sm font-semibold">Ordonnance</legend>
+            @if (prescriptionsOnFile().length > 0) {
+              <select
+                class="mb-1 w-full rounded border px-2 py-1 text-sm"
+                [ngModel]="cart.prescriptionOnFile()?.id ?? ''"
+                (ngModelChange)="pickPrescription($event)"
+                aria-label="Ordonnance en dossier"
+              >
+                <option value="">Ordonnance papier (saisie)</option>
+                @for (p of prescriptionsOnFile(); track p.id) {
+                  <option [value]="p.id">
+                    {{ p.prescriberName }} · {{ p.renewalsRemaining }} délivrance(s) restante(s) ·
+                    valable jusqu'au {{ p.validUntil }}
+                  </option>
+                }
+              </select>
+            }
             <input
               class="mb-1 w-full rounded border px-2 py-1"
               placeholder="Prescripteur"
@@ -232,7 +254,7 @@ import { Receipt, ReceiptData } from './receipt';
               <button
                 type="button"
                 class="text-red-700"
-                (click)="cart.customer.set(null)"
+                (click)="clearCustomer()"
                 aria-label="Retirer le client"
               >
                 ✕
@@ -241,8 +263,42 @@ import { Receipt, ReceiptData } from './receipt';
           }
         </div>
 
+        @if (policies().length > 0) {
+          <fieldset class="rounded border border-brand/40 bg-brand/5 p-2 text-sm">
+            <legend class="px-1 font-semibold">Tiers payant</legend>
+            <select
+              class="w-full rounded border px-2 py-1"
+              [ngModel]="cart.policy()?.id ?? ''"
+              (ngModelChange)="pickPolicy($event)"
+              aria-label="Police d'assurance"
+            >
+              <option value="">Sans tiers payant</option>
+              @for (p of policies(); track p.id) {
+                <option [value]="p.id">
+                  {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
+                </option>
+              }
+            </select>
+            @if (cart.policy(); as policy) {
+              <p class="mt-1 flex justify-between">
+                <span>Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span>
+                <strong>{{ cart.insuredShareCents() | money }}</strong>
+              </p>
+              @if (policy.remainingCeilingCents !== null) {
+                <p class="text-xs text-slate-600">
+                  Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
+                </p>
+              }
+              <p class="flex justify-between">
+                <span>Reste à charge du patient</span>
+                <strong>{{ cart.netCents() - cart.insuredShareCents() | money }}</strong>
+              </p>
+            }
+          </fieldset>
+        }
+
         <div class="grid grid-cols-2 gap-2">
-          @for (method of methods; track method.code) {
+          @for (method of visibleMethods(); track method.code) {
             <button
               type="button"
               class="rounded border-2 border-brand px-2 py-2 font-medium text-brand hover:bg-brand hover:text-on-brand"
@@ -286,6 +342,9 @@ import { Receipt, ReceiptData } from './receipt';
                 >{{ labelOf(payment.method) }}
                 @if (payment.provider) {
                   · {{ payment.provider }}
+                }
+                @if (payment.policyId) {
+                  · {{ cart.policy()?.insurerName }}
                 }
               </span>
               <span
@@ -362,6 +421,9 @@ export class PosPage {
   protected provider: string = MOBILE_MONEY_PROVIDERS[0];
   protected readonly providers = MOBILE_MONEY_PROVIDERS;
   protected readonly customerResults = signal<Customer[]>([]);
+  /** Covers and renewable prescriptions of the selected customer. */
+  protected readonly policies = signal<InsurancePolicy[]>([]);
+  protected readonly prescriptionsOnFile = signal<Prescription[]>([]);
   protected readonly cashSessionOpen = signal(true);
   protected readonly results = signal<CachedProduct[]>([]);
   protected readonly highlighted = signal(0);
@@ -376,10 +438,66 @@ export class PosPage {
     { code: 'CREDIT', label: 'Crédit client' },
     { code: 'CHECK', label: 'Chèque' },
   ];
+  /** The insured share is computed from the policy, never typed: its button hides once a policy applies. */
+  protected readonly visibleMethods = computed(() =>
+    this.methods.filter((m) => m.code !== 'THIRD_PARTY_PAYER' || this.policies().length === 0),
+  );
   private readonly cashierName = computed(() => this.permissions.profile()?.displayName ?? '');
 
   constructor() {
     void this.checkCashSession();
+  }
+
+  private async loadCustomerFiles(customer: Customer): Promise<void> {
+    try {
+      const [policies, prescriptions] = await Promise.all([
+        firstValueFrom(
+          this.http.get<InsurancePolicy[]>(
+            `${this.env.apiUrl}/v1/customers/${customer.id}/policies`,
+          ),
+        ),
+        firstValueFrom(
+          this.http.get<Prescription[]>(`${this.env.apiUrl}/v1/prescriptions`, {
+            params: { customerId: customer.id, status: 'ACTIVE', limit: 20 },
+          }),
+        ),
+      ]);
+      this.policies.set(policies);
+      this.prescriptionsOnFile.set(prescriptions.filter((p) => p.renewalsRemaining > 0));
+      if (policies.length === 1) {
+        this.cart.applyPolicy(policies[0]);
+      }
+    } catch {
+      // Offline: the covers cannot be checked, the sale goes on without third-party payer.
+      this.policies.set([]);
+      this.prescriptionsOnFile.set([]);
+    }
+  }
+
+  protected pickPolicy(policyId: string): void {
+    const policy = this.policies().find((p) => p.id === policyId) ?? null;
+    if (policy) {
+      this.cart.applyPolicy(policy);
+    } else {
+      this.cart.policy.set(null);
+      this.cart.payments.update((payments) =>
+        payments.filter((p) => !(p.method === 'THIRD_PARTY_PAYER' && p.policyId)),
+      );
+    }
+  }
+
+  protected pickPrescription(prescriptionId: string): void {
+    this.cart.usePrescriptionOnFile(
+      this.prescriptionsOnFile().find((p) => p.id === prescriptionId) ?? null,
+    );
+  }
+
+  protected clearCustomer(): void {
+    this.cart.customer.set(null);
+    this.policies.set([]);
+    this.prescriptionsOnFile.set([]);
+    this.pickPolicy('');
+    this.cart.usePrescriptionOnFile(null);
   }
 
   private async checkCashSession(): Promise<void> {
@@ -418,6 +536,7 @@ export class PosPage {
     this.cart.customer.set(customer);
     this.customerTerm = '';
     this.customerResults.set([]);
+    void this.loadCustomerFiles(customer);
   }
 
   protected async lookup(term: string): Promise<void> {
@@ -475,6 +594,11 @@ export class PosPage {
   }
 
   protected pay(method: PaymentMethod): void {
+    const policy = this.cart.policy();
+    if (method === 'THIRD_PARTY_PAYER' && policy) {
+      this.cart.applyPolicy(policy);
+      return;
+    }
     const typed = this.currency.parse(this.amount);
     const cents = typed > 0 ? typed : this.cart.remainingCents();
     this.cart.addPayment({
@@ -552,6 +676,7 @@ export class PosPage {
             amountCents: p.amountCents,
             thirdPartyCode: p.thirdPartyCode,
             provider: p.provider,
+            policyId: p.policyId,
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
         });

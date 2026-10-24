@@ -11,6 +11,8 @@ public final class Accounts {
     public static final String SUPPLIERS = "401";
     public static final String CUSTOMERS = "4111";
     public static final String THIRD_PARTY_PAYERS = "4112";
+    /** Each insurer gets its own sub-account under 4112: {@code 4112} + three-digit sequence. */
+    public static final String THIRD_PARTY_PAYER_PREFIX = "4112";
     public static final String VAT_COLLECTED = "4431";
     public static final String VAT_DEDUCTIBLE = "4452";
     public static final String BANK = "521";

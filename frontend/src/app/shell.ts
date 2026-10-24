@@ -21,6 +21,16 @@ const PHARMACY_NAV: NavItem[] = [
   { path: '/procurement', label: 'Commandes', permissions: ['PROCUREMENT_VIEW'] },
   { path: '/accounting', label: 'Compta', permissions: ['ACCOUNTING_VIEW'] },
   {
+    path: '/insurance',
+    label: 'Tiers payant',
+    permissions: ['INSURANCE_VIEW', 'INSURANCE_MANAGE'],
+  },
+  {
+    path: '/prescriptions',
+    label: 'Ordonnances',
+    permissions: ['PRESCRIPTION_DISPENSE', 'PRESCRIPTION_REGISTER_VIEW'],
+  },
+  {
     path: '/network',
     label: 'Réseau',
     permissions: ['NETWORK_STOCK_QUERY', 'NETWORK_TRANSFER_REQUEST', 'NETWORK_TRANSFER_RESPOND'],

@@ -67,6 +67,20 @@ export const routes: Routes = [
           import('./features/accounting/accounting-page').then((m) => m.AccountingPage),
       },
       {
+        path: 'insurance',
+        title: 'Tiers payant',
+        canActivate: [permissionGuard('INSURANCE_VIEW', 'INSURANCE_MANAGE')],
+        loadComponent: () =>
+          import('./features/insurance/insurance-page').then((m) => m.InsurancePage),
+      },
+      {
+        path: 'prescriptions',
+        title: 'Ordonnances',
+        canActivate: [permissionGuard('PRESCRIPTION_DISPENSE', 'PRESCRIPTION_REGISTER_VIEW')],
+        loadComponent: () =>
+          import('./features/prescription/prescriptions-page').then((m) => m.PrescriptionsPage),
+      },
+      {
         path: 'admin/hub',
         title: 'Serveur local',
         canActivate: [permissionGuard('HUB_ADMIN', 'AUDIT_VIEW')],
