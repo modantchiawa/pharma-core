@@ -61,7 +61,7 @@ class ImportIT extends IntegrationTest {
                 .andExpect(jsonPath("$.created").value(3))
                 .andExpect(jsonPath("$.rejected").value(1))
                 .andExpect(jsonPath("$.errors[0].line").value(5));
-        call(get("/api/v1/catalog/products?q=TRAMADOL"), pharmacy.ownerToken(), null)
+        call(get("/api/v1/catalog/products?q=" + TRAMADOL), pharmacy.ownerToken(), null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].data.listing").value("STUPEFIANT"))
                 .andExpect(jsonPath("$[0].data.publicPriceCents").value(200_000));
@@ -111,7 +111,7 @@ class ImportIT extends IntegrationTest {
                 .andExpect(jsonPath("$.created").value(2))
                 .andExpect(jsonPath("$.rejected").value(1))
                 .andExpect(jsonPath("$.errors[0].line").value(4));
-        var doliprane = JsonPath.read(call(get("/api/v1/catalog/products?q=DOLIPRANE"), pharmacy.ownerToken(), null)
+        var doliprane = JsonPath.read(call(get("/api/v1/catalog/products?q=" + DOLIPRANE), pharmacy.ownerToken(), null)
                 .andReturn().getResponse().getContentAsString(), "$[0].id");
         assertThat(available(pharmacy, java.util.UUID.fromString(doliprane.toString()))).isEqualTo(48);
 
