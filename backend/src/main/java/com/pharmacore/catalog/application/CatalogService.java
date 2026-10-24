@@ -56,6 +56,12 @@ public class CatalogService {
         return product;
     }
 
+    /** Product carrying this 13-digit code as CIP13 or, failing that, as EAN13. */
+    @Transactional(readOnly = true)
+    public java.util.Optional<ProductEntity> findByCode(String code) {
+        return products.findByAnyCode(code).stream().findFirst();
+    }
+
     @Transactional(readOnly = true)
     public List<ProductEntity> search(String term, int limit) {
         return products.search(term.trim(), PageRequest.of(0, Math.clamp(limit, 1, 50)));

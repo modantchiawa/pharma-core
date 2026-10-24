@@ -46,6 +46,7 @@ const PHARMACY_NAV: NavItem[] = [
   { path: '/chat', label: 'Messagerie', permissions: ['NETWORK_CHAT'] },
   { path: '/admin/branding', label: 'Identité', permissions: ['CONFIG_BRANDING_MANAGE'] },
   { path: '/admin/roles', label: 'Droits', permissions: ['ROLE_MANAGE'] },
+  { path: '/admin/import', label: 'Import', permissions: ['DATA_IMPORT'] },
   { path: '/admin/hub', label: 'Serveur', permissions: ['HUB_ADMIN'] },
 ];
 
@@ -184,7 +185,10 @@ export class Shell {
 
   protected readonly nav = computed(() =>
     this.auth.isPlatformOperator()
-      ? [{ path: '/platform', label: 'Supervision', permissions: [] }]
+      ? [
+          { path: '/platform', label: 'Supervision', permissions: [] },
+          { path: '/platform/catalog-import', label: 'Référentiel', permissions: [] },
+        ]
       : PHARMACY_NAV.filter((item) => this.permissions.hasAny(...item.permissions)),
   );
   protected readonly userName = computed(

@@ -673,3 +673,48 @@ export interface RegisterEntry {
   cashier: string;
   prescriptionId: string | null;
 }
+
+// ---------------------------------------------------------------- importation de données
+
+export type ImportKind = 'CATALOG' | 'PRODUCTS' | 'STOCK' | 'CUSTOMERS' | 'SUPPLIERS';
+
+export interface ImportFieldView {
+  name: string;
+  label: string;
+  required: boolean;
+  column: number | null;
+}
+
+export interface ImportKindView {
+  kind: ImportKind;
+  label: string;
+  fields: ImportFieldView[];
+}
+
+export interface ImportPreview {
+  format: string;
+  charset: string;
+  delimiter: string;
+  headers: string[];
+  rows: number;
+  fields: ImportFieldView[];
+  missingRequired: string[];
+  sample: { line: number; values: Record<string, string>; error: string | null }[];
+}
+
+export interface ImportJob {
+  id: string;
+  kind: ImportKind;
+  fileName: string;
+  fileFormat: string;
+  dryRun: boolean;
+  status: string;
+  total: number;
+  created: number;
+  updated: number;
+  rejected: number;
+  errors: { line: number; message: string }[];
+  startedBy: string;
+  startedAt: string;
+  finishedAt: string;
+}

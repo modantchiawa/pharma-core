@@ -34,8 +34,8 @@ spring:
       spec: maximumSize=20000,expireAfterWrite=60s
   servlet:
     multipart:
-      max-file-size: 512KB
-      max-request-size: 1MB
+      max-file-size: 20MB
+      max-request-size: 21MB
 
 server:
   shutdown: graceful

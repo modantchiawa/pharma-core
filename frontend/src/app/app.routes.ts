@@ -36,6 +36,12 @@ export const routes: Routes = [
             (m) => m.PlatformDashboardPage,
           ),
       },
+      {
+        path: 'catalog-import',
+        title: 'Référentiel · import',
+        data: { platform: true },
+        loadComponent: () => import('./features/admin/import-page').then((m) => m.ImportPage),
+      },
     ],
   },
   {
@@ -161,6 +167,12 @@ export const routes: Routes = [
         canActivate: [permissionGuard('CONFIG_BRANDING_MANAGE')],
         loadComponent: () =>
           import('./features/admin/branding-settings-page').then((m) => m.BrandingSettingsPage),
+      },
+      {
+        path: 'admin/import',
+        title: 'Import de données',
+        canActivate: [permissionGuard('DATA_IMPORT')],
+        loadComponent: () => import('./features/admin/import-page').then((m) => m.ImportPage),
       },
       {
         path: 'admin/roles',

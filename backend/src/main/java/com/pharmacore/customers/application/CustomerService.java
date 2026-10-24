@@ -155,6 +155,32 @@ public class CustomerService {
         return customer.addCredit(cents);
     }
 
+    /**
+     * Opening balance carried over from the previous software: the amount the customer already
+     * owes, recorded outside any sale and above the limit if need be (it is history, not a new credit).
+     */
+    @Transactional
+    public void importOpeningBalance(UUID customerId, long cents) {
+        var customer = customers.lockById(customerId).orElseThrow(() -> new NotFoundException("Customer", customerId));
+        if (cents == 0) {
+            return;
+        }
+        customer.addCredit(cents);
+        audit.record("CUSTOMER_OPENING_BALANCE", "CUSTOMER", customerId, Map.of("cents", Long.toString(cents)));
+    }
+
+    /** Existing customer with this phone number, for de-duplication when a file is imported. */
+    @Transactional(readOnly = true)
+    public java.util.Optional<UUID> findIdByPhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return jdbc.sql("SELECT id FROM customer WHERE tenant_id = :tenant AND phone = :phone ORDER BY created_at LIMIT 1")
+                .param("tenant", TenantContext.requireTenant().value())
+                .param("phone", phone.trim())
+                .query(UUID.class).optional();
+    }
+
     @Transactional
     public void releaseCredit(UUID customerId, long cents) {
         customers.lockById(customerId).ifPresent(customer -> customer.settle(cents));
