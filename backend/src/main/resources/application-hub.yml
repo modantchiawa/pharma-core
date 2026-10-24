@@ -1,0 +1,40 @@
+# Profil "hub" : serveur local d'une officine (Windows), maître de ses données,
+# synchronisé avec le cloud quand Internet est disponible.
+pharmacore:
+  node:
+    mode: HUB
+    keys-dir: ${PHARMACORE_DATA_DIR:./data}/keys
+    cloud-url: ${PHARMACORE_CLOUD_URL:https://cloud.pharmacore.io}
+    sync-interval: PT30S
+    subscription-grace: P30D
+  security:
+    # Les postes de l'officine : adresse du hub sur le LAN (http://pharmacore-hub:8080) et localhost
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:8080,http://pharmacore-hub:8080,http://127.0.0.1:8080}
+    issuers: []
+  messaging:
+    broker-relay:
+      enabled: false
+
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/pharmacore}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          max-age: 1h
+
+server:
+  port: ${SERVER_PORT:8080}
+  # Le hub n'est joignable que sur le réseau de l'officine ; TLS est assuré par le
+  # certificat local installé par le programme d'installation si configuré.
+  address: 0.0.0.0
+
+logging:
+  file:
+    name: ${PHARMACORE_DATA_DIR:./data}/logs/pharmacore-hub.log
+  logback:
+    rollingpolicy:
+      max-history: 30

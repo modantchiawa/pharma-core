@@ -7,8 +7,12 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { PaymentMethod } from '../../core/api/models';
+import { firstValueFrom } from 'rxjs';
+import { Customer, MOBILE_MONEY_PROVIDERS, PaymentMethod } from '../../core/api/models';
+import { APP_ENVIRONMENT } from '../../core/config';
+import { CurrencyService } from '../../core/ui/currency.service';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CatalogSyncService } from '../../core/offline/catalog-sync.service';
 import { ConnectivityService } from '../../core/offline/connectivity.service';
@@ -191,6 +195,52 @@ import { Receipt, ReceiptData } from './receipt';
           </fieldset>
         }
 
+        <div class="relative">
+          <input
+            type="search"
+            class="w-full rounded border px-2 py-1 text-sm"
+            placeholder="Client (nom, téléphone) — facultatif"
+            [(ngModel)]="customerTerm"
+            (ngModelChange)="searchCustomers($event)"
+            aria-label="Client"
+          />
+          @if (customerResults().length > 0) {
+            <ul
+              class="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded border bg-white shadow"
+              role="listbox"
+            >
+              @for (c of customerResults(); track c.id) {
+                <li
+                  role="option"
+                  class="cursor-pointer px-2 py-1 hover:bg-slate-100"
+                  (mousedown)="pickCustomer(c)"
+                >
+                  {{ c.displayName }}
+                  <small class="text-slate-500"
+                    >{{ c.phone }} · crédit dispo {{ c.availableCreditCents | money }}</small
+                  >
+                </li>
+              }
+            </ul>
+          }
+          @if (cart.customer(); as c) {
+            <p class="mt-1 flex justify-between text-sm">
+              <span
+                >👤 {{ c.displayName }}
+                <small class="text-slate-500">dû {{ c.creditBalanceCents | money }}</small></span
+              >
+              <button
+                type="button"
+                class="text-red-700"
+                (click)="cart.customer.set(null)"
+                aria-label="Retirer le client"
+              >
+                ✕
+              </button>
+            </p>
+          }
+        </div>
+
         <div class="grid grid-cols-2 gap-2">
           @for (method of methods; track method.code) {
             <button
@@ -202,22 +252,42 @@ import { Receipt, ReceiptData } from './receipt';
             </button>
           }
         </div>
-        <label class="text-sm"
-          >Montant
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            class="mt-1 w-full rounded border px-2 py-1"
-            [(ngModel)]="amount"
-            placeholder="Reste {{ cart.remainingCents() / 100 }}"
-          />
-        </label>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <label
+            >Montant
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mt-1 w-full rounded border px-2 py-1"
+              [(ngModel)]="amount"
+              placeholder="Reste {{ cart.remainingCents() | money }}"
+            />
+          </label>
+          <label
+            >Opérateur mobile money
+            <select class="mt-1 w-full rounded border px-2 py-1" [(ngModel)]="provider">
+              @for (p of providers; track p) {
+                <option [value]="p">{{ p.replace('_', ' ') }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (!cashSessionOpen()) {
+          <p class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
+            Aucune session de caisse ouverte sur ce poste : les espèces ne seront pas rattachées à
+            un rapport Z.
+          </p>
+        }
 
         <ul class="text-sm">
           @for (payment of cart.payments(); track $index) {
             <li class="flex justify-between">
-              <span>{{ labelOf(payment.method) }}</span>
+              <span
+                >{{ labelOf(payment.method) }}
+                @if (payment.provider) {
+                  · {{ payment.provider }}
+                }
+              </span>
               <span
                 >{{ payment.amountCents | money }}
                 <button
@@ -282,20 +352,73 @@ export class PosPage {
   private readonly databases = inject(PosDatabaseService);
   private readonly searchInput = viewChild.required<ElementRef<HTMLInputElement>>('search');
 
+  private readonly http = inject(HttpClient);
+  private readonly env = inject(APP_ENVIRONMENT);
+  private readonly currency = inject(CurrencyService);
+
   protected term = '';
-  protected amount: number | null = null;
+  protected amount = '';
+  protected customerTerm = '';
+  protected provider: string = MOBILE_MONEY_PROVIDERS[0];
+  protected readonly providers = MOBILE_MONEY_PROVIDERS;
+  protected readonly customerResults = signal<Customer[]>([]);
+  protected readonly cashSessionOpen = signal(true);
   protected readonly results = signal<CachedProduct[]>([]);
   protected readonly highlighted = signal(0);
   protected readonly message = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly receipt = signal<ReceiptData | null>(null);
   protected readonly methods: { code: PaymentMethod; label: string }[] = [
-    { code: 'CASH', label: 'Espèces' },
+    { code: 'CASH', label: 'Espèces (F4)' },
+    { code: 'MOBILE_MONEY', label: 'Mobile money (F5)' },
     { code: 'CARD', label: 'Carte' },
     { code: 'THIRD_PARTY_PAYER', label: 'Tiers payant' },
+    { code: 'CREDIT', label: 'Crédit client' },
     { code: 'CHECK', label: 'Chèque' },
   ];
   private readonly cashierName = computed(() => this.permissions.profile()?.displayName ?? '');
+
+  constructor() {
+    void this.checkCashSession();
+  }
+
+  private async checkCashSession(): Promise<void> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get(`${this.env.apiUrl}/v1/cash/sessions/open`, {
+          params: { terminalId: this.terminal.terminalId },
+          observe: 'response',
+        }),
+      );
+      this.cashSessionOpen.set(response.status === 200);
+    } catch {
+      // Offline: cannot tell, do not nag.
+    }
+  }
+
+  protected async searchCustomers(term: string): Promise<void> {
+    if (term.trim().length < 2) {
+      this.customerResults.set([]);
+      return;
+    }
+    try {
+      this.customerResults.set(
+        await firstValueFrom(
+          this.http.get<Customer[]>(`${this.env.apiUrl}/v1/customers`, {
+            params: { q: term.trim(), limit: 8 },
+          }),
+        ),
+      );
+    } catch {
+      this.customerResults.set([]);
+    }
+  }
+
+  protected pickCustomer(customer: Customer): void {
+    this.cart.customer.set(customer);
+    this.customerTerm = '';
+    this.customerResults.set([]);
+  }
 
   protected async lookup(term: string): Promise<void> {
     this.highlighted.set(0);
@@ -352,16 +475,15 @@ export class PosPage {
   }
 
   protected pay(method: PaymentMethod): void {
-    const cents =
-      this.amount !== null && this.amount > 0
-        ? Math.round(this.amount * 100)
-        : this.cart.remainingCents();
+    const typed = this.currency.parse(this.amount);
+    const cents = typed > 0 ? typed : this.cart.remainingCents();
     this.cart.addPayment({
       method,
       amountCents: cents,
       thirdPartyCode: method === 'THIRD_PARTY_PAYER' ? 'AMO' : undefined,
+      provider: method === 'MOBILE_MONEY' ? this.provider : undefined,
     });
-    this.amount = null;
+    this.amount = '';
   }
 
   protected labelOf(method: PaymentMethod): string {
@@ -377,6 +499,10 @@ export class PosPage {
       case 'F4':
         event.preventDefault();
         this.pay('CASH');
+        break;
+      case 'F5':
+        event.preventDefault();
+        this.pay('MOBILE_MONEY');
         break;
       case 'F9':
         event.preventDefault();
@@ -414,6 +540,7 @@ export class PosPage {
           ticketNumber,
           occurredAt: occurredAt.toISOString(),
           cashierUserId: profile.userId,
+          customerId: this.cart.customer()?.id,
           lines: this.cart.lines().map((l) => ({
             productId: l.productId,
             quantity: l.quantity,
@@ -424,6 +551,7 @@ export class PosPage {
             method: p.method,
             amountCents: p.amountCents,
             thirdPartyCode: p.thirdPartyCode,
+            provider: p.provider,
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
         });

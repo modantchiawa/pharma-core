@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, permissionGuard, platformGuard } from './core/auth/guards';
+import { authGuard, pairedGuard, permissionGuard, platformGuard } from './core/auth/guards';
 import { Shell } from './shell';
 
 export const routes: Routes = [
@@ -30,9 +30,49 @@ export const routes: Routes = [
   {
     path: '',
     component: Shell,
-    canActivate: [authGuard],
+    canActivate: [pairedGuard, authGuard],
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'pos' },
+      {
+        path: 'account/password',
+        title: 'Mot de passe',
+        loadComponent: () => import('./features/auth/password-page').then((m) => m.PasswordPage),
+      },
+      {
+        path: 'cash',
+        title: 'Caisse · sessions',
+        canActivate: [permissionGuard('CASH_SESSION_MANAGE', 'REPORT_VIEW')],
+        loadComponent: () =>
+          import('./features/pos/cash-session-page').then((m) => m.CashSessionPage),
+      },
+      {
+        path: 'customers',
+        title: 'Clients',
+        canActivate: [permissionGuard('CUSTOMER_MANAGE', 'SALE_CREATE')],
+        loadComponent: () =>
+          import('./features/customers/customers-page').then((m) => m.CustomersPage),
+      },
+      {
+        path: 'procurement',
+        title: 'Commandes',
+        canActivate: [permissionGuard('PROCUREMENT_VIEW')],
+        loadComponent: () =>
+          import('./features/procurement/order-sheet-page').then((m) => m.OrderSheetPage),
+      },
+      {
+        path: 'accounting',
+        title: 'Comptabilité',
+        canActivate: [permissionGuard('ACCOUNTING_VIEW')],
+        loadComponent: () =>
+          import('./features/accounting/accounting-page').then((m) => m.AccountingPage),
+      },
+      {
+        path: 'admin/hub',
+        title: 'Serveur local',
+        canActivate: [permissionGuard('HUB_ADMIN', 'AUDIT_VIEW')],
+        loadComponent: () =>
+          import('./features/hub/sync-status-page').then((m) => m.SyncStatusPage),
+      },
       {
         path: 'pos',
         title: 'Caisse',

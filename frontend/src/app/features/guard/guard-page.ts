@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
-import { APP_ENVIRONMENT } from '../../core/config';
+import { NodeInfoService } from '../../core/api/node-info.service';
 
 interface GuardSlot {
   id: string;
@@ -74,7 +74,7 @@ const TYPE_LABEL: Record<GuardSlot['type'], string> = {
 })
 export class GuardPage {
   private readonly http = inject(HttpClient);
-  private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/guards`;
+  private readonly api = `${inject(NodeInfoService).networkApiUrl()}/v1/guards`;
   protected readonly myTenant = inject(AuthService).tenantId;
   protected readonly now = signal<GuardSlot[]>([]);
   protected readonly slots = signal<GuardSlot[]>([]);

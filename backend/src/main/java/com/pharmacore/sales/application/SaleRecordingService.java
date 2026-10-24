@@ -1,6 +1,11 @@
 package com.pharmacore.sales.application;
 
+import com.pharmacore.accounting.application.AccountingPoster;
+import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.catalog.persistence.ProductEntity;
+import com.pharmacore.customers.application.CustomerService;
+import com.pharmacore.inventory.application.TenantCalendar;
+import com.pharmacore.sales.application.certification.CertificationService;
 import com.pharmacore.catalog.persistence.ProductRepository;
 import com.pharmacore.inventory.application.StockLedger;
 import com.pharmacore.inventory.domain.AllocationPlan;
@@ -52,18 +57,30 @@ public class SaleRecordingService {
     private final StockLedger ledger;
     private final TenantSequenceRepository sequences;
     private final SellerProfiles sellers;
+    private final CustomerService customers;
+    private final CashSessionService cashSessions;
+    private final AccountingPoster accounting;
+    private final CertificationService certification;
+    private final TenantCalendar calendar;
     private final AuditTrail audit;
     private final Clock clock;
 
     public SaleRecordingService(SaleRepository sales, ProductRepository products, StockRepository stocks,
                                 StockLedger ledger, TenantSequenceRepository sequences, SellerProfiles sellers,
-                                AuditTrail audit, Clock clock) {
+                                CustomerService customers, CashSessionService cashSessions,
+                                AccountingPoster accounting, CertificationService certification,
+                                TenantCalendar calendar, AuditTrail audit, Clock clock) {
         this.sales = sales;
         this.products = products;
         this.stocks = stocks;
         this.ledger = ledger;
         this.sequences = sequences;
         this.sellers = sellers;
+        this.customers = customers;
+        this.cashSessions = cashSessions;
+        this.accounting = accounting;
+        this.certification = certification;
+        this.calendar = calendar;
         this.audit = audit;
         this.clock = clock;
     }
@@ -92,10 +109,19 @@ public class SaleRecordingService {
         SellerProfile seller = sellers.resolve(draft.cashierUserId());
         Set<SaleAnomaly> anomalies = EnumSet.noneOf(SaleAnomaly.class);
         anomalies.addAll(SaleRules.evaluate(draft, facts, seller, now));
+        if (draft.onCredit() && draft.customerId() != null && !anomalies.contains(SaleAnomaly.CREDIT_NOT_ALLOWED)
+                && !customers.addCredit(draft.customerId(), draft.creditCents())) {
+            anomalies.add(SaleAnomaly.CREDIT_LIMIT_EXCEEDED);
+        }
 
         return switch (SaleRules.decide(draft.origin(), anomalies)) {
-            case SaleDecision.Reject reject -> new SaleOutcome.Rejected(draft.clientSaleId(), "sale-rule-violation",
-                    reject.violations(), "The sale violates business rules: " + reject.violations());
+            case SaleDecision.Reject reject -> {
+                if (draft.onCredit() && draft.customerId() != null && !reject.violations().contains(SaleAnomaly.CREDIT_NOT_ALLOWED)) {
+                    customers.releaseCredit(draft.customerId(), draft.creditCents());
+                }
+                yield new SaleOutcome.Rejected(draft.clientSaleId(), "sale-rule-violation",
+                        reject.violations(), "The sale violates business rules: " + reject.violations());
+            }
             case SaleDecision.Accept accept -> persist(draft, catalog, seller, accept.anomalies(), now);
         };
     }
@@ -121,12 +147,13 @@ public class SaleRecordingService {
         Long ordonnancier = listed ? sequences.next(TenantSequenceRepository.ORDONNANCIER) : null;
         var prescription = draft.prescription();
 
+        UUID cashSession = cashSessions.sessionFor(draft.terminalId(), draft.occurredAt()).orElse(null);
         var sale = new SaleEntity(saleId, draft.clientSaleId(), draft.terminalId(), draft.ticketNumber(), draft.origin(),
                 draft.occurredAt(), now, seller.userId(), draft.grossCents(), draft.discountCents(), draft.netCents(),
                 prescription == null ? null : prescription.prescriberName(),
                 prescription == null ? null : prescription.prescriberRpps(),
                 prescription == null ? null : prescription.patientReference(),
-                ordonnancier, anomalies);
+                ordonnancier, anomalies, draft.customerId(), cashSession, certification.required());
 
         var remaining = new LotCursor(plans);
         short lineNo = 1;
@@ -136,8 +163,10 @@ public class SaleRecordingService {
                     remaining.take(line.productId(), line.quantity())));
         }
         draft.payments().forEach(payment -> sale.addPayment(new SalePaymentEntity(payment.method(),
-                payment.amountCents(), payment.thirdPartyCode(), payment.reference())));
+                payment.amountCents(), payment.thirdPartyCode(), payment.reference(), payment.provider(),
+                payment.method().isCustomerAccount() ? draft.customerId() : null)));
         sales.save(sale);
+        accounting.post(Postings.sale(sale, calendar.today()), "SALE", sale.id());
 
         audit.record("SALE_RECORDED", "SALE", sale.id(), Map.of(
                 "clientSaleId", draft.clientSaleId().toString(),

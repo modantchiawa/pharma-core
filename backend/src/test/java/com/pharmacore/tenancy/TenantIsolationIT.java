@@ -87,23 +87,29 @@ class TenantIsolationIT extends IntegrationTest {
 
         String cashierRole = JsonPath.<java.util.List<String>>read(call(get("/api/v1/roles"), zeta.ownerToken(), null)
                 .andReturn().getResponse().getContentAsString(), "$[?(@.code == 'CAISSIER')].id").getFirst();
-        call(post("/api/v1/users"), zeta.ownerToken(), """
-                {"externalSubject":"cashier-%s","email":"cashier-%s@example.org","displayName":"Camille",
-                 "roleIds":["%s"]}
-                """.formatted(zeta.slug(), zeta.slug(), cashierRole)).andExpect(status().isCreated());
-        String cashierToken = JWT.pharmacist(zeta.tenantId(), "cashier-" + zeta.slug());
+        var registration = call(post("/api/v1/users"), zeta.ownerToken(), """
+                {"email":"cashier-%s@example.org","displayName":"Camille","roleIds":["%s"]}
+                """.formatted(zeta.slug(), cashierRole)).andExpect(status().isCreated());
+        String cashierToken = login(zeta.slug(), "cashier-" + zeta.slug() + "@example.org",
+                read(registration, "$.temporaryPassword"));
 
         call(get("/api/v1/roles"), cashierToken, null).andExpect(status().isForbidden());
         call(get("/api/v1/inventory/stocks"), cashierToken, null).andExpect(status().isOk());
         call(get("/api/platform/tenants"), zeta.ownerToken(), null).andExpect(status().isForbidden());
 
-        // Same issuer and claims, signed with another key
+        // Trusted federated issuer, signed with another key
         String forged = new TestJwtIssuer().pharmacist(zeta.tenantId(), "owner-" + zeta.slug());
         mvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + forged))
                 .andExpect(status().isUnauthorized());
         // Valid signature but the subject is not registered in that pharmacy
         call(get("/api/v1/me"), JWT.pharmacist(zeta.tenantId(), "stranger"), null)
                 .andExpect(status().isUnauthorized());
+        // Wrong password locks nothing yet but is refused; the right one still works afterwards
+        mvc.perform(post("/api/auth/login").contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("""
+                        {"pharmacy":"%s","email":"%s","password":"wrong-password-1","terminalId":"T-TEST"}
+                        """.formatted(zeta.slug(), zeta.ownerEmail())))
+                .andExpect(status().isUnprocessableContent());
+        login(zeta.slug(), zeta.ownerEmail(), zeta.ownerPassword());
     }
 
     private long countLots(java.util.UUID tenant) {

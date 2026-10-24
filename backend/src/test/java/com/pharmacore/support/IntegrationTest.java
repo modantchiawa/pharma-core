@@ -15,7 +15,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,15 +32,26 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @Import(IntegrationTest.TestSecurity.class)
 public abstract class IntegrationTest {
 
-    protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
-    protected static final TestJwtIssuer JWT = new TestJwtIssuer();
+    public static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
+    public static final TestJwtIssuer JWT = new TestJwtIssuer();
 
     static {
         POSTGRES.start();
     }
 
+    private static final java.nio.file.Path KEYS_DIR;
+
+    static {
+        try {
+            KEYS_DIR = java.nio.file.Files.createTempDirectory("pharmacore-keys");
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
+        registry.add("pharmacore.node.keys-dir", KEYS_DIR::toString);
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -59,7 +69,6 @@ public abstract class IntegrationTest {
     static class TestSecurity {
 
         @Bean
-        @Primary
         TestJwtIssuer testJwtIssuer() {
             return JWT;
         }
@@ -67,20 +76,30 @@ public abstract class IntegrationTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    protected record Pharmacy(UUID tenantId, String slug, String ownerToken) {
+    protected record Pharmacy(UUID tenantId, String slug, String ownerEmail, String ownerPassword, String ownerToken) {
     }
 
     protected Pharmacy onboardPharmacy(String name) throws Exception {
         String slug = name.toLowerCase().replaceAll("[^a-z0-9]+", "-") + "-" + shortId();
-        String owner = "owner-" + slug;
+        String email = "owner-" + slug + "@example.org";
         var result = call(post("/api/platform/tenants"), platformToken, """
-                {"slug":"%s","legalName":"SELARL %s","displayName":"%s","countryCode":"FR","currency":"EUR",
-                 "timeZone":"Europe/Paris","subscriptionPlan":"PRO","ownerSubject":"%s",
-                 "ownerEmail":"%s@example.org","ownerDisplayName":"Dr %s"}
-                """.formatted(slug, name, name, owner, owner, name))
+                {"slug":"%s","legalName":"SARL %s","displayName":"%s","countryCode":"NE","currency":"XOF",
+                 "timeZone":"Africa/Niamey","subscriptionPlan":"PRO",
+                 "ownerEmail":"%s","ownerDisplayName":"Dr %s"}
+                """.formatted(slug, name, name, email, name))
                 .andExpect(status().isCreated());
         UUID tenantId = UUID.fromString(read(result, "$.id"));
-        return new Pharmacy(tenantId, slug, JWT.pharmacist(tenantId, owner));
+        String temporary = read(result, "$.ownerTemporaryPassword");
+        return new Pharmacy(tenantId, slug, email, temporary, login(slug, email, temporary));
+    }
+
+    /** Local (offline-capable) authentication, exactly as the PWA does it. */
+    protected String login(String slug, String email, String password) throws Exception {
+        var result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"pharmacy":"%s","email":"%s","password":"%s","terminalId":"T-TEST"}
+                        """.formatted(slug, email, password)))
+                .andExpect(status().isOk());
+        return read(result, "$.accessToken");
     }
 
     protected UUID createProduct(String designation, String listing, long publicPriceCents) throws Exception {

@@ -15,6 +15,7 @@ public record SaleDraft(UUID clientSaleId,
                         Instant occurredAt,
                         SaleOrigin origin,
                         UUID cashierUserId,
+                        UUID customerId,
                         List<Line> lines,
                         List<Payment> payments,
                         Prescription prescription) {
@@ -57,7 +58,9 @@ public record SaleDraft(UUID clientSaleId,
         }
     }
 
-    public record Payment(PaymentMethod method, long amountCents, String thirdPartyCode, String reference) {
+    /** @param provider mobile money operator or card scheme, free text matched against the configured list */
+    public record Payment(PaymentMethod method, long amountCents, String thirdPartyCode, String reference,
+                          String provider) {
 
         public Payment {
             Objects.requireNonNull(method, "method");
@@ -84,5 +87,13 @@ public record SaleDraft(UUID clientSaleId,
 
     public long paidCents() {
         return payments.stream().mapToLong(Payment::amountCents).sum();
+    }
+
+    public long creditCents() {
+        return payments.stream().filter(p -> p.method().isCustomerAccount()).mapToLong(Payment::amountCents).sum();
+    }
+
+    public boolean onCredit() {
+        return creditCents() > 0;
     }
 }

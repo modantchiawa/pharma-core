@@ -1,86 +1,248 @@
+import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
+import { firstValueFrom } from 'rxjs';
+import { Me } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
+import { PermissionService } from './permission.service';
 
 export type Realm = 'pharmacy' | 'platform';
 
 const REALM_KEY = 'pharmacore.realm';
+const TERMINAL_TOKEN_KEY = 'pharmacore.terminalToken';
+const REFRESH_KEY = 'pharmacore.refreshToken';
+const ACCESS_KEY = 'pharmacore.accessToken';
+const PHARMACY_KEY = 'pharmacore.pharmacy';
+
+interface TokenResponse {
+  accessToken: string;
+  accessExpiresAt: string;
+  refreshToken: string;
+  terminalToken: string | null;
+  mustChangePassword: boolean;
+  profile: Me;
+}
 
 /**
- * OpenID Connect (authorization code + PKCE) against the pharmacy realm or the editor's
- * platform realm. Tokens live in sessionStorage only; offline sales never need a token, the
- * journal is synchronized once the session can be refreshed.
+ * Two ways in:
+ * <ul>
+ *   <li>Pharmacy staff: local accounts verified by the node (hub or cloud), no Internet needed.
+ *       A password login binds the terminal for 30 days; afterwards colleagues switch with a PIN.</li>
+ *   <li>Editor operators: OpenID Connect (PKCE) on the platform realm, for the supervision console.</li>
+ * </ul>
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly env = inject(APP_ENVIRONMENT);
+  private readonly http = inject(HttpClient);
+  private readonly permissions = inject(PermissionService);
   private readonly realmState = signal<Realm>(
     (sessionStorage.getItem(REALM_KEY) as Realm) ?? 'pharmacy',
   );
-  private readonly userState = signal<User | null>(null);
-  private manager = this.createManager(this.realmState());
+  private readonly accessState = signal<string | null>(sessionStorage.getItem(ACCESS_KEY));
+  private readonly mustChange = signal(false);
+  private readonly platformUser = signal<User | null>(null);
+  private platformManager: UserManager | null = null;
+  private refreshing: Promise<string | null> | null = null;
 
   readonly realm = this.realmState.asReadonly();
-  readonly user = this.userState.asReadonly();
-  readonly isAuthenticated = computed(() => {
-    const user = this.userState();
-    return !!user && !user.expired;
-  });
-  readonly accessToken = computed(() => this.userState()?.access_token ?? null);
+  readonly mustChangePassword = this.mustChange.asReadonly();
+  readonly accessToken = computed(() =>
+    this.realmState() === 'platform'
+      ? (this.platformUser()?.access_token ?? null)
+      : this.accessState(),
+  );
   readonly claims = computed(() => decodeJwtPayload(this.accessToken()));
   readonly tenantId = computed(() => (this.claims()?.['tenant_id'] as string | undefined) ?? null);
   readonly isPlatformOperator = computed(() => {
     const roles = this.claims()?.['platform_roles'];
     return Array.isArray(roles) && roles.includes('SUPER_ADMIN');
   });
+  readonly isAuthenticated = computed(() => {
+    const exp = this.claims()?.['exp'];
+    return typeof exp === 'number' && exp * 1000 > Date.now();
+  });
+  /** Users who can switch in with a PIN on this terminal (last successful logins). */
+  readonly terminalBound = computed(() => !!localStorage.getItem(TERMINAL_TOKEN_KEY));
+  readonly user = this.platformUser.asReadonly();
 
   async init(): Promise<void> {
-    this.userState.set(await this.manager.getUser());
+    if (this.realmState() === 'platform') {
+      this.platformUser.set(await this.manager().getUser());
+    } else if (!this.isAuthenticated() && localStorage.getItem(REFRESH_KEY)) {
+      await this.refresh();
+    }
   }
 
-  async login(realm: Realm, returnUrl = '/'): Promise<void> {
-    sessionStorage.setItem(REALM_KEY, realm);
-    this.realmState.set(realm);
-    this.manager = this.createManager(realm);
-    await this.manager.signinRedirect({ state: returnUrl });
+  // ------------------------------------------------------------------ pharmacy staff
+
+  async loginWithPassword(
+    pharmacy: string | null,
+    email: string,
+    password: string,
+    terminalId: string,
+  ): Promise<Me> {
+    const response = await firstValueFrom(
+      this.http.post<TokenResponse>(`${this.env.apiUrl}/auth/login`, {
+        pharmacy,
+        email,
+        password,
+        terminalId,
+      }),
+    );
+    if (pharmacy) {
+      localStorage.setItem(PHARMACY_KEY, pharmacy);
+    }
+    if (response.terminalToken) {
+      localStorage.setItem(TERMINAL_TOKEN_KEY, response.terminalToken);
+    }
+    this.rememberKnownUser(email, response.profile.displayName);
+    return this.accept(response);
   }
 
-  async completeLogin(): Promise<string> {
-    const user = await this.manager.signinRedirectCallback();
-    this.userState.set(user);
-    return typeof user.state === 'string' ? user.state : '/';
+  async loginWithPin(email: string, pin: string, terminalId: string): Promise<Me> {
+    const terminalToken = localStorage.getItem(TERMINAL_TOKEN_KEY);
+    if (!terminalToken) {
+      throw new Error('Ce poste doit être ouvert avec un mot de passe');
+    }
+    const response = await firstValueFrom(
+      this.http.post<TokenResponse>(`${this.env.apiUrl}/auth/pin`, {
+        terminalToken,
+        email,
+        pin,
+        terminalId,
+      }),
+    );
+    return this.accept(response);
   }
 
-  /** Called by the HTTP layer on 401: tries a silent refresh before giving up. */
-  async refresh(): Promise<string | null> {
+  /** Called by the HTTP layer on 401 and at startup; concurrent callers share one refresh. */
+  refresh(): Promise<string | null> {
+    if (this.realmState() === 'platform') {
+      return this.refreshPlatform();
+    }
+    this.refreshing ??= this.doRefresh().finally(() => (this.refreshing = null));
+    return this.refreshing;
+  }
+
+  async logout(): Promise<void> {
+    if (this.realmState() === 'platform') {
+      await this.manager().signoutRedirect();
+      return;
+    }
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    sessionStorage.removeItem(ACCESS_KEY);
+    this.accessState.set(null);
+    this.permissions.clear();
+    if (refreshToken) {
+      try {
+        await firstValueFrom(this.http.post(`${this.env.apiUrl}/auth/logout`, { refreshToken }));
+      } catch {
+        // Offline: the server session expires by itself.
+      }
+    }
+  }
+
+  /** Staff who signed in on this terminal, offered for PIN switching. */
+  knownUsers(): { email: string; name: string }[] {
     try {
-      const user = await this.manager.signinSilent();
-      this.userState.set(user);
+      return JSON.parse(localStorage.getItem('pharmacore.knownUsers') ?? '[]') as {
+        email: string;
+        name: string;
+      }[];
+    } catch {
+      return [];
+    }
+  }
+
+  lastPharmacy(): string | null {
+    return localStorage.getItem(PHARMACY_KEY);
+  }
+
+  passwordChanged(): void {
+    this.mustChange.set(false);
+  }
+
+  // ------------------------------------------------------------------ platform console (OIDC)
+
+  async loginPlatform(returnUrl = '/platform'): Promise<void> {
+    sessionStorage.setItem(REALM_KEY, 'platform');
+    this.realmState.set('platform');
+    await this.manager().signinRedirect({ state: returnUrl });
+  }
+
+  async completePlatformLogin(): Promise<string> {
+    const user = await this.manager().signinRedirectCallback();
+    this.platformUser.set(user);
+    return typeof user.state === 'string' ? user.state : '/platform';
+  }
+
+  // ------------------------------------------------------------------ internals
+
+  private accept(response: TokenResponse): Me {
+    sessionStorage.setItem(REALM_KEY, 'pharmacy');
+    this.realmState.set('pharmacy');
+    sessionStorage.setItem(ACCESS_KEY, response.accessToken);
+    localStorage.setItem(REFRESH_KEY, response.refreshToken);
+    this.accessState.set(response.accessToken);
+    this.mustChange.set(response.mustChangePassword);
+    this.permissions.setProfile(response.profile);
+    return response.profile;
+  }
+
+  private async doRefresh(): Promise<string | null> {
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (!refreshToken) {
+      return null;
+    }
+    try {
+      const response = await firstValueFrom(
+        this.http.post<TokenResponse>(`${this.env.apiUrl}/auth/refresh`, { refreshToken }),
+      );
+      this.accept(response);
+      return response.accessToken;
+    } catch (error) {
+      if ((error as { status?: number }).status === 422) {
+        localStorage.removeItem(REFRESH_KEY);
+      }
+      return null;
+    }
+  }
+
+  private async refreshPlatform(): Promise<string | null> {
+    try {
+      const user = await this.manager().signinSilent();
+      this.platformUser.set(user);
       return user?.access_token ?? null;
     } catch {
       return null;
     }
   }
 
-  async logout(): Promise<void> {
-    await this.manager.signoutRedirect();
+  private rememberKnownUser(email: string, name: string): void {
+    const users = this.knownUsers().filter((u) => u.email !== email);
+    users.unshift({ email, name });
+    localStorage.setItem('pharmacore.knownUsers', JSON.stringify(users.slice(0, 8)));
   }
 
-  private createManager(realm: Realm): UserManager {
-    const config = this.env.oidc[realm];
-    const manager = new UserManager({
-      authority: config.authority,
-      client_id: config.clientId,
-      redirect_uri: `${location.origin}/auth/callback`,
-      post_logout_redirect_uri: location.origin,
-      response_type: 'code',
-      scope: this.env.oidc.scope,
-      automaticSilentRenew: true,
-      userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    });
-    manager.events.addUserLoaded((user) => this.userState.set(user));
-    manager.events.addUserUnloaded(() => this.userState.set(null));
-    return manager;
+  private manager(): UserManager {
+    if (!this.platformManager) {
+      const config = this.env.oidc.platform;
+      this.platformManager = new UserManager({
+        authority: config.authority,
+        client_id: config.clientId,
+        redirect_uri: `${location.origin}/auth/callback`,
+        post_logout_redirect_uri: location.origin,
+        response_type: 'code',
+        scope: this.env.oidc.scope,
+        automaticSilentRenew: true,
+        userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+      });
+      this.platformManager.events.addUserLoaded((user) => this.platformUser.set(user));
+      this.platformManager.events.addUserUnloaded(() => this.platformUser.set(null));
+    }
+    return this.platformManager;
   }
 }
 

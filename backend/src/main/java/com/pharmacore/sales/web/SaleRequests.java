@@ -26,16 +26,17 @@ final class SaleRequests {
                        @NotBlank @Size(max = 40) String ticketNumber,
                        @NotNull Instant occurredAt,
                        UUID cashierUserId,
+                       UUID customerId,
                        @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines,
                        @NotNull @Size(max = 10) List<@Valid PaymentRequest> payments,
                        @Valid PrescriptionRequest prescription) {
 
         SaleDraft toDraft(SaleOrigin origin) {
-            return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId,
+            return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId,
                     lines.stream().map(line -> new SaleDraft.Line(line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents())).toList(),
                     payments.stream().map(payment -> new SaleDraft.Payment(payment.method(), payment.amountCents(),
-                            payment.thirdPartyCode(), payment.reference())).toList(),
+                            payment.thirdPartyCode(), payment.reference(), payment.provider())).toList(),
                     prescription == null ? null : new SaleDraft.Prescription(prescription.prescriberName(),
                             prescription.prescriberRpps(), prescription.patientReference()));
         }
@@ -50,7 +51,8 @@ final class SaleRequests {
     record PaymentRequest(@NotNull PaymentMethod method,
                           @Positive long amountCents,
                           @Size(max = 20) String thirdPartyCode,
-                          @Size(max = 64) String reference) {
+                          @Size(max = 64) String reference,
+                          @Size(max = 30) String provider) {
     }
 
     record PrescriptionRequest(@Size(max = 150) String prescriberName,
@@ -67,6 +69,6 @@ final class SaleRequests {
                             Instant lastSyncAt) {
     }
 
-    record ReasonRequest(@NotBlank @Size(max = 255) String reason) {
+    record ReasonRequest(@NotBlank @Size(max = 255) String reason, @Size(max = 40) String terminalId) {
     }
 }

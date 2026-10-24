@@ -6,7 +6,7 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
-import { APP_ENVIRONMENT } from '../../core/config';
+import { NodeInfoService } from '../../core/api/node-info.service';
 import { CatalogSyncService } from '../../core/offline/catalog-sync.service';
 import { CachedProduct } from '../../core/offline/pos-database';
 import { StompService } from '../../core/realtime/stomp.service';
@@ -189,7 +189,7 @@ const LEVEL_LABEL = {
 })
 export class NetworkPage {
   private readonly http = inject(HttpClient);
-  private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/network`;
+  private readonly api = `${inject(NodeInfoService).networkApiUrl()}/v1/network`;
   private readonly catalog = inject(CatalogSyncService);
   private readonly auth = inject(AuthService);
 

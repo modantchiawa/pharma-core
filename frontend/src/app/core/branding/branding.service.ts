@@ -4,6 +4,7 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { Branding, BrandingView } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
+import { CurrencyService } from '../ui/currency.service';
 import { isHexColor, readableTextOn } from '../util/color';
 
 const CACHE_KEY = 'pharmacore.branding';
@@ -37,6 +38,7 @@ export class BrandingService {
   private readonly http = inject(HttpClient);
   private readonly env = inject(APP_ENVIRONMENT);
   private readonly document = inject(DOCUMENT);
+  private readonly currency = inject(CurrencyService);
   private readonly state = signal<Branding>(readCache() ?? DEFAULT_BRANDING);
   private readonly preview = signal<Partial<Branding> | null>(null);
   private readonly logo = signal<string | null>(null);
@@ -121,6 +123,7 @@ export class BrandingService {
   }
 
   private apply(view: BrandingView): void {
+    this.currency.set(view.currency);
     this.state.set(view.branding);
     localStorage.setItem(CACHE_KEY, JSON.stringify(view.branding));
     if (view.hasLogo) {

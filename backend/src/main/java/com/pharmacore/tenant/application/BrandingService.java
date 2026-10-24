@@ -12,6 +12,7 @@ import com.pharmacore.tenant.persistence.PharmacyConfigEntity.Branding;
 import com.pharmacore.tenant.persistence.PharmacyConfigRepository;
 import com.pharmacore.tenant.persistence.TenantAssetEntity;
 import com.pharmacore.tenant.persistence.TenantAssetRepository;
+import com.pharmacore.tenant.persistence.TenantRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -34,6 +35,7 @@ public class BrandingService {
     static final int MAX_LOGO_BYTES = 512 * 1024;
 
     private final PharmacyConfigRepository configs;
+    private final TenantRepository tenants;
     private final TenantAssetRepository assets;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
@@ -41,7 +43,9 @@ public class BrandingService {
     private final Clock clock;
 
     public BrandingService(PharmacyConfigRepository configs, TenantAssetRepository assets, AuditTrail audit,
-                           JdbcClient jdbc, PlatformTransactionManager transactionManager, Clock clock) {
+                           JdbcClient jdbc, PlatformTransactionManager transactionManager, Clock clock,
+                           TenantRepository tenants) {
+        this.tenants = tenants;
         this.configs = configs;
         this.assets = assets;
         this.audit = audit;
@@ -53,7 +57,7 @@ public class BrandingService {
 
     @Transactional(readOnly = true)
     public BrandingView current() {
-        return BrandingView.of(load());
+        return view(load());
     }
 
     @Transactional
@@ -65,7 +69,7 @@ public class BrandingService {
                 "displayName", branding.displayName(),
                 "legalIdentifierChanged", String.valueOf(!java.util.Objects.equals(before.legalIdentifier(), branding.legalIdentifier())),
                 "ordonnancierPrefix", String.valueOf(branding.ordonnancierPrefix())));
-        return BrandingView.of(config);
+        return view(config);
     }
 
     @Transactional
@@ -76,7 +80,7 @@ public class BrandingService {
         config.useLogo(asset.id(), clock.instant());
         audit.record("LOGO_REPLACED", "PHARMACY_CONFIG", config.tenantId(), Map.of(
                 "assetId", asset.id().toString(), "sha256", asset.sha256()));
-        return BrandingView.of(config);
+        return view(config);
     }
 
     @Transactional(readOnly = true)
@@ -88,7 +92,7 @@ public class BrandingService {
 
     /** Unauthenticated access by slug (login screen, customer display). */
     public Optional<BrandingView> publicBranding(String slug) {
-        return resolveActiveTenant(slug).flatMap(tenant -> asPublicReader(tenant, () -> configs.findCurrent().map(BrandingView::of)));
+        return resolveActiveTenant(slug).flatMap(tenant -> asPublicReader(tenant, () -> configs.findCurrent().map(this::view)));
     }
 
     public Optional<Logo> publicLogo(String slug) {
@@ -145,10 +149,11 @@ public class BrandingService {
     public record Logo(String contentType, byte[] content, String sha256) {
     }
 
-    public record BrandingView(Branding branding, boolean hasLogo, long version) {
+    public record BrandingView(Branding branding, boolean hasLogo, long version, String currency) {
+    }
 
-        static BrandingView of(PharmacyConfigEntity config) {
-            return new BrandingView(config.branding(), config.logoAssetId() != null, config.version());
-        }
+    private BrandingView view(PharmacyConfigEntity config) {
+        String currency = tenants.findById(config.tenantId()).map(t -> t.currency()).orElse("XOF");
+        return new BrandingView(config.branding(), config.logoAssetId() != null, config.version(), currency);
     }
 }

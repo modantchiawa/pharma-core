@@ -16,6 +16,8 @@ import com.pharmacore.tenant.persistence.PharmacyConfigRepository;
 import com.pharmacore.tenant.persistence.TenantEntity;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import com.pharmacore.tenant.persistence.TenantStatus;
+import com.pharmacore.tenant.persistence.TenantTopology;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
@@ -44,11 +46,13 @@ public class TenantProvisioningService {
     private final TenantUserLoader actorCache;
     private final TransactionTemplate tx;
     private final Clock clock;
+    private final JdbcClient jdbc;
 
     public TenantProvisioningService(TenantRepository tenants, PharmacyConfigRepository configs,
                                      RoleManagementService roles, UserManagementService users, AuditTrail audit,
                                      TenantUserLoader actorCache, PlatformTransactionManager transactionManager,
-                                     Clock clock) {
+                                     JdbcClient jdbc, Clock clock) {
+        this.jdbc = jdbc;
         this.tenants = tenants;
         this.configs = configs;
         this.roles = roles;
@@ -83,15 +87,17 @@ public class TenantProvisioningService {
         var tenantContext = new RequestContext(platformContext.correlationId(),
                 Actor.SystemProcess.forTenant("provisioning:" + platformContext.actor().auditId(), tenant));
 
-        TenantContext.run(tenantContext, () -> tx.executeWithoutResult(status -> {
+        String temporaryPassword = TenantContext.call(tenantContext, () -> tx.execute(status -> {
             if (configs.findCurrent().isPresent()) {
-                return;
+                return null;
             }
             configs.save(new PharmacyConfigEntity(displayName, countryCode, clock.instant()));
             var seeded = roles.seedPredefinedRoles();
-            users.register(owner.externalSubject(), owner.email(), owner.displayName(),
+            var registration = users.register(owner.email(), owner.displayName(),
                     Set.of(seeded.get(PredefinedRole.TITULAIRE).id()));
+            jdbc.sql("SELECT accounting_seed_chart(:tenant)").param("tenant", tenantId).query(Integer.class).single();
             audit.record("TENANT_PROVISIONED", "TENANT", tenantId, Map.of("owner", owner.email()));
+            return registration.temporaryPassword();
         }));
 
         return tx.execute(status -> {
@@ -100,7 +106,7 @@ public class TenantProvisioningService {
                 entity.changeStatus(TenantStatus.ACTIVE, clock.instant());
                 audit.record("TENANT_ACTIVATED", "TENANT", tenantId, Map.of());
             }
-            return TenantSummary.of(entity);
+            return TenantSummary.of(entity, temporaryPassword);
         });
     }
 
@@ -129,7 +135,7 @@ public class TenantProvisioningService {
         return summary;
     }
 
-    public record Owner(String externalSubject, String email, String displayName) {
+    public record Owner(String email, String displayName) {
     }
 
     public record NewPharmacy(String slug,
@@ -143,12 +149,17 @@ public class TenantProvisioningService {
                               Owner owner) {
     }
 
+    /** @param ownerTemporaryPassword only set by the provisioning call that created the owner account */
     public record TenantSummary(UUID id, String slug, String legalName, TenantStatus status, String subscriptionPlan,
-                                Instant subscriptionExpiresAt) {
+                                Instant subscriptionExpiresAt, TenantTopology topology, String ownerTemporaryPassword) {
 
         static TenantSummary of(TenantEntity tenant) {
+            return of(tenant, null);
+        }
+
+        static TenantSummary of(TenantEntity tenant, String ownerTemporaryPassword) {
             return new TenantSummary(tenant.id(), tenant.slug(), tenant.legalName(), tenant.status(),
-                    tenant.subscriptionPlan(), tenant.subscriptionExpiresAt());
+                    tenant.subscriptionPlan(), tenant.subscriptionExpiresAt(), tenant.topology(), ownerTemporaryPassword);
         }
     }
 }

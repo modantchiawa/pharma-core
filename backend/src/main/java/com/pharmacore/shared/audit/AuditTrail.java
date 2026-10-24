@@ -3,6 +3,7 @@ package com.pharmacore.shared.audit;
 import com.pharmacore.shared.context.RequestContext;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.context.TenantId;
+import com.pharmacore.shared.runtime.NodeProperties;
 import java.time.Clock;
 import java.util.Map;
 import java.util.UUID;
@@ -21,10 +22,12 @@ public class AuditTrail {
 
     private final JdbcClient jdbc;
     private final Clock clock;
+    private final NodeProperties node;
 
-    public AuditTrail(JdbcClient jdbc, Clock clock) {
+    public AuditTrail(JdbcClient jdbc, Clock clock, NodeProperties node) {
         this.jdbc = jdbc;
         this.clock = clock;
+        this.node = node;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -35,15 +38,17 @@ public class AuditTrail {
 
         // Serializes writers of the same chain without blocking other tenants.
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:tenant, 7341))")
-                .param("tenant", tenant.toString())
+                .param("tenant", tenant + ":" + node.mode().name())
                 .query((RowCallbackHandler) rs -> { });
 
+        String origin = node.mode().name();
         var previous = jdbc.sql("""
                         SELECT sequence_no, hash FROM audit_event
-                        WHERE tenant_id = :tenant
+                        WHERE tenant_id = :tenant AND origin = :origin
                         ORDER BY sequence_no DESC
                         LIMIT 1""")
                 .param("tenant", tenant)
+                .param("origin", origin)
                 .query((rs, rowNum) -> new ChainHead(rs.getLong("sequence_no"), rs.getString("hash")))
                 .optional()
                 .orElse(new ChainHead(0L, AuditHashing.GENESIS));
@@ -59,11 +64,12 @@ public class AuditTrail {
                 actor.auditId(), action, resourceType, rid, canonical, context.correlationId(), previous.hash(), hash);
 
         jdbc.sql("""
-                        INSERT INTO audit_event (id, tenant_id, sequence_no, occurred_at, actor_type, actor_id, action,
+                        INSERT INTO audit_event (id, tenant_id, origin, sequence_no, occurred_at, actor_type, actor_id, action,
                                                  resource_type, resource_id, details, correlation_id, previous_hash, hash)
-                        VALUES (:id, :tenant, :seq, :occurredAt, :actorType, :actorId, :action,
+                        VALUES (:id, :tenant, :origin, :seq, :occurredAt, :actorType, :actorId, :action,
                                 :resourceType, :resourceId, :details, :correlationId, :previousHash, :hash)""")
                 .param("id", record.id())
+                .param("origin", origin)
                 .param("tenant", tenant)
                 .param("seq", sequence)
                 .param("occurredAt", java.sql.Timestamp.from(occurredAt))

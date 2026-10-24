@@ -24,6 +24,7 @@ import org.springframework.stereotype.Component;
 public class BearerTokenAuthenticator implements AuthenticationManager {
 
     public static final String PLATFORM_ADMIN_AUTHORITY = "ROLE_PLATFORM_ADMIN";
+    public static final String HUB_NODE_AUTHORITY = "ROLE_HUB_NODE";
 
     private final TrustedIssuerRegistry issuers;
     private final ActorResolver actors;
@@ -42,7 +43,8 @@ public class BearerTokenAuthenticator implements AuthenticationManager {
     }
 
     public PharmacyAuthenticationToken authenticate(String token) {
-        var trusted = issuers.find(unverifiedIssuer(token))
+        var header = unverifiedHeader(token);
+        var trusted = issuers.find(header.issuer(), header.kid())
                 .orElseThrow(() -> new InvalidBearerTokenException("Untrusted token issuer"));
         Jwt jwt;
         try {
@@ -62,16 +64,22 @@ public class BearerTokenAuthenticator implements AuthenticationManager {
                 user.roles().forEach(role -> authorities.add(new SimpleGrantedAuthority("ROLE_" + role)));
             }
             case Actor.PlatformOperator _ -> authorities.add(new SimpleGrantedAuthority(PLATFORM_ADMIN_AUTHORITY));
+            case Actor.HubNode _ -> authorities.add(new SimpleGrantedAuthority(HUB_NODE_AUTHORITY));
             case Actor.SystemProcess _ -> throw new InvalidBearerTokenException("System actors cannot hold tokens");
         }
         return authorities;
     }
 
-    private static String unverifiedIssuer(String token) {
+    private static UnverifiedHeader unverifiedHeader(String token) {
         try {
-            return JWTParser.parse(token).getJWTClaimsSet().getIssuer();
+            var jwt = JWTParser.parse(token);
+            String kid = jwt.getHeader() instanceof com.nimbusds.jose.JWSHeader jws ? jws.getKeyID() : null;
+            return new UnverifiedHeader(jwt.getJWTClaimsSet().getIssuer(), kid);
         } catch (ParseException e) {
             throw new InvalidBearerTokenException("Malformed token", e);
         }
+    }
+
+    private record UnverifiedHeader(String issuer, String kid) {
     }
 }

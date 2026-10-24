@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { DrugListing, PaymentMethod, PrescriptionRequest } from '../../core/api/models';
+import { Customer, DrugListing, PaymentMethod, PrescriptionRequest } from '../../core/api/models';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CachedProduct } from '../../core/offline/pos-database';
 
@@ -19,6 +19,7 @@ export interface CartPayment {
   method: PaymentMethod;
   amountCents: number;
   thirdPartyCode?: string;
+  provider?: string;
 }
 
 const DISPENSING_PERMISSION: Record<DrugListing, string | null> = {
@@ -40,6 +41,7 @@ export class CartStore {
   readonly lines = signal<CartLine[]>([]);
   readonly payments = signal<CartPayment[]>([]);
   readonly prescription = signal<PrescriptionRequest | null>(null);
+  readonly customer = signal<Customer | null>(null);
 
   readonly grossCents = computed(() =>
     this.lines().reduce((sum, l) => sum + l.unitPriceCents * l.quantity, 0),
@@ -56,6 +58,11 @@ export class CartStore {
       .reduce((sum, p) => sum + p.amountCents, 0);
     return Math.min(Math.max(this.paidCents() - this.netCents(), 0), cash);
   });
+  readonly creditCents = computed(() =>
+    this.payments()
+      .filter((p) => p.method === 'CREDIT')
+      .reduce((sum, p) => sum + p.amountCents, 0),
+  );
   readonly itemCount = computed(() => this.lines().reduce((sum, l) => sum + l.quantity, 0));
   readonly requiresPrescription = computed(() => this.lines().some((l) => l.listing !== 'NONE'));
 
@@ -92,6 +99,17 @@ export class CartStore {
     }
     if (this.lines().length > 0 && this.paidCents() < this.netCents()) {
       issues.push('Règlement incomplet');
+    }
+    const credit = this.creditCents();
+    if (credit > 0) {
+      const customer = this.customer();
+      if (!customer) {
+        issues.push('Vente à crédit : choisissez un client');
+      } else if (!this.permissions.has('CREDIT_SALE')) {
+        issues.push('Vous ne pouvez pas vendre à crédit');
+      } else if (credit > customer.availableCreditCents) {
+        issues.push(`Crédit disponible dépassé pour ${customer.displayName}`);
+      }
     }
     return issues;
   });
@@ -196,6 +214,7 @@ export class CartStore {
     this.lines.set([]);
     this.payments.set([]);
     this.prescription.set(null);
+    this.customer.set(null);
   }
 }
 

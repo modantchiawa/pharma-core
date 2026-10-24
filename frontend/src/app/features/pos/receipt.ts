@@ -25,6 +25,8 @@ const PAYMENT_LABELS: Record<string, string> = {
   CHECK: 'Chèque',
   THIRD_PARTY_PAYER: 'Tiers payant',
   VOUCHER: 'Avoir',
+  MOBILE_MONEY: 'Mobile money',
+  CREDIT: 'Crédit client',
 };
 
 /** 80 mm thermal ticket carrying the pharmacy's own identity and legal mentions. */

@@ -47,6 +47,9 @@ public final class SaleRules {
         if (draft.paidCents() != draft.netCents()) {
             anomalies.add(SaleAnomaly.PAYMENT_MISMATCH);
         }
+        if (draft.onCredit() && (draft.customerId() == null || !seller.can("CREDIT_SALE"))) {
+            anomalies.add(SaleAnomaly.CREDIT_NOT_ALLOWED);
+        }
         if (draft.occurredAt().isAfter(now.plus(CLOCK_TOLERANCE))) {
             anomalies.add(SaleAnomaly.FUTURE_TIMESTAMP);
         }

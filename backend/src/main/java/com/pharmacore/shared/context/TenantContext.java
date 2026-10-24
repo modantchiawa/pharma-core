@@ -43,6 +43,8 @@ public final class TenantContext {
             case Actor.TenantUser user -> user;
             case Actor.PlatformOperator operator ->
                     throw new MissingTenantContextException("Platform operator " + operator.subject() + " is not a pharmacy user");
+            case Actor.HubNode hub ->
+                    throw new MissingTenantContextException("Hub node " + hub.nodeId() + " is not a pharmacy user");
             case Actor.SystemProcess system ->
                     throw new MissingTenantContextException("System process " + system.process() + " is not a pharmacy user");
         };

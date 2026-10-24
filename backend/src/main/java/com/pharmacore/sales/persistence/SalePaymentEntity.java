@@ -34,15 +34,32 @@ public class SalePaymentEntity {
     @Column(length = 64, updatable = false)
     private String reference;
 
+    @Column(length = 30, updatable = false)
+    private String provider;
+
+    @Column(name = "customer_id", updatable = false)
+    private UUID customerId;
+
     protected SalePaymentEntity() {
     }
 
-    public SalePaymentEntity(PaymentMethod method, long amountCents, String thirdPartyCode, String reference) {
+    public SalePaymentEntity(PaymentMethod method, long amountCents, String thirdPartyCode, String reference,
+                             String provider, UUID customerId) {
         this.id = UUID.randomUUID();
         this.method = method;
         this.amountCents = amountCents;
         this.thirdPartyCode = thirdPartyCode;
         this.reference = reference;
+        this.provider = provider;
+        this.customerId = customerId;
+    }
+
+    public String provider() {
+        return provider;
+    }
+
+    public UUID customerId() {
+        return customerId;
     }
 
     public PaymentMethod method() {

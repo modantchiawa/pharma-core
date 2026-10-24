@@ -97,7 +97,7 @@ class SaleController {
     @PostMapping("/api/v1/sales/{saleId}/cancellation")
     @PreAuthorize("hasAuthority('SALE_CANCEL')")
     SaleSummary cancel(@PathVariable UUID saleId, @Valid @RequestBody ReasonRequest request) {
-        return SaleSummary.of(management.cancel(saleId, request.reason()));
+        return SaleSummary.of(management.cancel(saleId, request.reason(), request.terminalId()));
     }
 
     @GetMapping("/api/v1/sales/review-queue")
@@ -136,12 +136,14 @@ class SaleController {
 
     record SaleSummary(UUID id, UUID clientSaleId, String ticketNumber, String terminalId, SaleOrigin origin,
                        SaleEntity.Status status, Instant occurredAt, long totalNetCents, boolean reviewRequired,
-                       Set<SaleAnomaly> anomalies, Long ordonnancierNumber) {
+                       Set<SaleAnomaly> anomalies, Long ordonnancierNumber, UUID customerId,
+                       String certificationStatus, String certificationCode, String certificationQr) {
 
         static SaleSummary of(SaleEntity sale) {
             return new SaleSummary(sale.id(), sale.clientSaleId(), sale.ticketNumber(), sale.terminalId(),
                     sale.origin(), sale.status(), sale.occurredAt(), sale.totalNetCents(), sale.reviewRequired(),
-                    sale.anomalies(), sale.ordonnancierNumber());
+                    sale.anomalies(), sale.ordonnancierNumber(), sale.customerId(),
+                    sale.certificationStatus().name(), sale.certificationCode(), sale.certificationQr());
         }
     }
 
@@ -153,7 +155,7 @@ class SaleController {
                     sale.lines().stream().map(line -> new Line(line.lineNo(), line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate())).toList(),
                     sale.payments().stream().map(payment -> new Payment(payment.method().name(),
-                            payment.amountCents(), payment.thirdPartyCode())).toList(),
+                            payment.amountCents(), payment.thirdPartyCode(), payment.provider())).toList(),
                     sale.cancelReason());
         }
     }
@@ -162,6 +164,6 @@ class SaleController {
                 BigDecimal vatRate) {
     }
 
-    record Payment(String method, long amountCents, String thirdPartyCode) {
+    record Payment(String method, long amountCents, String thirdPartyCode, String provider) {
     }
 }

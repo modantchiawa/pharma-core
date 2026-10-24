@@ -15,18 +15,19 @@ public enum PredefinedRole {
     TITULAIRE("Pharmacien titulaire", new BigDecimal("100"), EnumSet.allOf(Permission.class)),
 
     ADJOINT("Pharmacien adjoint", new BigDecimal("30"), EnumSet.complementOf(EnumSet.of(
-            ROLE_MANAGE, USER_MANAGE, CONFIG_BRANDING_MANAGE))),
+            ROLE_MANAGE, USER_MANAGE, CONFIG_BRANDING_MANAGE, ACCOUNTING_MANAGE, HUB_ADMIN))),
 
     PREPARATEUR("Préparateur", new BigDecimal("5"), EnumSet.of(
             SALE_CREATE, SALE_VIEW, PRESCRIPTION_DISPENSE, STOCK_VIEW, STOCK_RECEIVE,
-            NETWORK_STOCK_QUERY, NETWORK_CHAT, GUARD_VIEW)),
+            NETWORK_STOCK_QUERY, NETWORK_CHAT, GUARD_VIEW, CASH_SESSION_MANAGE, CUSTOMER_MANAGE)),
 
     CAISSIER("Caissier / Vendeur", new BigDecimal("2"), EnumSet.of(
-            SALE_CREATE, SALE_VIEW, STOCK_VIEW, GUARD_VIEW)),
+            SALE_CREATE, SALE_VIEW, STOCK_VIEW, GUARD_VIEW, CASH_SESSION_MANAGE, CUSTOMER_MANAGE)),
 
     GESTIONNAIRE_STOCK("Gestionnaire de stock", BigDecimal.ZERO, EnumSet.of(
             STOCK_VIEW, STOCK_RECEIVE, STOCK_ADJUST, STOCK_PRICE_MANAGE, NETWORK_STOCK_QUERY,
-            NETWORK_TRANSFER_REQUEST, NETWORK_TRANSFER_RESPOND, GUARD_VIEW, REPORT_VIEW));
+            NETWORK_TRANSFER_REQUEST, NETWORK_TRANSFER_RESPOND, GUARD_VIEW, REPORT_VIEW,
+            PROCUREMENT_VIEW, PROCUREMENT_MANAGE));
 
     private final String label;
     private final BigDecimal maxDiscountPercent;

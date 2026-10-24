@@ -43,6 +43,24 @@ public class AppUserEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "password_hash", length = 100)
+    private String passwordHash;
+
+    @Column(name = "pin_hash", length = 100)
+    private String pinHash;
+
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
+    @Column(name = "failed_attempts", nullable = false)
+    private short failedAttempts;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(name = "password_changed_at")
+    private Instant passwordChangedAt;
+
     @ManyToMany
     @JoinTable(name = "user_role",
             joinColumns = @JoinColumn(name = "user_id"),
@@ -55,13 +73,61 @@ public class AppUserEntity {
     protected AppUserEntity() {
     }
 
-    public AppUserEntity(String externalSubject, String email, String displayName, Instant createdAt) {
-        this.id = UUID.randomUUID();
+    public AppUserEntity(UUID id, String externalSubject, String email, String displayName, Instant createdAt) {
+        this.id = id;
         this.externalSubject = externalSubject;
         this.email = email;
         this.displayName = displayName;
         this.active = true;
         this.createdAt = createdAt;
+        this.mustChangePassword = true;
+    }
+
+    /** Credentials are stored hashed; a temporary password forces a change at first login. */
+    public void setPassword(String passwordHash, boolean temporary, Instant now) {
+        this.passwordHash = passwordHash;
+        this.mustChangePassword = temporary;
+        this.passwordChangedAt = now;
+        this.failedAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    public void setPin(String pinHash) {
+        this.pinHash = pinHash;
+    }
+
+    public boolean isLocked(Instant now) {
+        return lockedUntil != null && lockedUntil.isAfter(now);
+    }
+
+    /** Counts a failed attempt; locks the account for {@code lockFor} after {@code maxAttempts}. */
+    public void recordFailure(int maxAttempts, java.time.Duration lockFor, Instant now) {
+        this.failedAttempts++;
+        if (this.failedAttempts >= maxAttempts) {
+            this.lockedUntil = now.plus(lockFor);
+            this.failedAttempts = 0;
+        }
+    }
+
+    public void recordSuccess() {
+        this.failedAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    public String passwordHash() {
+        return passwordHash;
+    }
+
+    public String pinHash() {
+        return pinHash;
+    }
+
+    public boolean mustChangePassword() {
+        return mustChangePassword;
+    }
+
+    public Instant lockedUntil() {
+        return lockedUntil;
     }
 
     public void assignRoles(Set<RoleEntity> newRoles) {

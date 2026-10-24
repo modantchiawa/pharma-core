@@ -18,8 +18,12 @@ public record SecurityProperties(List<Issuer> issuers, List<String> allowedOrigi
     }
 
     public enum IssuerKind {
+        /** OpenID Connect realm of the software editor (Super-Admin). */
         PLATFORM,
-        TENANT
+        /** Optional OpenID Connect realm for pharmacies that federate their staff identities. */
+        TENANT,
+        /** Tokens signed by a PharmaCore node (hub or cloud) with a key registered in signing_key. */
+        INTERNAL
     }
 
     public record Issuer(URI uri, IssuerKind kind, String audience) {

@@ -1,5 +1,6 @@
 package com.pharmacore.identity.web;
 
+import com.pharmacore.identity.application.LocalAuthService;
 import com.pharmacore.identity.application.RoleManagementService;
 import com.pharmacore.identity.application.RoleManagementService.RoleCommand;
 import com.pharmacore.identity.application.RoleManagementService.RoleView;
@@ -19,6 +20,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -39,10 +41,12 @@ class IdentityController {
 
     private final RoleManagementService roles;
     private final UserManagementService users;
+    private final LocalAuthService auth;
 
-    IdentityController(RoleManagementService roles, UserManagementService users) {
+    IdentityController(RoleManagementService roles, UserManagementService users, LocalAuthService auth) {
         this.roles = roles;
         this.users = users;
+        this.auth = auth;
     }
 
     /** Profile of the signed-in user, used by the front-end to drive menus and permission directives. */
@@ -94,8 +98,26 @@ class IdentityController {
     @PostMapping("/users")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAuthority('USER_MANAGE')")
-    UserView registerUser(@Valid @RequestBody UserRequest request) {
-        return users.register(request.externalSubject(), request.email(), request.displayName(), request.roleIds());
+    UserManagementService.Registration registerUser(@Valid @RequestBody UserRequest request) {
+        return users.register(request.email(), request.displayName(), request.roleIds());
+    }
+
+    @PostMapping("/users/{userId}/password-reset")
+    @PreAuthorize("hasAuthority('USER_MANAGE')")
+    Map<String, String> resetPassword(@PathVariable UUID userId) {
+        return Map.of("temporaryPassword", auth.resetPassword(userId));
+    }
+
+    @PutMapping("/me/password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void changePassword(@Valid @RequestBody PasswordChangeRequest request) {
+        auth.changePassword(request.currentPassword(), request.newPassword());
+    }
+
+    @PutMapping("/me/pin")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void setPin(@Valid @RequestBody PinRequest request) {
+        auth.setPin(request.password(), request.pin());
     }
 
     @PutMapping("/users/{userId}/roles")
@@ -124,8 +146,13 @@ class IdentityController {
         }
     }
 
-    record UserRequest(@NotBlank @Size(max = 255) String externalSubject,
-                       @NotBlank @Email String email,
+    record PasswordChangeRequest(@NotBlank String currentPassword, @NotBlank String newPassword) {
+    }
+
+    record PinRequest(@NotBlank String password, @NotBlank String pin) {
+    }
+
+    record UserRequest(@NotBlank @Email String email,
                        @NotBlank @Size(max = 150) String displayName,
                        @NotEmpty Set<UUID> roleIds) {
     }
