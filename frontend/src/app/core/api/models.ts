@@ -319,6 +319,7 @@ export interface Dashboard {
   };
   receivables: { customerCreditCents: number; debtors: number };
   cash: { sessionsClosed: number; differenceCents: number; expensesCents: number };
+}
 
 // ---------------------------------------------------------------- annuaire public et réseau
 
