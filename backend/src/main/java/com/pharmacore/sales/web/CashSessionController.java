@@ -1,10 +1,15 @@
 package com.pharmacore.sales.web;
 
 import com.pharmacore.sales.application.CashSessionService;
+import com.pharmacore.sales.application.CashSessionService.Closing;
+import com.pharmacore.sales.application.CashSessionService.Declared;
 import com.pharmacore.sales.application.CashSessionService.Movement;
 import com.pharmacore.sales.application.CashSessionService.Report;
+import com.pharmacore.sales.domain.Denominations;
+import com.pharmacore.sales.domain.PaymentMethod;
 import com.pharmacore.sales.persistence.CashMovementEntity;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -53,7 +58,25 @@ class CashSessionController {
     @PostMapping("/{sessionId}/closure")
     @PreAuthorize("hasAuthority('CASH_SESSION_MANAGE')")
     Report close(@PathVariable UUID sessionId, @Valid @RequestBody CloseRequest request) {
-        return cash.closeSession(sessionId, request.countedCashCents(), request.notes());
+        return cash.closeSession(sessionId, new Closing(
+                request.denominations() == null ? List.of()
+                        : request.denominations().stream().map(d -> new Denominations.Line(d.value(), d.count())).toList(),
+                request.countedCashCents(),
+                request.declared() == null ? List.of()
+                        : request.declared().stream().map(d -> new Declared(d.method(), d.provider(), d.amountCents())).toList(),
+                request.notes()));
+    }
+
+    @PostMapping("/{sessionId}/approval")
+    @PreAuthorize("hasAuthority('CASH_APPROVE')")
+    Report approve(@PathVariable UUID sessionId, @RequestBody(required = false) ApprovalRequest request) {
+        return cash.approveClosing(sessionId, request == null ? null : request.note());
+    }
+
+    @GetMapping("/pending-approval")
+    @PreAuthorize("hasAuthority('CASH_APPROVE')")
+    List<Report> pendingApproval(@RequestParam(defaultValue = "20") int limit) {
+        return cash.pendingApproval(limit);
     }
 
     @PostMapping("/{sessionId}/movements")
@@ -79,7 +102,20 @@ class CashSessionController {
     record OpenRequest(@NotBlank @Size(max = 40) String terminalId, @PositiveOrZero long openingFloatCents) {
     }
 
-    record CloseRequest(@PositiveOrZero long countedCashCents, @Size(max = 500) String notes) {
+    record DenominationRequest(@Positive long value, @Min(0) int count) {
+    }
+
+    record DeclaredRequest(@NotNull PaymentMethod method, @Size(max = 30) String provider, @PositiveOrZero long amountCents) {
+    }
+
+    /** Either the banknote/coin breakdown or a typed total; declared totals per electronic method. */
+    record CloseRequest(@Size(max = 40) List<@Valid DenominationRequest> denominations,
+                        @PositiveOrZero Long countedCashCents,
+                        @Size(max = 40) List<@Valid DeclaredRequest> declared,
+                        @Size(max = 500) String notes) {
+    }
+
+    record ApprovalRequest(@Size(max = 500) String note) {
     }
 
     record MovementRequest(@NotNull CashMovementEntity.Kind kind,

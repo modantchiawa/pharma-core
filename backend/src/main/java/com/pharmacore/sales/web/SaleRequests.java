@@ -69,6 +69,10 @@ final class SaleRequests {
                             Instant lastSyncAt) {
     }
 
-    record ReasonRequest(@NotBlank @Size(max = 255) String reason, @Size(max = 40) String terminalId) {
+    /** Supervisor credentials are only needed when the operation exceeds the pharmacy's thresholds. */
+    record ReasonRequest(@NotBlank @Size(max = 255) String reason,
+                         @Size(max = 40) String terminalId,
+                         @Size(max = 200) String supervisorEmail,
+                         @Size(max = 12) String supervisorPin) {
     }
 }

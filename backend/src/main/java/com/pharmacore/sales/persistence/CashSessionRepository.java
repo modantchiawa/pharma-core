@@ -14,4 +14,17 @@ public interface CashSessionRepository extends JpaRepository<CashSessionEntity, 
 
     @Query("select s from CashSessionEntity s order by s.openedAt desc")
     List<CashSessionEntity> findRecent(Pageable pageable);
+
+    /** Last Z report of the terminal: the predecessor in the hash chain. */
+    @Query("""
+            select s from CashSessionEntity s
+            where s.terminalId = :terminalId and s.status = com.pharmacore.sales.persistence.CashSessionEntity.Status.CLOSED
+            order by s.closedAt desc""")
+    List<CashSessionEntity> findClosedByTerminal(String terminalId, Pageable pageable);
+
+    @Query("""
+            select s from CashSessionEntity s
+            where s.closingRequiresApproval = true and s.approvedAt is null
+            order by s.closedAt""")
+    List<CashSessionEntity> findPendingApproval(Pageable pageable);
 }

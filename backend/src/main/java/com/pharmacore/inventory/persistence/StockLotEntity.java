@@ -105,4 +105,15 @@ public class StockLotEntity {
     public int quantity() {
         return quantity;
     }
+
+    public long unitCostCents() {
+        return unitCostCents;
+    }
+
+    /** Takes the whole remaining quantity off the shelf (expired lot); returns the units written off. */
+    public int writeOff() {
+        int units = quantity;
+        this.quantity = 0;
+        return units;
+    }
 }

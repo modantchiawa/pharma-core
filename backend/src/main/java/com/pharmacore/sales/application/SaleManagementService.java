@@ -32,10 +32,13 @@ public class SaleManagementService {
     private final CashSessionService cashSessions;
     private final AccountingPoster accounting;
     private final TenantCalendar calendar;
+    private final CashPolicyService policy;
+    private final SupervisorApprovalService approvals;
 
     public SaleManagementService(SaleRepository sales, StockLedger ledger, AuditTrail audit, Clock clock,
                                  CustomerService customers, CashSessionService cashSessions,
-                                 AccountingPoster accounting, TenantCalendar calendar) {
+                                 AccountingPoster accounting, TenantCalendar calendar, CashPolicyService policy,
+                                 SupervisorApprovalService approvals) {
         this.sales = sales;
         this.ledger = ledger;
         this.audit = audit;
@@ -44,6 +47,8 @@ public class SaleManagementService {
         this.cashSessions = cashSessions;
         this.accounting = accounting;
         this.calendar = calendar;
+        this.policy = policy;
+        this.approvals = approvals;
     }
 
     @Transactional(readOnly = true)
@@ -66,15 +71,27 @@ public class SaleManagementService {
     /**
      * Cancels a sale: units go back into the exact lots they came from, the customer's credit is
      * released, the accounting entry is reversed and cash refunded leaves the current drawer.
+     * A cancellation above the pharmacy's threshold, or of a sale whose drawer is already closed,
+     * must be signed by a holder of {@code CASH_APPROVE} (the actor, or a supervisor's PIN).
      */
     @Transactional
-    public SaleEntity cancel(UUID saleId, String reason, String terminalId) {
+    public SaleEntity cancel(UUID saleId, String reason, String terminalId,
+                             SupervisorApprovalService.SupervisorApproval approval) {
         var sale = sales.findWithLines(saleId).orElseThrow(() -> new NotFoundException("Sale", saleId));
         if (sale.status() == SaleEntity.Status.CANCELLED) {
             throw new BusinessRuleException("already-cancelled", "Sale " + sale.ticketNumber() + " is already cancelled");
         }
         UUID userId = TenantContext.requireTenantUser().userId();
         Instant now = clock.instant();
+        long threshold = policy.current().cancelApprovalThresholdCents();
+        boolean aboveThreshold = threshold > 0 && sale.totalNetCents() > threshold;
+        boolean drawerClosed = sale.cashSessionId() != null && cashSessions.isClosed(sale.cashSessionId());
+        UUID approvedBy = null;
+        if (aboveThreshold || drawerClosed) {
+            approvedBy = approvals.require(approval, aboveThreshold ? "SALE_CANCELLATION_ABOVE_THRESHOLD"
+                    : "SALE_CANCELLATION_CLOSED_DRAWER", "SALE", saleId);
+            sale.approve(approvedBy, now);
+        }
         var reference = new StockLedger.Reference("SALE_CANCELLATION", saleId, now, userId);
         for (SaleLineEntity line : sale.lines()) {
             ledger.restore(line.productId(), line.lotAllocations(), line.uncoveredQuantity(), reference);
@@ -94,7 +111,8 @@ public class SaleManagementService {
         audit.record("SALE_CANCELLED", "SALE", saleId, Map.of(
                 "ticket", sale.ticketNumber(),
                 "netCents", Long.toString(sale.totalNetCents()),
-                "reason", reason));
+                "reason", reason,
+                "approvedBy", String.valueOf(approvedBy)));
         return sale;
     }
 

@@ -165,10 +165,11 @@ export interface CashSessionReport {
   cashInCents: number;
   cashOutCents: number;
   expensesCents: number;
-  expectedCashCents: number;
-  countedCashCents: number | null;
-  differenceCents: number | null;
-  notes: string | null;
+  /** Absent on an open session for a cashier without CASH_APPROVE (blind count). */
+  expectedCashCents?: number;
+  countedCashCents?: number | null;
+  differenceCents?: number | null;
+  notes?: string | null;
   movements: {
     id: string;
     kind: string;
@@ -176,6 +177,13 @@ export interface CashSessionReport {
     reason: string;
     occurredAt: string;
   }[];
+  countedBreakdown: DenominationLine[];
+  reconciliation: ReconciliationLine[];
+  approvalStatus: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED';
+  approvedAt?: string | null;
+  approvalNote?: string | null;
+  reportHash?: string | null;
+  previousReportHash?: string | null;
 }
 
 export interface ProposalLine {
@@ -430,4 +438,95 @@ export interface GuardShareText {
   timeZone: string;
   slots: number;
   text: string;
+}
+
+// ---------------------------------------------------------------- fiabilité stock et caisse
+
+export interface StockCountLine {
+  id: string;
+  productId: string;
+  designation: string;
+  cip13: string;
+  ean13: string | null;
+  lotNumber: string;
+  expiryDate: string;
+  /** Hidden from counters (blind count). */
+  expectedQuantity?: number;
+  countedQuantity?: number | null;
+  variance?: number;
+  countedAt?: string | null;
+}
+
+export interface StockCount {
+  id: string;
+  label: string;
+  location?: string | null;
+  status: 'OPEN' | 'VALIDATED' | 'CANCELLED';
+  startedAt: string;
+  validatedAt?: string | null;
+  notes?: string | null;
+  lineCount: number;
+  countedLines: number;
+  varianceUnits?: number;
+  varianceValueCents?: number;
+  lines: StockCountLine[];
+}
+
+export interface StockIntegrityReport {
+  id: string;
+  runAt: string;
+  lotsChecked: number;
+  mismatches: number;
+  details: {
+    kind: 'LOT_QUANTITY' | 'RESERVED_QUANTITY';
+    designation: string;
+    cip13: string;
+    lotNumber: string | null;
+    stored: number;
+    computed: number;
+  }[];
+}
+
+export interface ExpiryWriteOff {
+  lotId: string;
+  productId: string;
+  designation: string;
+  cip13: string;
+  lotNumber: string;
+  expiryDate: string;
+  quantity: number;
+  unitCostCents: number;
+  valueCents: number;
+  writtenOffAt: string;
+}
+
+export interface DenominationLine {
+  valueCents: number;
+  count: number;
+}
+
+export interface ReconciliationLine {
+  method: PaymentMethod;
+  provider: string | null;
+  expectedCents: number;
+  declaredCents: number;
+  differenceCents: number;
+}
+
+export interface CashPolicy {
+  cashDifferenceThresholdCents: number;
+  cancelApprovalThresholdCents: number;
+}
+
+export interface PendingPayment {
+  paymentId: string;
+  saleId: string;
+  ticketNumber: string;
+  occurredAt: string;
+  method: string;
+  provider: string | null;
+  reference: string | null;
+  amountCents: number;
+  status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'NOT_REQUIRED';
+  rejectionReason: string | null;
 }
