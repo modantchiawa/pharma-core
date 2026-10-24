@@ -200,6 +200,15 @@ Le modèle de données complet est dans les migrations `V1`…`V7` (`backend/src
 Migrations `V8`…`V11`. Les tables de v3 suivent `docs/CONVENTIONS.md` : RLS, droits, enregistrement
 dans `sync_table`, clés étrangères différables.
 
+### 4.2 Domaines ajoutés en v4
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Importation de données** | `TabularReaders` (`CsvReader`, `XlsxReader` SpreadsheetML sans dépendance), `ColumnMapping`, `ValueParsers`, `RowLoaders`, `CatalogWriter`, `ImportService`, table `import_job` | Détection du format par le contenu, du jeu de caractères (UTF-8, BOM, Windows-1252) et du séparateur ; en-têtes reconnus par alias normalisés (accents, ponctuation) puis corrigés par l'utilisateur ; aperçu qui exécute chaque ligne et l'annule ; une transaction **par ligne** (une ligne fautive n'annule pas les autres), essai à blanc par rollback ; montants, pourcentages et dates tolérants (« 1 250 », « 09/2027 », numéro de série Excel) ; produit sans code → code interne stable préfixe 200 (GS1 restreint) ; les produits inconnus d'une officine sont créés dans le référentiel par un **processus plateforme en transaction séparée** (la politique RLS réserve l'écriture du catalogue à la plateforme) ; créances clients reprises comme solde d'ouverture audité ; journal `import_job` répliqué vers le cloud |
+| **Impression** | `ReceiptDocument`, `ReceiptLayout`, `EscPosRenderer`, `TextReceiptRenderer`, `PrinterPort` (`NetworkPrinter`, `SharedPrinter`), `PrintSettingsService`, `ReceiptPrintService`, table `terminal_printer` | Réglage par poste (mode navigateur, ESC/POS réseau 9100 ou partage Windows ; papier 58 mm / 80 mm / A4 ; exemplaires, coupe, tiroir, impression automatique) ; rendu ESC/POS en 32 ou 48 colonnes, CP858 avec repli ASCII, QR de certification ; un ticket non encore synchronisé s'imprime depuis le panier (`POST /api/v1/print/tickets`), repli sur l'impression navigateur si l'imprimante ne répond pas ; facture A4 avec montant en lettres ; audit `RECEIPT_PRINTED` |
+
+Migrations `V12` et `V13`.
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste

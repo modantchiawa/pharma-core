@@ -6,7 +6,9 @@ money et crédit client, stocks par lot (FEFO), fiche de commande du lendemain, 
 SYSCOHADA (résultat, bilan), tiers payant avec bordereaux assureurs, registre des ordonnances,
 inventaires à l'aveugle et contrôle d'intégrité, caisse à l'aveugle avec approbations, tableau de
 bord, réseau inter-pharmacies (qui a ce produit ?), annuaire public et pharmacies de garde
-partagées, console de supervision éditeur.
+partagées, impression de tickets 58 mm / 80 mm et factures A4 (navigateur ou ESC/POS direct),
+importation de données depuis un autre logiciel (CSV, Excel) et du référentiel des médicaments,
+console de supervision éditeur.
 
 | Dossier | Contenu |
 |---|---|

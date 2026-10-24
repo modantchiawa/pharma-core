@@ -97,3 +97,28 @@ conservés, Flyway migre la base au démarrage.
 
 Imprimantes thermiques 80 mm USB (pilote Windows générique ou ESC/POS), douchettes USB en
 mode clavier (suffixe Entrée), lecteur de codes-barres 1D/2D pour les CIP13/Datamatrix.
+
+
+## Imprimantes de tickets
+
+Chaque poste choisit son imprimante dans **Imprimantes** (droit `PRINTER_MANAGE`) :
+
+| Situation | Réglage |
+|---|---|
+| Imprimante thermique USB branchée sur le poste, pilote Windows installé | Mode **Navigateur**, papier 58 mm ou 80 mm : le navigateur imprime la page du ticket (choisir l'imprimante thermique par défaut et désactiver les marges) |
+| Imprimante thermique USB sans pilote fiable | Partager l'imprimante dans Windows (Paramètres › Imprimantes › Partager, nom court sans espace), puis mode **ESC/POS partage** avec l'adresse `\\NOM-DU-PC\NomDuPartage` : le serveur local envoie les octets bruts, coupe le papier et ouvre le tiroir |
+| Imprimante thermique réseau (Ethernet, Wi-Fi) | Mode **ESC/POS réseau** avec l'adresse IP (port 9100 par défaut) |
+| Imprimante A4 (laser, jet d'encre) pour les factures | Papier **A4** pour les factures ; le ticket reste sur la thermique |
+
+Le bouton **Imprimer un test** vérifie la liaison. Si l'imprimante ne répond pas pendant une vente,
+le poste bascule automatiquement sur l'impression navigateur : aucune vente n'est bloquée par une
+imprimante.
+
+## Reprise des données d'un autre logiciel
+
+Menu **Import** (droit `DATA_IMPORT`) : exporter depuis l'ancien logiciel en CSV ou Excel les
+produits (avec codes CIP/EAN et prix), le stock (lot, péremption, quantité, prix d'achat), les
+clients (avec le solde dû) et les fournisseurs ; charger chaque fichier, vérifier les colonnes
+reconnues, lancer un **essai à blanc**, puis l'import. Le rapport indique chaque ligne refusée et
+pourquoi ; le fichier corrigé peut être rechargé : les fiches déjà présentes ne sont pas dupliquées.
+Les modèles CSV téléchargeables donnent l'ordre des colonnes attendu.

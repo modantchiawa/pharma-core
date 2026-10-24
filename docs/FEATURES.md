@@ -36,9 +36,9 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Clôture **à l'aveugle** par coupures XOF, rapprochement par mode et opérateur mobile money, écart au-dessus du seuil soumis à approbation, rapports Z chaînés (inviolables) | Rare | ✅ |
 | Annulation ou remboursement au-dessus d'un seuil (ou sur session fermée) soumis au **PIN d'un superviseur** | Partiel | ✅ |
 | Rapprochement des paiements **mobile money et carte** avec les relevés opérateurs (confirmation, rejet → vente en revue), référence de transaction unique | Rare | ✅ |
-| Ticket thermique 80 mm aux couleurs de la pharmacie, facture A4 | Oui | ✅ ticket · 🟡 facture A4 : phase 2 |
+| Ticket thermique **58 mm (type TPE) ou 80 mm** aux couleurs de la pharmacie, **facture A4** (montant en lettres, TVA, client, police) | Oui | ✅ impression navigateur ou ESC/POS direct (USB partagée, réseau 9100), réglages par poste, réimpression, tiroir-caisse |
 | **Facture certifiée DGI (SECeF)** | Obligatoire au Niger pour les assujettis TVA | 🟡 port de certification, file de retry, QR/code sur ticket ; connecteur DGI à réaliser avec les spécifications SECeF |
-| Afficheur client, tiroir-caisse, imprimante étiquettes | Oui | ⬜ phase 2 (coque Tauri pour ESC/POS brut et tiroir) |
+| Afficheur client, imprimante étiquettes | Oui | ⬜ phase 2 bis (étiquettes de prix) ; tiroir-caisse ✅ via ESC/POS |
 | Fidélité (points) | Souvent | 🟡 points stockés ; règles d'attribution : phase 2 |
 
 ### Stocks et approvisionnement
@@ -56,7 +56,8 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Contrôle d'intégrité** nocturne du stock (lots recalculés depuis les mouvements, réservations), sortie automatique des lots périmés avec valeur au coût | Rare | ✅ |
 | Lecture des codes **GS1 DataMatrix** (lot, péremption) au comptoir, à la réception et à l'inventaire | Partiel | ✅ |
 | Transferts entre pharmacies d'un même groupe | Parfois | ✅ réservations réseau ; transfert intra-groupe : phase 2 |
-| Catalogue national (CIP/DCI, prix indicatifs, monographies) maintenu par l'éditeur | Rare | ✅ |
+| Catalogue national (CIP/DCI, prix indicatifs, monographies) maintenu par l'éditeur | Rare | ✅ + **import du référentiel** (CSV, Excel) par l'éditeur |
+| **Migration depuis un autre logiciel** : import des produits et prix, du stock par lot, des clients avec leurs créances, des fournisseurs (CSV tout séparateur et encodage, Excel .xlsx), colonnes reconnues automatiquement, aperçu, essai à blanc, rapport ligne par ligne | Partiel (prestation payante) | ✅ |
 
 ### Comptabilité et gestion
 
@@ -74,7 +75,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 
 | Fonction | Attendu | PharmaCore |
 |---|---|---|
-| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 41 permissions, 5 rôles prédéfinis modifiables |
+| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 43 permissions, 5 rôles prédéfinis modifiables |
 | Connexion mot de passe + **bascule caissier par PIN**, sans Internet | Oui | ✅ |
 | Journal d'audit inaltérable | Rare | ✅ chaîne SHA-256 |
 | **Sauvegardes** automatiques locales, USB et cloud | Oui | ✅ tâche planifiée + réplique cloud continue |
@@ -86,6 +87,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Pharmacies de garde partagées** : publication publique par réseau (opt-in du coordinateur), message du jour prêt pour WhatsApp/SMS | Non | ✅ |
 | Multilingue (français ; haoussa, zarma, wolof) | Français seul | 🟡 français ; infrastructure i18n Angular : phase 3 |
 | Installation Windows multi-postes | Oui | ✅ paquet hub (services Windows) + PWA installable |
+| Imprimantes par poste : navigateur (58 mm, 80 mm, A4) ou thermique ESC/POS (partage Windows, réseau) | Oui | ✅ page Imprimantes, test d'impression |
 
 ## 2. Spécificités du marché retenues
 
@@ -107,5 +109,6 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 |---|---|---|
 | **1 (livrée)** | Hub + cloud, caisse hors-ligne, stocks FEFO, commandes, comptabilité, sessions de caisse, crédit, réseau, supervision, paquet Windows | Pilotes dans 2–3 officines |
 | **2 (livrée)** | Bordereaux tiers payant, tableau de bord, inventaire à l'aveugle et contrôle d'intégrité, caisse à l'aveugle et approbations, rapprochement mobile money, registre des ordonnances, substitution par DCI, annuaire public et gardes partagées | Parité et avance sur les PGO installés |
-| **2 bis** | Connecteur SECeF certifié, facture A4 PDF, étiquettes de prix, grand livre, coque Tauri (tiroir, ESC/POS), avoirs sur bordereaux émis | Conformité fiscale complète |
+| **2 bis (livrée)** | Impression 58/80 mm et facture A4, ESC/POS direct et tiroir, importation de données et du référentiel | Migration des officines équipées |
+| **2 ter** | Connecteur SECeF certifié, étiquettes de prix, grand livre, avoirs sur bordereaux émis, export PDF | Conformité fiscale complète |
 | **3** | Multi-langue, application mobile du titulaire (chiffres du jour, alertes), commandes électroniques vers les grossistes (EDI/API), base d'interactions médicamenteuses sous licence, SMS clients (ordonnance prête, rappel de traitement) | Différenciation |
