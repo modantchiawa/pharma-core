@@ -21,6 +21,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Fonction | Attendu sur le marché | PharmaCore |
 |---|---|---|
 | Vente ultra-rapide clavier / douchette, recherche par nom, DCI, CIP/EAN | Oui | ✅ |
+| **Substitution** : équivalents de même DCI et dosage proposés quand le produit demandé est en rupture, avec prix et stock de l'officine, y compris hors ligne | Rare | ✅ |
 | Fonctionnement **hors-ligne total** (coupure Internet) | Partiel (poste serveur local) | ✅ local-first : journal IndexedDB par poste + serveur local (hub) |
 | Multi-postes synchronisés sur le réseau de l'officine | Oui | ✅ hub LAN, temps réel STOMP |
 | Devise XOF sans décimales, arrondis | Oui | ✅ |
@@ -60,7 +61,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Compte de résultat** et **bilan** de gestion | Rare (export vers le comptable) | ✅ bilan simplifié + compte de résultat, stock valorisé au coût moyen |
 | Clôture mensuelle, écritures diverses | Oui | ✅ |
 | Export vers le comptable (CSV compatible tableur / Sage) | Oui | ✅ CSV |
-| Tableaux de bord : CA par jour/heure/vendeur, marge, top produits | Oui | 🟡 données et API présentes (ventes, sessions, résultat) ; écran statistiques : phase 2 |
+| Tableaux de bord : CA par jour, marge brute, panier moyen, encaissements par mode, top produits, valeur et péremption du stock, créances, écarts de caisse, comparaison avec la période précédente | Oui | ✅ page Pilotage · 🟡 par heure et par vendeur : phase 3 |
 | Déclaration TVA (collectée / déductible) | Oui | ✅ comptes 4431/4452 dans la balance |
 
 ### Organisation, sécurité, réseau
