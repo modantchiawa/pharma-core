@@ -1,7 +1,11 @@
+import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Branding } from '../../core/api/models';
+import { firstValueFrom } from 'rxjs';
+import { Branding, PublicSharing } from '../../core/api/models';
+import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { BrandingService } from '../../core/branding/branding.service';
+import { APP_ENVIRONMENT } from '../../core/config';
 import { contrastRatio, isHexColor, readableTextOn } from '../../core/util/color';
 import { CartLine } from '../pos/cart.store';
 import { Receipt, ReceiptData } from '../pos/receipt';
@@ -21,7 +25,7 @@ const SAMPLE_LINE: CartLine = {
 /** White-label settings with a live preview of the colors and of the receipt. */
 @Component({
   selector: 'app-branding-settings-page',
-  imports: [FormsModule, Receipt],
+  imports: [FormsModule, Receipt, HasPermissionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="grid gap-6 p-4 lg:grid-cols-[1fr_auto]">
@@ -167,6 +171,94 @@ const SAMPLE_LINE: CartLine = {
         <p class="mb-2 text-sm text-slate-600">Aperçu du ticket</p>
         <app-receipt [data]="sample" class="block shadow" />
       </div>
+
+      <form
+        class="grid max-w-3xl gap-3 rounded-lg border bg-white p-4 md:grid-cols-2 lg:col-span-2"
+        (ngSubmit)="saveSharing()"
+        *appHasPermission="['DIRECTORY_SHARING_MANAGE', 'CONFIG_BRANDING_MANAGE']"
+      >
+        <h2 class="text-lg font-semibold md:col-span-2">Annuaire public</h2>
+        <p class="text-sm text-slate-600 md:col-span-2">
+          Les patients trouvent la pharmacie, ses horaires et, si vous l'acceptez, un niveau de
+          disponibilité (« disponible » ou « dernières unités », jamais la quantité ni le prix) sur
+          la page publique
+          <a class="underline" href="/public" target="_blank" rel="noopener">/public</a>.
+        </p>
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="publicListing"
+            [ngModel]="sharing().publicListing"
+            (ngModelChange)="patchSharing({ publicListing: $event })"
+          />
+          Afficher la pharmacie dans l'annuaire public
+        </label>
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="publicAvailability"
+            [disabled]="!sharing().publicListing"
+            [ngModel]="sharing().publicAvailability"
+            (ngModelChange)="patchSharing({ publicAvailability: $event })"
+          />
+          Publier le niveau de disponibilité de mes produits
+        </label>
+        <label
+          >Horaires d'ouverture<input
+            class="field"
+            name="openingHours"
+            maxlength="300"
+            placeholder="Lun-Sam 8h-22h, Dim 9h-13h"
+            [ngModel]="sharing().openingHours"
+            (ngModelChange)="patchSharing({ openingHours: $event })"
+        /></label>
+        <label
+          >Numéro WhatsApp<input
+            class="field"
+            name="whatsapp"
+            maxlength="30"
+            placeholder="+227 90 00 00 00"
+            [ngModel]="sharing().whatsapp"
+            (ngModelChange)="patchSharing({ whatsapp: $event })"
+        /></label>
+        <label
+          >Latitude<input
+            class="field"
+            name="latitude"
+            type="number"
+            step="0.000001"
+            min="-90"
+            max="90"
+            [ngModel]="sharing().latitude"
+            (ngModelChange)="patchSharing({ latitude: toNumber($event) })"
+        /></label>
+        <label
+          >Longitude<input
+            class="field"
+            name="longitude"
+            type="number"
+            step="0.000001"
+            min="-180"
+            max="180"
+            [ngModel]="sharing().longitude"
+            (ngModelChange)="patchSharing({ longitude: toNumber($event) })"
+        /></label>
+        <div class="flex items-center gap-2 md:col-span-2">
+          <button type="button" class="rounded border px-3 py-2" (click)="locate()">
+            Utiliser ma position
+          </button>
+          <button
+            type="submit"
+            class="rounded bg-brand px-4 py-2 text-on-brand"
+            *appHasPermission="'DIRECTORY_SHARING_MANAGE'"
+          >
+            Enregistrer l'annuaire public
+          </button>
+          @if (sharingStatus(); as text) {
+            <span class="text-sm" role="status">{{ text }}</span>
+          }
+        </div>
+      </form>
     </div>
   `,
   styles: `
@@ -182,6 +274,17 @@ const SAMPLE_LINE: CartLine = {
 })
 export class BrandingSettingsPage {
   private readonly service = inject(BrandingService);
+  private readonly http = inject(HttpClient);
+  private readonly sharingApi = `${inject(APP_ENVIRONMENT).apiUrl}/v1/config/public-sharing`;
+  protected readonly sharing = signal<PublicSharing>({
+    publicListing: false,
+    publicAvailability: false,
+    latitude: null,
+    longitude: null,
+    openingHours: null,
+    whatsapp: null,
+  });
+  protected readonly sharingStatus = signal<string | null>(null);
   protected readonly draft = signal<Branding>({ ...this.service.branding() });
   protected readonly status = signal<string | null>(null);
   protected readonly colors = [
@@ -207,6 +310,62 @@ export class BrandingSettingsPage {
     vat: [{ rate: 2.1, totalTtc: 432, vat: 9 }],
     offline: false,
   };
+
+  constructor() {
+    void this.loadSharing();
+  }
+
+  protected patchSharing(change: Partial<PublicSharing>): void {
+    this.sharing.update((current) => ({ ...current, ...change }));
+  }
+
+  protected toNumber(value: unknown): number | null {
+    const n = Number(value);
+    return value === '' || value === null || Number.isNaN(n) ? null : n;
+  }
+
+  protected locate(): void {
+    if (!('geolocation' in navigator)) {
+      this.sharingStatus.set('Géolocalisation indisponible sur ce poste');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) =>
+        this.patchSharing({
+          latitude: Number(position.coords.latitude.toFixed(6)),
+          longitude: Number(position.coords.longitude.toFixed(6)),
+        }),
+      () => this.sharingStatus.set('Position refusée ou indisponible'),
+      { timeout: 10_000 },
+    );
+  }
+
+  protected async saveSharing(): Promise<void> {
+    try {
+      const saved = await firstValueFrom(
+        this.http.put<PublicSharing>(this.sharingApi, this.sharing()),
+      );
+      this.sharing.set(saved);
+      this.sharingStatus.set(
+        saved.publicListing
+          ? 'Annuaire public enregistré : la pharmacie est visible des patients'
+          : 'Annuaire public enregistré : la pharmacie reste privée',
+      );
+    } catch (error) {
+      this.sharingStatus.set(
+        (error as { error?: { detail?: string } }).error?.detail ??
+          'Enregistrement impossible : vérifiez les champs',
+      );
+    }
+  }
+
+  private async loadSharing(): Promise<void> {
+    try {
+      this.sharing.set(await firstValueFrom(this.http.get<PublicSharing>(this.sharingApi)));
+    } catch {
+      // Keep the defaults when offline or without the right
+    }
+  }
 
   protected patch(change: Partial<Branding>): void {
     this.draft.update((current) => ({ ...current, ...change }));

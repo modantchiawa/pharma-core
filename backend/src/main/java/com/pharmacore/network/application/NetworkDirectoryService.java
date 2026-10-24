@@ -6,8 +6,10 @@ import com.pharmacore.network.persistence.PharmacyNetworkEntity;
 import com.pharmacore.network.persistence.PharmacyNetworkRepository;
 import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.TenantContext;
+import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
 import java.time.Clock;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -50,6 +52,33 @@ public class NetworkDirectoryService {
                 .list();
     }
 
+    /** The networks the current pharmacy belongs to, with its role and the publication choices. */
+    @Transactional(readOnly = true)
+    public List<NetworkSettings> networks() {
+        var tenant = TenantContext.requireTenant().value();
+        return networks.findAll().stream()
+                .map(n -> new NetworkSettings(n.id(), n.name(), n.region(), n.coordinatorTenantId().equals(tenant),
+                        n.quantityCap(), n.publishGuards()))
+                .sorted(Comparator.comparing(NetworkSettings::name))
+                .toList();
+    }
+
+    /** Only the coordinator decides whether the roster is visible to the public. */
+    @Transactional
+    public NetworkSettings setGuardsPublication(UUID networkId, boolean publish) {
+        var tenant = TenantContext.requireTenant().value();
+        var network = networks.findById(networkId).orElseThrow(() -> new NotFoundException("Network", networkId));
+        if (!network.coordinatorTenantId().equals(tenant)) {
+            throw new BusinessRuleException("not-coordinator",
+                    "Seul le coordinateur du r\u00e9seau publie le planning de garde");
+        }
+        network.publishGuards(publish);
+        audit.record("NETWORK_GUARDS_PUBLICATION_CHANGED", "NETWORK", networkId,
+                Map.of("publish", Boolean.toString(publish)));
+        return new NetworkSettings(network.id(), network.name(), network.region(), true, network.quantityCap(),
+                network.publishGuards());
+    }
+
     @Transactional
     public void setStockSharing(UUID networkId, boolean share) {
         var tenant = TenantContext.requireTenant().value();
@@ -82,6 +111,10 @@ public class NetworkDirectoryService {
         networks.findById(networkId).orElseThrow(() -> new NotFoundException("Network", networkId));
         memberships.save(new NetworkMembershipEntity(networkId, tenantId, clock.instant()));
         audit.record("NETWORK_MEMBER_ADDED", "NETWORK", networkId, Map.of("tenant", tenantId.toString()));
+    }
+
+    public record NetworkSettings(UUID networkId, String name, String region, boolean coordinator, int quantityCap,
+                                  boolean publishGuards) {
     }
 
     public record DirectoryEntry(UUID networkId, String networkName, String region, UUID tenantId,

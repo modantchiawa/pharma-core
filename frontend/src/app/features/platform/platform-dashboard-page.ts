@@ -90,6 +90,11 @@ interface TenantHealth {
                 {{ t.pendingOfflineSales }}
               </td>
               <td class="p-2">{{ t.lastSeenAt | date: 'dd/MM HH:mm' }}</td>
+              <td class="p-2">
+                <button type="button" class="underline" (click)="pairingCode(t)">
+                  Code d'appairage
+                </button>
+              </td>
             </tr>
           }
         </tbody>
@@ -119,6 +124,16 @@ export class PlatformDashboardPage {
     void this.refresh();
     const timer = setInterval(() => void this.refresh(), 30_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
+  }
+
+  protected async pairingCode(tenant: TenantHealth): Promise<void> {
+    const reply = await firstValueFrom(
+      this.http.post<{ code: string; validFor: string }>(
+        `${this.api}/${tenant.id}/pairing-codes`,
+        {},
+      ),
+    );
+    window.prompt(`Code d'appairage pour ${tenant.legalName} (valable 24 h) :`, reply.code);
   }
 
   private async refresh(): Promise<void> {

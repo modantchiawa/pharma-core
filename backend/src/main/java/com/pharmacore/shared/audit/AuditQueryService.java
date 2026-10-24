@@ -1,6 +1,7 @@
 package com.pharmacore.shared.audit;
 
 import com.pharmacore.shared.context.TenantContext;
+import com.pharmacore.shared.runtime.NodeProperties;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -15,9 +16,11 @@ public class AuditQueryService {
     private static final int VERIFY_BATCH = 1_000;
 
     private final JdbcClient jdbc;
+    private final NodeProperties node;
 
-    public AuditQueryService(JdbcClient jdbc) {
+    public AuditQueryService(JdbcClient jdbc, NodeProperties node) {
         this.jdbc = jdbc;
+        this.node = node;
     }
 
     @Transactional(readOnly = true)
@@ -26,7 +29,7 @@ public class AuditQueryService {
         return jdbc.sql("""
                         SELECT * FROM audit_event
                         WHERE tenant_id = :tenant AND sequence_no < :before
-                        ORDER BY sequence_no DESC
+                        ORDER BY occurred_at DESC, sequence_no DESC
                         LIMIT :limit""")
                 .param("tenant", tenant)
                 .param("before", beforeSequence == null ? Long.MAX_VALUE : beforeSequence)
@@ -36,8 +39,14 @@ public class AuditQueryService {
     }
 
     /** Recomputes the whole chain of the current tenant in keyset-paginated batches. */
+    /** Verifies the chain written by this node (hub or cloud) for the current pharmacy. */
     @Transactional(readOnly = true)
     public ChainVerification verifyChain() {
+        return verifyChain(node.mode().name());
+    }
+
+    @Transactional(readOnly = true)
+    public ChainVerification verifyChain(String origin) {
         UUID tenant = TenantContext.requireTenant().value();
         String expectedPrevious = AuditHashing.GENESIS;
         long expectedSequence = 1;
@@ -45,10 +54,11 @@ public class AuditQueryService {
         while (true) {
             List<AuditRecord> batch = jdbc.sql("""
                             SELECT * FROM audit_event
-                            WHERE tenant_id = :tenant AND sequence_no >= :from
+                            WHERE tenant_id = :tenant AND origin = :origin AND sequence_no >= :from
                             ORDER BY sequence_no
                             LIMIT :limit""")
                     .param("tenant", tenant)
+                    .param("origin", origin)
                     .param("from", expectedSequence)
                     .param("limit", VERIFY_BATCH)
                     .query(AuditQueryService::map)

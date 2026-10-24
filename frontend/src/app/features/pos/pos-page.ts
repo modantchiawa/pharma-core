@@ -7,8 +7,18 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { PaymentMethod } from '../../core/api/models';
+import { firstValueFrom } from 'rxjs';
+import {
+  Customer,
+  InsurancePolicy,
+  MOBILE_MONEY_PROVIDERS,
+  PaymentMethod,
+  Prescription,
+} from '../../core/api/models';
+import { APP_ENVIRONMENT } from '../../core/config';
+import { CurrencyService } from '../../core/ui/currency.service';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CatalogSyncService } from '../../core/offline/catalog-sync.service';
 import { ConnectivityService } from '../../core/offline/connectivity.service';
@@ -17,9 +27,12 @@ import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { SaleOutboxService } from '../../core/offline/sale-outbox.service';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { uuidv7 } from '../../core/util/uuid';
+import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { CartStore, discountPercent } from './cart.store';
-import { Receipt, ReceiptData } from './receipt';
+import { PaperFormat, TerminalTicketRequest } from '../../core/api/models';
+import { PrintSettingsService } from '../../core/printing/print-settings.service';
+import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -69,8 +82,17 @@ import { Receipt, ReceiptData } from './receipt';
                   >
                   <span
                     >{{ product.unitPriceCents | money }} · stock
-                    {{ product.availableQuantity }}</span
-                  >
+                    {{ product.availableQuantity }}
+                    @if (product.availableQuantity === 0 && product.dci) {
+                      <button
+                        type="button"
+                        class="ml-2 rounded border px-2 text-xs"
+                        (mousedown)="$event.stopPropagation(); showAlternatives(product)"
+                      >
+                        Équivalents
+                      </button>
+                    }
+                  </span>
                 </li>
               }
             </ul>
@@ -167,6 +189,22 @@ import { Receipt, ReceiptData } from './receipt';
         @if (cart.requiresPrescription()) {
           <fieldset class="rounded border p-2">
             <legend class="px-1 text-sm font-semibold">Ordonnance</legend>
+            @if (prescriptionsOnFile().length > 0) {
+              <select
+                class="mb-1 w-full rounded border px-2 py-1 text-sm"
+                [ngModel]="cart.prescriptionOnFile()?.id ?? ''"
+                (ngModelChange)="pickPrescription($event)"
+                aria-label="Ordonnance en dossier"
+              >
+                <option value="">Ordonnance papier (saisie)</option>
+                @for (p of prescriptionsOnFile(); track p.id) {
+                  <option [value]="p.id">
+                    {{ p.prescriberName }} · {{ p.renewalsRemaining }} délivrance(s) restante(s) ·
+                    valable jusqu'au {{ p.validUntil }}
+                  </option>
+                }
+              </select>
+            }
             <input
               class="mb-1 w-full rounded border px-2 py-1"
               placeholder="Prescripteur"
@@ -191,8 +229,88 @@ import { Receipt, ReceiptData } from './receipt';
           </fieldset>
         }
 
+        <div class="relative">
+          <input
+            type="search"
+            class="w-full rounded border px-2 py-1 text-sm"
+            placeholder="Client (nom, téléphone) — facultatif"
+            [(ngModel)]="customerTerm"
+            (ngModelChange)="searchCustomers($event)"
+            aria-label="Client"
+          />
+          @if (customerResults().length > 0) {
+            <ul
+              class="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded border bg-white shadow"
+              role="listbox"
+            >
+              @for (c of customerResults(); track c.id) {
+                <li
+                  role="option"
+                  class="cursor-pointer px-2 py-1 hover:bg-slate-100"
+                  (mousedown)="pickCustomer(c)"
+                >
+                  {{ c.displayName }}
+                  <small class="text-slate-500"
+                    >{{ c.phone }} · crédit dispo {{ c.availableCreditCents | money }}</small
+                  >
+                </li>
+              }
+            </ul>
+          }
+          @if (cart.customer(); as c) {
+            <p class="mt-1 flex justify-between text-sm">
+              <span
+                >👤 {{ c.displayName }}
+                <small class="text-slate-500">dû {{ c.creditBalanceCents | money }}</small></span
+              >
+              <button
+                type="button"
+                class="text-red-700"
+                (click)="clearCustomer()"
+                aria-label="Retirer le client"
+              >
+                ✕
+              </button>
+            </p>
+          }
+        </div>
+
+        @if (policies().length > 0) {
+          <fieldset class="rounded border border-brand/40 bg-brand/5 p-2 text-sm">
+            <legend class="px-1 font-semibold">Tiers payant</legend>
+            <select
+              class="w-full rounded border px-2 py-1"
+              [ngModel]="cart.policy()?.id ?? ''"
+              (ngModelChange)="pickPolicy($event)"
+              aria-label="Police d'assurance"
+            >
+              <option value="">Sans tiers payant</option>
+              @for (p of policies(); track p.id) {
+                <option [value]="p.id">
+                  {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
+                </option>
+              }
+            </select>
+            @if (cart.policy(); as policy) {
+              <p class="mt-1 flex justify-between">
+                <span>Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span>
+                <strong>{{ cart.insuredShareCents() | money }}</strong>
+              </p>
+              @if (policy.remainingCeilingCents !== null) {
+                <p class="text-xs text-slate-600">
+                  Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
+                </p>
+              }
+              <p class="flex justify-between">
+                <span>Reste à charge du patient</span>
+                <strong>{{ cart.netCents() - cart.insuredShareCents() | money }}</strong>
+              </p>
+            }
+          </fieldset>
+        }
+
         <div class="grid grid-cols-2 gap-2">
-          @for (method of methods; track method.code) {
+          @for (method of visibleMethods(); track method.code) {
             <button
               type="button"
               class="rounded border-2 border-brand px-2 py-2 font-medium text-brand hover:bg-brand hover:text-on-brand"
@@ -202,22 +320,45 @@ import { Receipt, ReceiptData } from './receipt';
             </button>
           }
         </div>
-        <label class="text-sm"
-          >Montant
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            class="mt-1 w-full rounded border px-2 py-1"
-            [(ngModel)]="amount"
-            placeholder="Reste {{ cart.remainingCents() / 100 }}"
-          />
-        </label>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <label
+            >Montant
+            <input
+              type="text"
+              inputmode="decimal"
+              class="mt-1 w-full rounded border px-2 py-1"
+              [(ngModel)]="amount"
+              placeholder="Reste {{ cart.remainingCents() | money }}"
+            />
+          </label>
+          <label
+            >Opérateur mobile money
+            <select class="mt-1 w-full rounded border px-2 py-1" [(ngModel)]="provider">
+              @for (p of providers; track p) {
+                <option [value]="p">{{ p.replace('_', ' ') }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (!cashSessionOpen()) {
+          <p class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
+            Aucune session de caisse ouverte sur ce poste : les espèces ne seront pas rattachées à
+            un rapport Z.
+          </p>
+        }
 
         <ul class="text-sm">
           @for (payment of cart.payments(); track $index) {
             <li class="flex justify-between">
-              <span>{{ labelOf(payment.method) }}</span>
+              <span
+                >{{ labelOf(payment.method) }}
+                @if (payment.provider) {
+                  · {{ payment.provider }}
+                }
+                @if (payment.policyId) {
+                  · {{ cart.policy()?.insurerName }}
+                }
+              </span>
               <span
                 >{{ payment.amountCents | money }}
                 <button
@@ -264,11 +405,31 @@ import { Receipt, ReceiptData } from './receipt';
           }}
           · {{ outbox.pendingCount() }} en attente
         </p>
+        @if (receipt(); as last) {
+          <div class="flex flex-wrap gap-2 text-sm">
+            <button
+              type="button"
+              class="rounded border px-2 py-1"
+              (click)="printReceipt(last, false)"
+            >
+              Réimprimer le ticket {{ last.ticketNumber }}
+            </button>
+            @if (printing.settings().invoicePaper === 'A4') {
+              <button
+                type="button"
+                class="rounded border px-2 py-1"
+                (click)="printReceipt(last, true)"
+              >
+                Facture A4
+              </button>
+            }
+          </div>
+        }
       </aside>
     </div>
 
     @if (receipt(); as data) {
-      <div class="hidden print:block"><app-receipt [data]="data" /></div>
+      <div class="hidden print:block"><app-receipt [data]="data" [format]="printFormat()" /></div>
     }
   `,
 })
@@ -282,20 +443,135 @@ export class PosPage {
   private readonly databases = inject(PosDatabaseService);
   private readonly searchInput = viewChild.required<ElementRef<HTMLInputElement>>('search');
 
+  private readonly http = inject(HttpClient);
+  private readonly env = inject(APP_ENVIRONMENT);
+  private readonly currency = inject(CurrencyService);
+
   protected term = '';
-  protected amount: number | null = null;
+  protected amount = '';
+  protected customerTerm = '';
+  protected provider: string = MOBILE_MONEY_PROVIDERS[0];
+  protected readonly providers = MOBILE_MONEY_PROVIDERS;
+  protected readonly customerResults = signal<Customer[]>([]);
+  /** Covers and renewable prescriptions of the selected customer. */
+  protected readonly policies = signal<InsurancePolicy[]>([]);
+  protected readonly prescriptionsOnFile = signal<Prescription[]>([]);
+  protected readonly cashSessionOpen = signal(true);
   protected readonly results = signal<CachedProduct[]>([]);
   protected readonly highlighted = signal(0);
   protected readonly message = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly receipt = signal<ReceiptData | null>(null);
+  protected readonly printing = inject(PrintSettingsService);
+  protected readonly printFormat = signal<PaperFormat>('MM80');
   protected readonly methods: { code: PaymentMethod; label: string }[] = [
-    { code: 'CASH', label: 'Espèces' },
+    { code: 'CASH', label: 'Espèces (F4)' },
+    { code: 'MOBILE_MONEY', label: 'Mobile money (F5)' },
     { code: 'CARD', label: 'Carte' },
     { code: 'THIRD_PARTY_PAYER', label: 'Tiers payant' },
+    { code: 'CREDIT', label: 'Crédit client' },
     { code: 'CHECK', label: 'Chèque' },
   ];
+  /** The insured share is computed from the policy, never typed: its button hides once a policy applies. */
+  protected readonly visibleMethods = computed(() =>
+    this.methods.filter((m) => m.code !== 'THIRD_PARTY_PAYER' || this.policies().length === 0),
+  );
   private readonly cashierName = computed(() => this.permissions.profile()?.displayName ?? '');
+
+  constructor() {
+    void this.checkCashSession();
+  }
+
+  private async loadCustomerFiles(customer: Customer): Promise<void> {
+    try {
+      const [policies, prescriptions] = await Promise.all([
+        firstValueFrom(
+          this.http.get<InsurancePolicy[]>(
+            `${this.env.apiUrl}/v1/customers/${customer.id}/policies`,
+          ),
+        ),
+        firstValueFrom(
+          this.http.get<Prescription[]>(`${this.env.apiUrl}/v1/prescriptions`, {
+            params: { customerId: customer.id, status: 'ACTIVE', limit: 20 },
+          }),
+        ),
+      ]);
+      this.policies.set(policies);
+      this.prescriptionsOnFile.set(prescriptions.filter((p) => p.renewalsRemaining > 0));
+      if (policies.length === 1) {
+        this.cart.applyPolicy(policies[0]);
+      }
+    } catch {
+      // Offline: the covers cannot be checked, the sale goes on without third-party payer.
+      this.policies.set([]);
+      this.prescriptionsOnFile.set([]);
+    }
+  }
+
+  protected pickPolicy(policyId: string): void {
+    const policy = this.policies().find((p) => p.id === policyId) ?? null;
+    if (policy) {
+      this.cart.applyPolicy(policy);
+    } else {
+      this.cart.policy.set(null);
+      this.cart.payments.update((payments) =>
+        payments.filter((p) => !(p.method === 'THIRD_PARTY_PAYER' && p.policyId)),
+      );
+    }
+  }
+
+  protected pickPrescription(prescriptionId: string): void {
+    this.cart.usePrescriptionOnFile(
+      this.prescriptionsOnFile().find((p) => p.id === prescriptionId) ?? null,
+    );
+  }
+
+  protected clearCustomer(): void {
+    this.cart.customer.set(null);
+    this.policies.set([]);
+    this.prescriptionsOnFile.set([]);
+    this.pickPolicy('');
+    this.cart.usePrescriptionOnFile(null);
+  }
+
+  private async checkCashSession(): Promise<void> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get(`${this.env.apiUrl}/v1/cash/sessions/open`, {
+          params: { terminalId: this.terminal.terminalId },
+          observe: 'response',
+        }),
+      );
+      this.cashSessionOpen.set(response.status === 200);
+    } catch {
+      // Offline: cannot tell, do not nag.
+    }
+  }
+
+  protected async searchCustomers(term: string): Promise<void> {
+    if (term.trim().length < 2) {
+      this.customerResults.set([]);
+      return;
+    }
+    try {
+      this.customerResults.set(
+        await firstValueFrom(
+          this.http.get<Customer[]>(`${this.env.apiUrl}/v1/customers`, {
+            params: { q: term.trim(), limit: 8 },
+          }),
+        ),
+      );
+    } catch {
+      this.customerResults.set([]);
+    }
+  }
+
+  protected pickCustomer(customer: Customer): void {
+    this.cart.customer.set(customer);
+    this.customerTerm = '';
+    this.customerResults.set([]);
+    void this.loadCustomerFiles(customer);
+  }
 
   protected async lookup(term: string): Promise<void> {
     this.highlighted.set(0);
@@ -304,8 +580,21 @@ export class PosPage {
     );
   }
 
+  /** Replaces the result list with the substitutes of an out-of-stock product (same DCI). */
+  protected async showAlternatives(product: CachedProduct): Promise<void> {
+    const substitutes = await this.catalog.alternatives(product);
+    this.highlighted.set(0);
+    this.results.set(substitutes);
+    this.message.set(
+      substitutes.length === 0
+        ? `Aucun équivalent de ${product.designation} (${product.dci}) au catalogue`
+        : `${substitutes.length} équivalent(s) de ${product.designation} — même DCI ${product.dci}`,
+    );
+  }
+
   protected async scan(): Promise<void> {
-    const term = this.term.trim();
+    // A GS1 DataMatrix (boxes with lot and expiry) is looked up by the EAN it carries
+    const term = parseGs1(this.term.trim())?.ean13 ?? this.term.trim();
     if (!term) {
       return;
     }
@@ -352,16 +641,20 @@ export class PosPage {
   }
 
   protected pay(method: PaymentMethod): void {
-    const cents =
-      this.amount !== null && this.amount > 0
-        ? Math.round(this.amount * 100)
-        : this.cart.remainingCents();
+    const policy = this.cart.policy();
+    if (method === 'THIRD_PARTY_PAYER' && policy) {
+      this.cart.applyPolicy(policy);
+      return;
+    }
+    const typed = this.currency.parse(this.amount);
+    const cents = typed > 0 ? typed : this.cart.remainingCents();
     this.cart.addPayment({
       method,
       amountCents: cents,
       thirdPartyCode: method === 'THIRD_PARTY_PAYER' ? 'AMO' : undefined,
+      provider: method === 'MOBILE_MONEY' ? this.provider : undefined,
     });
-    this.amount = null;
+    this.amount = '';
   }
 
   protected labelOf(method: PaymentMethod): string {
@@ -378,6 +671,10 @@ export class PosPage {
         event.preventDefault();
         this.pay('CASH');
         break;
+      case 'F5':
+        event.preventDefault();
+        this.pay('MOBILE_MONEY');
+        break;
       case 'F9':
         event.preventDefault();
         void this.checkout();
@@ -388,6 +685,52 @@ export class PosPage {
         }
         break;
     }
+  }
+
+  /**
+   * Ticket on the register's thermal printer through the local server when one is configured
+   * (the sale may not be synchronized yet, so the terminal sends the ticket itself); otherwise,
+   * or when the printer cannot be reached, the browser prints the HTML ticket at the configured
+   * paper size. An invoice always goes through the browser on A4.
+   */
+  protected async printReceipt(data: ReceiptData, invoice: boolean): Promise<void> {
+    const settings = this.printing.settings();
+    if (invoice) {
+      this.printFormat.set('A4');
+      this.printing.printPage('A4');
+      return;
+    }
+    if (settings.mode !== 'BROWSER') {
+      const ticket: TerminalTicketRequest = {
+        ticketNumber: data.ticketNumber,
+        occurredAt: data.occurredAt.toISOString(),
+        cashier: data.cashier,
+        customer: data.customer ?? null,
+        lines: data.lines.map((l) => ({
+          designation: l.designation,
+          quantity: l.quantity,
+          unitPriceCents: l.unitPriceCents,
+          discountCents: l.discountCents,
+          vatRate: l.vatRate,
+        })),
+        discountCents: data.discountCents,
+        netCents: data.netCents,
+        payments: data.payments.map((p) => ({
+          label: `${PAYMENT_LABELS[p.method] ?? p.method}${p.provider ? ' ' + p.provider.replace(/_/g, ' ').toLowerCase() : ''}`,
+          amountCents: p.amountCents,
+        })),
+        changeDueCents: data.changeDueCents,
+        vat: data.vat.map((v) => ({ rate: v.rate, totalTtcCents: v.totalTtc, vatCents: v.vat })),
+        offline: data.offline,
+      };
+      if (await this.printing.printTicket(ticket)) {
+        return;
+      }
+      this.message.set('Imprimante thermique injoignable : impression par le navigateur');
+    }
+    const paper = settings.paper === 'A4' ? 'A4' : settings.paper;
+    this.printFormat.set(paper);
+    this.printing.printPage(paper);
   }
 
   /** Commits the sale locally first (zero data loss), prints, then lets the outbox sync it. */
@@ -414,6 +757,7 @@ export class PosPage {
           ticketNumber,
           occurredAt: occurredAt.toISOString(),
           cashierUserId: profile.userId,
+          customerId: this.cart.customer()?.id,
           lines: this.cart.lines().map((l) => ({
             productId: l.productId,
             quantity: l.quantity,
@@ -424,15 +768,27 @@ export class PosPage {
             method: p.method,
             amountCents: p.amountCents,
             thirdPartyCode: p.thirdPartyCode,
+            provider: p.provider,
+            policyId: p.policyId,
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
         });
       });
-      this.receipt.set({
+      const customer = this.cart.customer();
+      const policy = this.cart.policy();
+      const data: ReceiptData = {
         ticketNumber,
         terminalId: this.terminal.terminalId,
         occurredAt,
         cashier: this.cashierName(),
+        customer: customer
+          ? {
+              displayName: customer.displayName,
+              phone: customer.phone,
+              address: customer.address,
+              policy: policy ? `${policy.insurerName} ${policy.policyNumber}` : null,
+            }
+          : null,
         lines: this.cart.lines(),
         payments: this.cart.payments(),
         grossCents: this.cart.grossCents(),
@@ -441,9 +797,12 @@ export class PosPage {
         changeDueCents: this.cart.changeDueCents(),
         vat: this.cart.vatBreakdown(),
         offline: !this.connectivity.online(),
-      });
+      };
+      this.receipt.set(data);
       this.cart.clear();
-      setTimeout(() => window.print());
+      if (this.printing.settings().autoPrint) {
+        void this.printReceipt(data, false);
+      }
       void this.outbox.flush();
     } catch (error) {
       this.message.set(`Vente non enregistrée : ${(error as Error).message}`);

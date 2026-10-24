@@ -1,8 +1,13 @@
 package com.pharmacore.shared.security;
 
+import com.pharmacore.shared.runtime.NodeProperties;
+import jakarta.servlet.DispatcherType;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -19,7 +24,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 class SecurityConfiguration {
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, BearerTokenAuthenticator authenticator) throws Exception {
+    SecurityFilterChain apiSecurity(HttpSecurity http, BearerTokenAuthenticator authenticator, NodeProperties node,
+                                    JdbcClient jdbc) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> { })
@@ -28,20 +34,38 @@ class SecurityConfiguration {
                         .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'none'; frame-ancestors 'none'"))
                         .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/public/hub/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/pin",
+                                "/api/auth/logout").permitAll()
                         // STOMP authenticates the CONNECT frame itself (see StompAuthenticationInterceptor)
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/platform/**").hasAuthority(BearerTokenAuthenticator.PLATFORM_ADMIN_AUTHORITY)
+                        .requestMatchers("/api/sync/**").hasAuthority(BearerTokenAuthenticator.HUB_NODE_AUTHORITY)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.authenticationManagerResolver(request -> authenticator))
                 .addFilterAfter(new TenantContextFilter(), BearerTokenAuthenticationFilter.class)
+                .addFilterAfter(new TopologyGuardFilter(node, jdbc), TenantContextFilter.class)
                 .build();
     }
 
     @Bean
-    TrustedIssuerRegistry trustedIssuerRegistry(SecurityProperties properties) {
+    InternalIssuerRegistry internalIssuerRegistry(JdbcClient jdbc, PlatformTransactionManager transactionManager) {
+        return new InternalIssuerRegistry(jdbc, transactionManager);
+    }
+
+    @Bean
+    OidcTrustedIssuerRegistry oidcTrustedIssuerRegistry(SecurityProperties properties) {
         return new OidcTrustedIssuerRegistry(properties);
+    }
+
+    /** Every registry bean (internal keys, OIDC realms, test issuers) consulted in turn. */
+    @Bean
+    @Primary
+    TrustedIssuerRegistry trustedIssuerRegistry(List<TrustedIssuerRegistry> registries) {
+        return new CompositeTrustedIssuerRegistry(registries);
     }
 
     @Bean

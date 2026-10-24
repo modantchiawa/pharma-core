@@ -40,6 +40,10 @@ public class TenantEntity {
     @Column(name = "time_zone", nullable = false, length = 64)
     private String timeZone;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    private TenantTopology topology;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -62,6 +66,7 @@ public class TenantEntity {
         this.subscriptionExpiresAt = subscriptionExpiresAt;
         this.currency = currency;
         this.timeZone = timeZone;
+        this.topology = TenantTopology.CLOUD;
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -78,8 +83,29 @@ public class TenantEntity {
     }
 
     public boolean isOperational(Instant now) {
+        return isOperational(now, java.time.Duration.ZERO);
+    }
+
+    /**
+     * A hub that cannot reach the cloud keeps serving its pharmacy during the grace period after
+     * the subscription end, so a late payment or a long outage never stops the counter.
+     */
+    public boolean isOperational(Instant now, java.time.Duration grace) {
         return status == TenantStatus.ACTIVE
-                && (subscriptionExpiresAt == null || subscriptionExpiresAt.isAfter(now));
+                && (subscriptionExpiresAt == null || subscriptionExpiresAt.plus(grace).isAfter(now));
+    }
+
+    public boolean subscriptionExpired(Instant now) {
+        return subscriptionExpiresAt != null && !subscriptionExpiresAt.isAfter(now);
+    }
+
+    public void attachHub(Instant now) {
+        this.topology = TenantTopology.HUB;
+        this.updatedAt = now;
+    }
+
+    public TenantTopology topology() {
+        return topology;
     }
 
     public UUID id() {

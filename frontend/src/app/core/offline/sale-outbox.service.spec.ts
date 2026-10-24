@@ -1,4 +1,6 @@
 import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
@@ -23,6 +25,13 @@ function sale(id: string, productId = 'p-1', quantity = 2): SaleRequest {
     payments: [{ method: 'CASH', amountCents: 250 * quantity }],
   };
 }
+
+// The specs share one module graph: Dexie must be pointed at a fresh in-memory IndexedDB
+// per file, whatever the order the files are evaluated in.
+beforeAll(() => {
+  Dexie.dependencies.indexedDB = new IDBFactory();
+  Dexie.dependencies.IDBKeyRange = IDBKeyRange;
+});
 
 describe('SaleOutboxService', () => {
   let outbox: SaleOutboxService;

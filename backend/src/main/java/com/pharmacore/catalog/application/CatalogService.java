@@ -56,6 +56,12 @@ public class CatalogService {
         return product;
     }
 
+    /** Product carrying this 13-digit code as CIP13 or, failing that, as EAN13. */
+    @Transactional(readOnly = true)
+    public java.util.Optional<ProductEntity> findByCode(String code) {
+        return products.findByAnyCode(code).stream().findFirst();
+    }
+
     @Transactional(readOnly = true)
     public List<ProductEntity> search(String term, int limit) {
         return products.search(term.trim(), PageRequest.of(0, Math.clamp(limit, 1, 50)));
@@ -111,6 +117,43 @@ public class CatalogService {
                 last == null ? since : last.changedAt(),
                 last == null ? afterProductId : last.productId(),
                 hasMore);
+    }
+
+    /**
+     * Therapeutic equivalents of a product for the counter: same active substance (DCI) and, when
+     * the product states one, same dosage; the pharmacy's own price and availability come along so
+     * the seller can offer a substitute in stock when the requested brand is missing.
+     */
+    @Transactional(readOnly = true)
+    public List<Alternative> alternatives(UUID productId) {
+        UUID tenant = TenantContext.requireTenant().value();
+        return jdbc.sql("""
+                        SELECT alt.id, alt.cip13, alt.designation, alt.dosage, alt.pharmaceutical_form, alt.laboratory,
+                               coalesce(s.selling_price_cents, alt.public_price_cents) AS unit_price_cents,
+                               GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available
+                        FROM product ref
+                        JOIN product alt ON alt.id <> ref.id AND alt.active
+                             AND lower(alt.dci) = lower(ref.dci)
+                             AND (ref.dosage IS NULL OR alt.dosage IS NULL OR lower(alt.dosage) = lower(ref.dosage))
+                        LEFT JOIN stock s ON s.product_id = alt.id AND s.tenant_id = :tenant
+                        LEFT JOIN LATERAL (
+                            SELECT sum(quantity) AS qty FROM stock_lot sl
+                            WHERE sl.stock_id = s.id AND sl.quantity > 0 AND sl.expiry_date > current_date
+                        ) l ON true
+                        WHERE ref.id = :product AND ref.dci IS NOT NULL
+                        ORDER BY available DESC, unit_price_cents NULLS LAST, alt.designation
+                        LIMIT 20""")
+                .param("tenant", tenant)
+                .param("product", productId)
+                .query((rs, rowNum) -> new Alternative(
+                        rs.getObject("id", UUID.class), rs.getString("cip13"), rs.getString("designation"),
+                        rs.getString("dosage"), rs.getString("pharmaceutical_form"), rs.getString("laboratory"),
+                        (Long) rs.getObject("unit_price_cents"), rs.getInt("available")))
+                .list();
+    }
+
+    public record Alternative(UUID productId, String cip13, String designation, String dosage, String pharmaceuticalForm,
+                              String laboratory, Long unitPriceCents, int availableQuantity) {
     }
 
     public record PosCatalogItem(UUID productId, String cip13, String ean13, String designation, String dci,

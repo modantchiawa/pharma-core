@@ -6,6 +6,7 @@ import com.pharmacore.shared.context.Actor;
 import com.pharmacore.shared.context.RequestContext;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.context.TenantId;
+import com.pharmacore.shared.runtime.NodeProperties;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import java.time.Clock;
 import org.springframework.cache.annotation.CacheEvict;
@@ -26,11 +27,13 @@ public class TenantUserLoader {
     private final TenantRepository tenants;
     private final TransactionTemplate readOnly;
     private final Clock clock;
+    private final NodeProperties node;
 
     public TenantUserLoader(AppUserRepository users, TenantRepository tenants,
-                            PlatformTransactionManager transactionManager, Clock clock) {
+                            PlatformTransactionManager transactionManager, Clock clock, NodeProperties node) {
         this.users = users;
         this.tenants = tenants;
+        this.node = node;
         this.readOnly = new TransactionTemplate(transactionManager);
         this.readOnly.setReadOnly(true);
         this.clock = clock;
@@ -42,7 +45,8 @@ public class TenantUserLoader {
         return TenantContext.call(context, () -> readOnly.execute(status -> {
             var pharmacy = tenants.findById(tenant.value())
                     .orElseThrow(() -> new InvalidBearerTokenException("Unknown pharmacy"));
-            if (!pharmacy.isOperational(clock.instant())) {
+            var grace = node.isHub() ? node.subscriptionGrace() : java.time.Duration.ZERO;
+            if (!pharmacy.isOperational(clock.instant(), grace)) {
                 throw new DisabledException("Pharmacy " + pharmacy.slug() + " is " + pharmacy.status());
             }
             AppUserEntity user = users.findWithAuthorities(subject)

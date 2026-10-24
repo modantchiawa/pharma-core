@@ -73,6 +73,21 @@ class SaleRulesTest {
     }
 
     @Test
+    void creditSaleNeedsACustomerAndTheRight() {
+        var noCustomer = new SaleDraft(UUID.randomUUID(), "T01", "T01-000002", NOW, SaleOrigin.ONLINE, null, null,
+                List.of(new SaleDraft.Line(PARACETAMOL, 1, 250, 0)),
+                List.of(new SaleDraft.Payment(PaymentMethod.CREDIT, 250, null, null, null)), null);
+        assertThat(SaleRules.evaluate(noCustomer, catalog, pharmacist, NOW)).containsExactly(SaleAnomaly.CREDIT_NOT_ALLOWED);
+
+        var withCustomer = new SaleDraft(UUID.randomUUID(), "T01", "T01-000003", NOW, SaleOrigin.ONLINE, null,
+                UUID.randomUUID(), noCustomer.lines(), noCustomer.payments(), null);
+        assertThat(SaleRules.evaluate(withCustomer, catalog, cashier, NOW)).containsExactly(SaleAnomaly.CREDIT_NOT_ALLOWED);
+        var seller = new SellerProfile(UUID.randomUUID(), Set.of("SALE_CREATE", "CREDIT_SALE"), BigDecimal.TEN);
+        assertThat(SaleRules.evaluate(withCustomer, catalog, seller, NOW)).isEmpty();
+        assertThat(withCustomer.creditCents()).isEqualTo(250);
+    }
+
+    @Test
     void onlineViolationsAreRejectedButOfflineSalesAreKeptForReview() {
         Set<SaleAnomaly> anomalies = Set.of(SaleAnomaly.DISCOUNT_ABOVE_LIMIT);
 
@@ -89,7 +104,7 @@ class SaleRulesTest {
 
     private static SaleDraft draft(List<SaleDraft.Line> lines, long paid, SaleDraft.Prescription prescription,
                                    Instant occurredAt) {
-        return new SaleDraft(UUID.randomUUID(), "T01", "T01-000001", occurredAt, SaleOrigin.OFFLINE_REPLAY, null,
-                lines, List.of(new SaleDraft.Payment(PaymentMethod.CASH, paid, null, null)), prescription);
+        return new SaleDraft(UUID.randomUUID(), "T01", "T01-000001", occurredAt, SaleOrigin.OFFLINE_REPLAY, null, null,
+                lines, List.of(new SaleDraft.Payment(PaymentMethod.CASH, paid, null, null, null)), prescription);
     }
 }

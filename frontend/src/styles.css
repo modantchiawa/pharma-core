@@ -27,9 +27,9 @@ body {
     sans-serif;
 }
 
+/* The page size (58 mm, 80 mm or A4) is set per print job by PrintSettingsService. */
 @media print {
   @page {
-    size: 80mm auto;
     margin: 0;
   }
 }

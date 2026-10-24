@@ -57,7 +57,7 @@ class PlatformTenantController {
         return provisioning.register(new NewPharmacy(request.slug(), request.legalName(), request.displayName(),
                 request.countryCode(), request.currency(), request.timeZone(), request.subscriptionPlan(),
                 request.subscriptionExpiresAt(),
-                new Owner(request.ownerSubject(), request.ownerEmail(), request.ownerDisplayName())));
+                new Owner(request.ownerEmail(), request.ownerDisplayName())));
     }
 
     @PutMapping("/{tenantId}/status")
@@ -78,7 +78,6 @@ class PlatformTenantController {
                              @NotBlank String timeZone,
                              @NotBlank @Size(max = 30) String subscriptionPlan,
                              @Future Instant subscriptionExpiresAt,
-                             @NotBlank String ownerSubject,
                              @NotBlank @Email String ownerEmail,
                              @NotBlank String ownerDisplayName) {
     }

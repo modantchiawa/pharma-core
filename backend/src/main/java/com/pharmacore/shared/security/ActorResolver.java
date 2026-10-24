@@ -17,6 +17,10 @@ public class ActorResolver {
     public static final String TENANT_CLAIM = "tenant_id";
     public static final String PLATFORM_ROLES_CLAIM = "platform_roles";
     public static final String SUPER_ADMIN = "SUPER_ADMIN";
+    public static final String TYPE_CLAIM = "typ";
+    public static final String TYPE_USER = "user";
+    public static final String TYPE_HUB_NODE = "hub-node";
+    public static final String NODE_CLAIM = "node_id";
 
     private final TenantUserLoader loader;
 
@@ -28,6 +32,7 @@ public class ActorResolver {
         return switch (kind) {
             case PLATFORM -> platformOperator(jwt);
             case TENANT -> tenantUser(jwt);
+            case INTERNAL -> TYPE_HUB_NODE.equals(jwt.getClaimAsString(TYPE_CLAIM)) ? hubNode(jwt) : tenantUser(jwt);
         };
     }
 
@@ -40,18 +45,28 @@ public class ActorResolver {
         return new Actor.PlatformOperator(jwt.getSubject(), name == null ? jwt.getSubject() : name);
     }
 
+    private Actor hubNode(Jwt jwt) {
+        String nodeId = jwt.getClaimAsString(NODE_CLAIM);
+        if (nodeId == null || nodeId.isBlank()) {
+            throw new InvalidBearerTokenException("Hub token without node id");
+        }
+        return new Actor.HubNode(tenant(jwt), nodeId);
+    }
+
     private Actor tenantUser(Jwt jwt) {
+        return loader.load(tenant(jwt), jwt.getSubject());
+    }
+
+    private static TenantId tenant(Jwt jwt) {
         String claim = jwt.getClaimAsString(TENANT_CLAIM);
         if (claim == null) {
             throw new InvalidBearerTokenException("Missing " + TENANT_CLAIM + " claim");
         }
-        TenantId tenant;
         try {
-            tenant = TenantId.of(claim);
+            return TenantId.of(claim);
         } catch (IllegalArgumentException e) {
             throw new InvalidBearerTokenException("Malformed " + TENANT_CLAIM + " claim");
         }
-        return loader.load(tenant, jwt.getSubject());
     }
 
 }

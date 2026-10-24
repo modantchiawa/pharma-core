@@ -16,6 +16,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class UserManagementService {
     private final AuditTrail audit;
     private final TenantUserLoader actorCache;
     private final Clock clock;
+    private final PasswordEncoder passwords;
 
     public UserManagementService(AppUserRepository users, RoleRepository roles, AuditTrail audit,
                                  TenantUserLoader actorCache, Clock clock) {
@@ -35,6 +38,7 @@ public class UserManagementService {
         this.audit = audit;
         this.actorCache = actorCache;
         this.clock = clock;
+        this.passwords = new BCryptPasswordEncoder(12);
     }
 
     @Transactional(readOnly = true)
@@ -42,17 +46,27 @@ public class UserManagementService {
         return users.findAllWithRoles().stream().map(UserView::of).toList();
     }
 
+    /**
+     * Creates a local account with a temporary password (returned once, to hand over to the
+     * person); the user must change it at first login.
+     */
     @Transactional
-    public UserView register(String externalSubject, String email, String displayName, Set<UUID> roleIds) {
+    public Registration register(String email, String displayName, Set<UUID> roleIds) {
         if (users.existsByEmailIgnoreCase(email)) {
             throw new BusinessRuleException("email-taken", "A user with this e-mail already exists");
         }
-        var user = new AppUserEntity(externalSubject, email.toLowerCase(), displayName, clock.instant());
+        UUID id = UUID.randomUUID();
+        var user = new AppUserEntity(id, id.toString(), email.toLowerCase(), displayName, clock.instant());
+        String temporary = PasswordPolicy.temporaryPassword();
+        user.setPassword(passwords.encode(temporary), true, clock.instant());
         user.assignRoles(resolveRoles(roleIds));
         users.save(user);
         audit.record("USER_REGISTERED", "USER", user.id(), Map.of(
                 "email", user.email(), "roles", codes(user.roles())));
-        return UserView.of(user);
+        return new Registration(UserView.of(user), temporary);
+    }
+
+    public record Registration(UserView user, String temporaryPassword) {
     }
 
     @Transactional

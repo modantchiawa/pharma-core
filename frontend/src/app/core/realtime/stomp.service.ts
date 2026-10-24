@@ -2,7 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 import { Observable } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
-import { APP_ENVIRONMENT } from '../config';
+import { NodeInfoService } from '../api/node-info.service';
 
 /**
  * Single STOMP connection shared by the app. The bearer token is read before every
@@ -10,7 +10,7 @@ import { APP_ENVIRONMENT } from '../config';
  */
 @Injectable({ providedIn: 'root' })
 export class StompService {
-  private readonly env = inject(APP_ENVIRONMENT);
+  private readonly node = inject(NodeInfoService);
   private readonly auth = inject(AuthService);
   private readonly registry = new Map<string, Set<(message: IMessage) => void>>();
   private readonly active = new Map<string, StompSubscription>();
@@ -56,7 +56,7 @@ export class StompService {
       return;
     }
     const client = new Client({
-      brokerURL: absoluteWsUrl(this.env.wsUrl),
+      brokerURL: absoluteWsUrl(this.node.networkWsUrl()),
       reconnectDelay: 5_000,
       heartbeatIncoming: 20_000,
       heartbeatOutgoing: 20_000,

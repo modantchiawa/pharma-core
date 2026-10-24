@@ -16,15 +16,10 @@ export class AuthCallbackPage {
     const permissions = inject(PermissionService);
     const router = inject(Router);
     auth
-      .completeLogin()
+      .completePlatformLogin()
       .then(async (returnUrl) => {
-        if (auth.isPlatformOperator()) {
-          permissions.clear();
-          await router.navigateByUrl('/platform');
-        } else {
-          await permissions.load();
-          await router.navigateByUrl(returnUrl);
-        }
+        permissions.clear();
+        await router.navigateByUrl(auth.isPlatformOperator() ? returnUrl : '/login');
       })
       .catch(() => this.error.set('Échec de la connexion, veuillez réessayer.'));
   }

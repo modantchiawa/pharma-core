@@ -50,6 +50,28 @@ export class CatalogSyncService {
       .toArray();
   }
 
+  /**
+   * Therapeutic equivalents in the local cache: same active substance, other product, in stock
+   * first. Works offline, which is when a substitute is most needed at the counter.
+   */
+  async alternatives(product: CachedProduct, limit = 10): Promise<CachedProduct[]> {
+    if (!product.dci) {
+      return [];
+    }
+    const wanted = product.dci.trim().toUpperCase();
+    const all = await this.databases
+      .db()
+      .products.filter((p) => p.active && p.productId !== product.productId && !!p.dci)
+      .toArray();
+    return all
+      .filter((p) => (p.dci as string).trim().toUpperCase() === wanted)
+      .sort(
+        (a, b) =>
+          b.availableQuantity - a.availableQuantity || a.designation.localeCompare(b.designation),
+      )
+      .slice(0, limit);
+  }
+
   private async doPull(): Promise<number> {
     const db = this.databases.db();
     let cursor = ((await db.meta.get(CURSOR_KEY))?.value as CatalogCursor | undefined) ?? {

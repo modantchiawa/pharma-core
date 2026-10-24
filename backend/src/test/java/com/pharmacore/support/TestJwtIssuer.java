@@ -45,7 +45,7 @@ public final class TestJwtIssuer implements TrustedIssuerRegistry {
     }
 
     @Override
-    public Optional<TrustedIssuer> find(String issuer) {
+    public Optional<TrustedIssuer> find(String issuer, String kid) {
         return Optional.ofNullable(issuers.get(issuer));
     }
 

@@ -84,6 +84,30 @@ public sealed interface Actor {
         }
     }
 
+    /** A paired pharmacy hub synchronizing with the cloud (machine identity, not a person). */
+    record HubNode(TenantId tenant, String nodeId) implements Actor {
+
+        @Override
+        public Optional<TenantId> tenantId() {
+            return Optional.of(tenant);
+        }
+
+        @Override
+        public boolean crossTenant() {
+            return false;
+        }
+
+        @Override
+        public String auditType() {
+            return "HUB";
+        }
+
+        @Override
+        public String auditId() {
+            return nodeId;
+        }
+    }
+
     /** Background job or internal process, optionally confined to one tenant. */
     record SystemProcess(String process, TenantId tenant) implements Actor {
 

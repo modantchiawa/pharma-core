@@ -34,8 +34,8 @@ spring:
       spec: maximumSize=20000,expireAfterWrite=60s
   servlet:
     multipart:
-      max-file-size: 512KB
-      max-request-size: 1MB
+      max-file-size: 20MB
+      max-request-size: 21MB
 
 server:
   shutdown: graceful
@@ -58,6 +58,11 @@ management:
         enabled: true
 
 pharmacore:
+  node:
+    mode: ${PHARMACORE_MODE:CLOUD}
+    keys-dir: ${PHARMACORE_KEYS_DIR:./data/keys}
+  invoicing:
+    certification: ${INVOICE_CERTIFICATION:NONE}
   security:
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:4200}
     issuers:
