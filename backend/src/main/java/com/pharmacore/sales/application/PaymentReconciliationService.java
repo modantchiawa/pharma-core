@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -44,20 +45,28 @@ public class PaymentReconciliationService {
         this.clock = clock;
     }
 
-    /** Refuses a transaction reference already used by a payment of this pharmacy. */
-    @Transactional(readOnly = true)
-    public void assertReferenceUnused(String provider, String reference) {
+    /**
+     * Has this operator reference already justified a payment of this pharmacy? A plain query,
+     * safe to call inside the sale transaction (no exception, so nothing is marked rollback-only).
+     */
+    @Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
+    public boolean isReferenceUsed(String provider, String reference) {
         if (provider == null || reference == null || reference.isBlank()) {
-            return;
+            return false;
         }
-        boolean used = jdbc.sql("""
+        return jdbc.sql("""
                         SELECT exists(SELECT 1 FROM sale_payment
                                       WHERE tenant_id = :tenant AND provider = :provider AND reference = :reference)""")
                 .param("tenant", TenantContext.requireTenant().value())
                 .param("provider", provider)
                 .param("reference", reference.trim())
                 .query(Boolean.class).single();
-        if (used) {
+    }
+
+    /** Refuses a transaction reference already used by a payment of this pharmacy. */
+    @Transactional(readOnly = true)
+    public void assertReferenceUnused(String provider, String reference) {
+        if (isReferenceUsed(provider, reference)) {
             throw new BusinessRuleException("duplicate-payment-reference",
                     "La référence " + reference + " (" + provider + ") a déjà justifié un paiement");
         }

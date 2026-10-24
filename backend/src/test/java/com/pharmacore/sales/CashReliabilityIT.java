@@ -56,7 +56,8 @@ class CashReliabilityIT extends IntegrationTest {
         // The same operator reference cannot justify a second payment
         call(post("/api/v1/sales"), pharmacy.ownerToken(), saleJson(product, 1,
                 "[{\"method\":\"MOBILE_MONEY\",\"amountCents\":500,\"provider\":\"AIRTEL_MONEY\",\"reference\":\"MM-001\"}]"))
-                .andExpect(status().isConflict());
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.violations[0]").value("DUPLICATE_PAYMENT_REFERENCE"));
 
         // --- cancellations: below threshold, drawer open: no signature needed
         call(post("/api/v1/sales/" + s4 + "/cancellation"), cashier, """

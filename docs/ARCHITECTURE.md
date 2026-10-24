@@ -184,6 +184,22 @@ mêmes politiques s'appliquent (défense en profondeur si une base est consolid�
 
 Le modèle de données complet est dans les migrations `V1`…`V7` (`backend/src/main/resources/db/migration`).
 
+### 4.1 Domaines ajoutés en v3
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Annuaire public** (cloud) | fonctions `SECURITY DEFINER` `public_pharmacies`, `public_availability`, `partner_stock_availability`, `public_guards` ; `PublicDirectoryController`, `PublicRateLimiter` | Opt-in par officine (`public_listing`, `public_availability`) et par réseau (`publish_guards`) ; le public ne voit qu'un **niveau** (disponible / dernières unités), jamais de quantité, de prix ni de lot ; limitation à 30 requêtes par minute et par adresse ; usage audité en compteurs agrégés ; texte de partage WhatsApp/SMS généré par `GuardShareText` (domaine pur) |
+| **Recherche réseau** | `GET /api/v1/network/stock?q=`, `GET /api/v1/network/pharmacies/{id}/stock?q=` | « Qui a ce produit ? » sur plusieurs produits à la fois et « qu'a cette pharmacie ? », toujours plafonnés par `quantity_cap` du réseau |
+| **Fiabilité du stock** | `StockCountService`, `StockIntegrityService`, `ExpiryWriteOffService`, `InventoryJobs` | Inventaire **à l'aveugle** (attendu figé au démarrage, masqué au compteur, écart appliqué à la validation par mouvement `COUNT_ADJUSTMENT`) ; contrôle nocturne recalculant chaque lot depuis ses mouvements et les réservations depuis le journal (écarts audités `STOCK_INTEGRITY_MISMATCH`) ; sortie automatique des lots périmés (`EXPIRY_WRITE_OFF`, valeur au coût) ; lecture GS1 DataMatrix (lot, péremption) au comptoir, à la réception et à l'inventaire |
+| **Fiabilité de la caisse** | `CashSessionService`, `CashReportHashing`, `Denominations`, `SupervisorApprovalService`, `PaymentReconciliationService` | Clôture par **coupures XOF** et montants déclarés par mode et opérateur, rapprochement avec les paiements enregistrés, attendu masqué au caissier (clôture à l'aveugle) ; écart au-delà du seuil → approbation `CASH_APPROVE` ; rapports Z **chaînés par SHA-256** par poste ; annulation au-dessus d'un seuil ou sur session fermée → PIN d'un superviseur ; paiements mobile money et carte en attente de confirmation sur relevé opérateur, référence de transaction **unique** (index + anomalie `DUPLICATE_PAYMENT_REFERENCE`) |
+| **Tiers payant** | `InsurerService`, `InsuranceCoverageResolver`, `InsuranceStatementService`, `CoverageContext` (règle pure) | Part assureur = arrondi de net × taux de la police, plafonnée par le plafond mensuel restant ; déclarée différente → `INSURANCE_SHARE_MISMATCH` ; police invalide ou d'un autre client → `INSURANCE_POLICY_INVALID` ; créance au sous-compte `4112nnn` de l'assureur ; bordereaux `BRD-AAAA-NNNN` (génération verrouillée, émission, CSV, règlement partiel ou total par virement/chèque/carte/mobile money, jamais en espèces) ; encours par assureur |
+| **Ordonnances** | `PrescriptionService`, `DispensingRegisterService` | Registre des délivrances sur ordonnance (listes I, II, stupéfiants) avec export audité ; ordonnances renouvelables (délivrances autorisées, dernière délivrance, expiration), refus `PRESCRIPTION_RENEWAL_REFUSED`, rappels dus |
+| **Pilotage** | `DashboardService` | Une requête d'agrégat par indicateur ; marge brute = net − coût des lots alloués ; comparaison avec la période précédente de même longueur ; période bornée à un an |
+| **Substitution** | `CatalogService.alternatives`, `CatalogSyncService.alternatives` (poste) | Même DCI et même dosage ; disponibilité et prix de l'officine ; calculée hors ligne sur le cache IndexedDB du poste |
+
+Migrations `V8`…`V11`. Les tables de v3 suivent `docs/CONVENTIONS.md` : RLS, droits, enregistrement
+dans `sync_table`, clés étrangères différables.
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste

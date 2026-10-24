@@ -29,9 +29,13 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Vente à crédit** (ardoise) avec plafond par client et encaissement des créances | Oui | ✅ |
 | Remises par ligne avec plafond par rôle | Oui | ✅ RBAC + ABAC |
 | Ordonnances, prescripteur, ordonnancier (numérotation sans trou), stupéfiants | Oui | ✅ |
-| Tiers payant : organismes, taux de couverture, bordereaux de facturation aux assureurs | Oui | 🟡 enregistré par vente (compte 4112) ; bordereaux par organisme : phase 2 |
+| **Registre des délivrances** (listes I, II, stupéfiants) avec export ; ordonnances renouvelables, délivrances suivies, rappels de renouvellement | Oui | ✅ |
+| Tiers payant : assureurs, mutuelles, entreprises conventionnées ; polices par client (taux, plafond mensuel, validité) ; part assureur calculée à la vente ; **bordereaux** par organisme (génération, émission, export CSV, règlement partiel), encours par assureur | Oui | ✅ |
 | Annulation / retour avec remise en stock dans le lot d'origine | Oui | ✅ |
 | **Sessions de caisse** : fond, mouvements, dépenses, rapport X/Z, écarts | Oui | ✅ |
+| Clôture **à l'aveugle** par coupures XOF, rapprochement par mode et opérateur mobile money, écart au-dessus du seuil soumis à approbation, rapports Z chaînés (inviolables) | Rare | ✅ |
+| Annulation ou remboursement au-dessus d'un seuil (ou sur session fermée) soumis au **PIN d'un superviseur** | Partiel | ✅ |
+| Rapprochement des paiements **mobile money et carte** avec les relevés opérateurs (confirmation, rejet → vente en revue), référence de transaction unique | Rare | ✅ |
 | Ticket thermique 80 mm aux couleurs de la pharmacie, facture A4 | Oui | ✅ ticket · 🟡 facture A4 : phase 2 |
 | **Facture certifiée DGI (SECeF)** | Obligatoire au Niger pour les assujettis TVA | 🟡 port de certification, file de retry, QR/code sur ticket ; connecteur DGI à réaliser avec les spécifications SECeF |
 | Afficheur client, tiroir-caisse, imprimante étiquettes | Oui | ⬜ phase 2 (coque Tauri pour ESC/POS brut et tiroir) |
@@ -48,7 +52,9 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Fournisseurs (grossistes-répartiteurs), références, prix d'achat, colisage, minimum de commande | Oui | ✅ |
 | Envoi de commande : texte WhatsApp / e-mail, impression, CSV | Oui | ✅ texte · 🟡 PDF : phase 2 |
 | Réception de livraison lot par lot, mise à jour des prix, suivi des reliquats | Oui | ✅ |
-| Inventaire (comptage, écarts, valorisation) | Oui | ✅ ajustement par lot · 🟡 session d'inventaire guidée : phase 2 |
+| Inventaire (comptage, écarts, valorisation) | Oui | ✅ session d'inventaire **à l'aveugle** par scan ou saisie, attendu masqué au compteur, validation par un pharmacien, écarts audités |
+| **Contrôle d'intégrité** nocturne du stock (lots recalculés depuis les mouvements, réservations), sortie automatique des lots périmés avec valeur au coût | Rare | ✅ |
+| Lecture des codes **GS1 DataMatrix** (lot, péremption) au comptoir, à la réception et à l'inventaire | Partiel | ✅ |
 | Transferts entre pharmacies d'un même groupe | Parfois | ✅ réservations réseau ; transfert intra-groupe : phase 2 |
 | Catalogue national (CIP/DCI, prix indicatifs, monographies) maintenu par l'éditeur | Rare | ✅ |
 
@@ -68,13 +74,16 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 
 | Fonction | Attendu | PharmaCore |
 |---|---|---|
-| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 32 permissions, 5 rôles prédéfinis modifiables |
+| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 41 permissions, 5 rôles prédéfinis modifiables |
 | Connexion mot de passe + **bascule caissier par PIN**, sans Internet | Oui | ✅ |
 | Journal d'audit inaltérable | Rare | ✅ chaîne SHA-256 |
 | **Sauvegardes** automatiques locales, USB et cloud | Oui | ✅ tâche planifiée + réplique cloud continue |
 | Supervision éditeur multi-pharmacies | — | ✅ |
 | Personnalisation : logo, couleurs, mentions, ticket ; densité, contraste, taille de texte, mode sombre par poste | Partiel | ✅ |
 | Réseau inter-pharmacies : disponibilité d'urgence, réservations, gardes, messagerie | Rare | ✅ (nécessite Internet) |
+| **« Qui a ce produit ? »** sur plusieurs produits à la fois et **« qu'a cette pharmacie ? »** chez les partenaires | Non | ✅ |
+| **Annuaire public** (patients, médecins) : disponibilité d'un produit par ville (niveau seulement, opt-in de l'officine), fiche de la pharmacie, itinéraire, WhatsApp | Non | ✅ page `/public`, API publique limitée en débit |
+| **Pharmacies de garde partagées** : publication publique par réseau (opt-in du coordinateur), message du jour prêt pour WhatsApp/SMS | Non | ✅ |
 | Multilingue (français ; haoussa, zarma, wolof) | Français seul | 🟡 français ; infrastructure i18n Angular : phase 3 |
 | Installation Windows multi-postes | Oui | ✅ paquet hub (services Windows) + PWA installable |
 
@@ -97,5 +106,6 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Phase | Contenu | Objectif |
 |---|---|---|
 | **1 (livrée)** | Hub + cloud, caisse hors-ligne, stocks FEFO, commandes, comptabilité, sessions de caisse, crédit, réseau, supervision, paquet Windows | Pilotes dans 2–3 officines |
-| **2** | Connecteur SECeF, bordereaux tiers payant, facture A4 PDF, tableaux de bord, inventaire guidé, étiquettes de prix, grand livre, coque Tauri (tiroir, ESC/POS) | Parité complète avec les PGO installés |
+| **2 (livrée)** | Bordereaux tiers payant, tableau de bord, inventaire à l'aveugle et contrôle d'intégrité, caisse à l'aveugle et approbations, rapprochement mobile money, registre des ordonnances, substitution par DCI, annuaire public et gardes partagées | Parité et avance sur les PGO installés |
+| **2 bis** | Connecteur SECeF certifié, facture A4 PDF, étiquettes de prix, grand livre, coque Tauri (tiroir, ESC/POS), avoirs sur bordereaux émis | Conformité fiscale complète |
 | **3** | Multi-langue, application mobile du titulaire (chiffres du jour, alertes), commandes électroniques vers les grossistes (EDI/API), base d'interactions médicamenteuses sous licence, SMS clients (ordonnance prête, rappel de traitement) | Différenciation |

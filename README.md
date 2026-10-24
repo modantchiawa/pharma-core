@@ -3,7 +3,10 @@
 Progiciel d'officine pour l'Afrique de l'Ouest : **serveur local par pharmacie (hub Windows)**
 synchronisé avec le cloud, caisse multi-postes entièrement utilisable sans Internet, mobile
 money et crédit client, stocks par lot (FEFO), fiche de commande du lendemain, comptabilité
-SYSCOHADA (résultat, bilan), réseau inter-pharmacies, console de supervision éditeur.
+SYSCOHADA (résultat, bilan), tiers payant avec bordereaux assureurs, registre des ordonnances,
+inventaires à l'aveugle et contrôle d'intégrité, caisse à l'aveugle avec approbations, tableau de
+bord, réseau inter-pharmacies (qui a ce produit ?), annuaire public et pharmacies de garde
+partagées, console de supervision éditeur.
 
 | Dossier | Contenu |
 |---|---|
@@ -15,6 +18,7 @@ SYSCOHADA (résultat, bilan), réseau inter-pharmacies, console de supervision �
 | [`docs/FEATURES.md`](docs/FEATURES.md) | Périmètre fonctionnel comparé aux PGO du marché, feuille de route |
 | [`docs/WINDOWS.md`](docs/WINDOWS.md) | Installation en officine, pannes (Internet, courant, matériel), sauvegardes |
 | [`docs/UX.md`](docs/UX.md) | Principes d'interface et système de design personnalisable |
+| [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Règles de développement : migrations, RLS, synchronisation, tests |
 
 ## Démarrage rapide
 

@@ -30,7 +30,6 @@ import com.pharmacore.sales.persistence.SalePaymentEntity;
 import com.pharmacore.sales.persistence.SaleRepository;
 import com.pharmacore.sales.persistence.TenantSequenceRepository;
 import com.pharmacore.shared.audit.AuditTrail;
-import com.pharmacore.shared.web.BusinessRuleException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -98,14 +97,8 @@ public class SaleRecordingService {
     }
 
     private boolean hasReusedPaymentReference(SaleDraft draft) {
-        for (SaleDraft.Payment payment : draft.payments()) {
-            try {
-                paymentReferences.assertReferenceUnused(payment.provider(), payment.reference());
-            } catch (BusinessRuleException e) {
-                return true;
-            }
-        }
-        return false;
+        return draft.payments().stream()
+                .anyMatch(payment -> paymentReferences.isReferenceUsed(payment.provider(), payment.reference()));
     }
 
     @Transactional
