@@ -175,6 +175,12 @@ export const routes: Routes = [
         loadComponent: () => import('./features/admin/import-page').then((m) => m.ImportPage),
       },
       {
+        path: 'admin/printers',
+        title: 'Imprimantes',
+        canActivate: [permissionGuard('PRINTER_MANAGE')],
+        loadComponent: () => import('./features/admin/printers-page').then((m) => m.PrintersPage),
+      },
+      {
         path: 'admin/roles',
         title: 'Rôles et droits',
         canActivate: [permissionGuard('ROLE_MANAGE')],

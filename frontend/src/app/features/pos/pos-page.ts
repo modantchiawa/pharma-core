@@ -30,7 +30,9 @@ import { uuidv7 } from '../../core/util/uuid';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { CartStore, discountPercent } from './cart.store';
-import { Receipt, ReceiptData } from './receipt';
+import { PaperFormat, TerminalTicketRequest } from '../../core/api/models';
+import { PrintSettingsService } from '../../core/printing/print-settings.service';
+import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -403,11 +405,31 @@ import { Receipt, ReceiptData } from './receipt';
           }}
           · {{ outbox.pendingCount() }} en attente
         </p>
+        @if (receipt(); as last) {
+          <div class="flex flex-wrap gap-2 text-sm">
+            <button
+              type="button"
+              class="rounded border px-2 py-1"
+              (click)="printReceipt(last, false)"
+            >
+              Réimprimer le ticket {{ last.ticketNumber }}
+            </button>
+            @if (printing.settings().invoicePaper === 'A4') {
+              <button
+                type="button"
+                class="rounded border px-2 py-1"
+                (click)="printReceipt(last, true)"
+              >
+                Facture A4
+              </button>
+            }
+          </div>
+        }
       </aside>
     </div>
 
     @if (receipt(); as data) {
-      <div class="hidden print:block"><app-receipt [data]="data" /></div>
+      <div class="hidden print:block"><app-receipt [data]="data" [format]="printFormat()" /></div>
     }
   `,
 })
@@ -440,6 +462,8 @@ export class PosPage {
   protected readonly message = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly receipt = signal<ReceiptData | null>(null);
+  protected readonly printing = inject(PrintSettingsService);
+  protected readonly printFormat = signal<PaperFormat>('MM80');
   protected readonly methods: { code: PaymentMethod; label: string }[] = [
     { code: 'CASH', label: 'Espèces (F4)' },
     { code: 'MOBILE_MONEY', label: 'Mobile money (F5)' },
@@ -663,6 +687,52 @@ export class PosPage {
     }
   }
 
+  /**
+   * Ticket on the register's thermal printer through the local server when one is configured
+   * (the sale may not be synchronized yet, so the terminal sends the ticket itself); otherwise,
+   * or when the printer cannot be reached, the browser prints the HTML ticket at the configured
+   * paper size. An invoice always goes through the browser on A4.
+   */
+  protected async printReceipt(data: ReceiptData, invoice: boolean): Promise<void> {
+    const settings = this.printing.settings();
+    if (invoice) {
+      this.printFormat.set('A4');
+      this.printing.printPage('A4');
+      return;
+    }
+    if (settings.mode !== 'BROWSER') {
+      const ticket: TerminalTicketRequest = {
+        ticketNumber: data.ticketNumber,
+        occurredAt: data.occurredAt.toISOString(),
+        cashier: data.cashier,
+        customer: data.customer ?? null,
+        lines: data.lines.map((l) => ({
+          designation: l.designation,
+          quantity: l.quantity,
+          unitPriceCents: l.unitPriceCents,
+          discountCents: l.discountCents,
+          vatRate: l.vatRate,
+        })),
+        discountCents: data.discountCents,
+        netCents: data.netCents,
+        payments: data.payments.map((p) => ({
+          label: `${PAYMENT_LABELS[p.method] ?? p.method}${p.provider ? ' ' + p.provider.replace(/_/g, ' ').toLowerCase() : ''}`,
+          amountCents: p.amountCents,
+        })),
+        changeDueCents: data.changeDueCents,
+        vat: data.vat.map((v) => ({ rate: v.rate, totalTtcCents: v.totalTtc, vatCents: v.vat })),
+        offline: data.offline,
+      };
+      if (await this.printing.printTicket(ticket)) {
+        return;
+      }
+      this.message.set('Imprimante thermique injoignable : impression par le navigateur');
+    }
+    const paper = settings.paper === 'A4' ? 'A4' : settings.paper;
+    this.printFormat.set(paper);
+    this.printing.printPage(paper);
+  }
+
   /** Commits the sale locally first (zero data loss), prints, then lets the outbox sync it. */
   protected async checkout(): Promise<void> {
     if (!this.cart.canCheckout() || this.busy()) {
@@ -704,11 +774,21 @@ export class PosPage {
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
         });
       });
-      this.receipt.set({
+      const customer = this.cart.customer();
+      const policy = this.cart.policy();
+      const data: ReceiptData = {
         ticketNumber,
         terminalId: this.terminal.terminalId,
         occurredAt,
         cashier: this.cashierName(),
+        customer: customer
+          ? {
+              displayName: customer.displayName,
+              phone: customer.phone,
+              address: customer.address,
+              policy: policy ? `${policy.insurerName} ${policy.policyNumber}` : null,
+            }
+          : null,
         lines: this.cart.lines(),
         payments: this.cart.payments(),
         grossCents: this.cart.grossCents(),
@@ -717,9 +797,12 @@ export class PosPage {
         changeDueCents: this.cart.changeDueCents(),
         vat: this.cart.vatBreakdown(),
         offline: !this.connectivity.online(),
-      });
+      };
+      this.receipt.set(data);
       this.cart.clear();
-      setTimeout(() => window.print());
+      if (this.printing.settings().autoPrint) {
+        void this.printReceipt(data, false);
+      }
       void this.outbox.flush();
     } catch (error) {
       this.message.set(`Vente non enregistrée : ${(error as Error).message}`);

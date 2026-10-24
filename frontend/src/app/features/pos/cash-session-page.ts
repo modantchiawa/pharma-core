@@ -15,6 +15,34 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { PaperFormat } from '../../core/api/models';
+import { PosDatabaseService } from '../../core/offline/pos-database.service';
+import { PrintSettingsService } from '../../core/printing/print-settings.service';
+import { Receipt, ReceiptData } from './receipt';
+
+/** Detail of a recorded sale as the server returns it, enough to rebuild its ticket. */
+interface SaleDetail {
+  summary: {
+    ticketNumber: string;
+    terminalId: string;
+    occurredAt: string;
+    status: 'COMPLETED' | 'CANCELLED';
+    certificationCode: string | null;
+    certificationQr: string | null;
+    origin: string;
+  };
+  totalGrossCents: number;
+  totalDiscountCents: number;
+  lines: {
+    productId: string;
+    quantity: number;
+    unitPriceCents: number;
+    discountCents: number;
+    netCents: number;
+    vatRate: number;
+  }[];
+  payments: { method: PaymentMethod; amountCents: number; provider: string | null }[];
+}
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Espèces',
@@ -54,10 +82,13 @@ interface SessionSale {
  */
 @Component({
   selector: 'app-cash-session-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective],
+  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Receipt],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="grid gap-4 p-4 lg:grid-cols-[1fr_380px]">
+    @if (reprint(); as data) {
+      <div class="hidden print:block"><app-receipt [data]="data" [format]="reprintFormat()" /></div>
+    }
+    <div class="grid gap-4 p-4 lg:grid-cols-[1fr_380px]" [class.print:hidden]="reprint() !== null">
       <section class="space-y-4">
         @if (session(); as s) {
           <div class="rounded-lg border bg-white p-4">
@@ -217,17 +248,35 @@ interface SessionSale {
                     <td class="py-1">{{ sale.ticketNumber }}</td>
                     <td class="py-1 text-right">{{ sale.totalNetCents | money }}</td>
                     <td class="py-1 text-right">
+                      <button
+                        type="button"
+                        class="rounded border px-2 py-0.5"
+                        (click)="reprintSale(sale, false)"
+                        title="Réimprimer le ticket"
+                      >
+                        Ticket
+                      </button>
+                      @if (printing.settings().invoicePaper === 'A4') {
+                        <button
+                          type="button"
+                          class="ml-1 rounded border px-2 py-0.5"
+                          (click)="reprintSale(sale, true)"
+                          title="Facture A4"
+                        >
+                          Facture
+                        </button>
+                      }
                       @if (sale.status === 'COMPLETED') {
                         <button
                           *appHasPermission="'SALE_CANCEL'"
                           type="button"
-                          class="rounded border px-2 py-0.5"
+                          class="ml-1 rounded border px-2 py-0.5"
                           (click)="startCancel(sale)"
                         >
                           Annuler
                         </button>
                       } @else {
-                        annulée
+                        <span class="ml-1">annulée</span>
                       }
                     </td>
                   </tr>
@@ -494,6 +543,11 @@ export class CashSessionPage {
   private readonly apiBase = inject(APP_ENVIRONMENT).apiUrl;
   private readonly api = `${this.apiBase}/v1/cash/sessions`;
 
+  protected readonly printing = inject(PrintSettingsService);
+  private readonly databases = inject(PosDatabaseService);
+  protected readonly reprint = signal<ReceiptData | null>(null);
+  protected readonly reprintFormat = signal<PaperFormat>('MM80');
+
   protected readonly session = signal<CashSessionReport | null>(null);
   protected readonly recent = signal<CashSessionReport[]>([]);
   protected readonly sales = signal<SessionSale[]>([]);
@@ -546,8 +600,82 @@ export class CashSessionPage {
     return Object.entries(s.mobileMoneyByProvider);
   }
 
+  /** X/Z report through the browser, on the register's ticket paper. */
   protected print(): void {
-    window.print();
+    this.reprint.set(null);
+    this.printing.printPage(this.printing.settings().paper);
+  }
+
+  /**
+   * Ticket or invoice of a recorded sale: the thermal printer when the register has one (ticket
+   * only), otherwise the browser with the ticket rebuilt from the sale detail and the local
+   * product cache.
+   */
+  protected async reprintSale(sale: SessionSale, invoice: boolean): Promise<void> {
+    this.error.set(null);
+    if (!invoice && (await this.printing.printSale(sale.id))) {
+      return;
+    }
+    try {
+      const detail = await firstValueFrom(
+        this.http.get<SaleDetail>(`${this.apiBase}/v1/sales/${sale.id}`),
+      );
+      const products = this.databases.db().products;
+      const lines = await Promise.all(
+        detail.lines.map(async (line) => {
+          const cached = await products.get(line.productId);
+          return {
+            productId: line.productId,
+            designation: cached?.designation ?? `Produit ${line.productId.slice(0, 8)}`,
+            cip13: cached?.cip13 ?? '',
+            listing: cached?.listing ?? 'NONE',
+            vatRate: line.vatRate,
+            unitPriceCents: line.unitPriceCents,
+            quantity: line.quantity,
+            discountCents: line.discountCents,
+            availableQuantity: cached?.availableQuantity ?? 0,
+          };
+        }),
+      );
+      const byRate = new Map<number, number>();
+      for (const line of detail.lines) {
+        byRate.set(line.vatRate, (byRate.get(line.vatRate) ?? 0) + line.netCents);
+      }
+      const net = detail.lines.reduce((sum, line) => sum + line.netCents, 0);
+      const paid = detail.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      this.reprint.set({
+        ticketNumber: detail.summary.ticketNumber,
+        terminalId: detail.summary.terminalId,
+        occurredAt: new Date(detail.summary.occurredAt),
+        cashier: this.permissions.profile()?.displayName ?? '',
+        lines,
+        payments: detail.payments.map((payment) => ({
+          method: payment.method,
+          amountCents: payment.amountCents,
+          provider: payment.provider ?? undefined,
+        })),
+        grossCents: detail.totalGrossCents,
+        discountCents: detail.totalDiscountCents,
+        netCents: net,
+        changeDueCents: Math.max(0, paid - net),
+        vat: [...byRate.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([rate, totalTtc]) => ({
+            rate,
+            totalTtc,
+            vat: Math.round(totalTtc - totalTtc / (1 + rate / 100)),
+          })),
+        offline: detail.summary.origin === 'OFFLINE_REPLAY',
+        cancelled: detail.summary.status === 'CANCELLED',
+        certificationCode: detail.summary.certificationCode,
+        certificationQr: detail.summary.certificationQr,
+      });
+      const paper = invoice ? 'A4' : this.printing.settings().paper;
+      this.reprintFormat.set(paper);
+      this.printing.printPage(paper);
+    } catch {
+      this.error.set('Ticket indisponible : la vente n’a pas pu être relue');
+    }
   }
 
   protected setCount(value: number, count: number | null): void {
