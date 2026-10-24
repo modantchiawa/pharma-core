@@ -65,12 +65,16 @@ export interface SalePaymentRequest {
   thirdPartyCode?: string;
   reference?: string;
   provider?: string;
+  /** Insurance policy covering a THIRD_PARTY_PAYER share. */
+  policyId?: string;
 }
 
 export interface PrescriptionRequest {
   prescriberName: string;
   prescriberRpps?: string;
   patientReference?: string;
+  /** Renewable prescription on file this dispensing counts against. */
+  prescriptionId?: string;
 }
 
 export interface SaleRequest {
@@ -529,4 +533,143 @@ export interface PendingPayment {
   amountCents: number;
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'NOT_REQUIRED';
   rejectionReason: string | null;
+}
+
+// ---------------------------------------------------------------- tiers payant
+
+export type InsurerKind = 'MUTUELLE' | 'ASSURANCE' | 'ETAT' | 'ENTREPRISE';
+
+export interface Insurer {
+  id: string;
+  code: string;
+  accountCode: string;
+  active: boolean;
+  details: {
+    name: string;
+    kind: InsurerKind;
+    defaultCoverageRate: number;
+    contactName: string | null;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    paymentTermsDays: number;
+  };
+}
+
+export interface InsurancePolicy {
+  id: string;
+  insurerId: string;
+  insurerName: string;
+  customerId: string;
+  policyNumber: string;
+  beneficiaryName: string;
+  coverageRate: number;
+  monthlyCeilingCents: number | null;
+  /** Null when the policy has no monthly ceiling. */
+  remainingCeilingCents: number | null;
+  validFrom: string;
+  validUntil: string | null;
+  active: boolean;
+  usable: boolean;
+}
+
+/** Insurer share of a sale total, as the server computes it (rate rounded half up, ceiling cap). */
+export function insuredShareCents(policy: InsurancePolicy, netCents: number): number {
+  const share = Math.floor((netCents * policy.coverageRate + 50) / 100);
+  return policy.remainingCeilingCents === null
+    ? share
+    : Math.min(share, policy.remainingCeilingCents);
+}
+
+export type StatementStatus = 'DRAFT' | 'ISSUED' | 'PAID';
+
+export interface InsurerStatement {
+  id: string;
+  insurerId: string;
+  insurerName: string;
+  number: string;
+  periodFrom: string;
+  periodTo: string;
+  status: StatementStatus;
+  totalCents: number;
+  paidCents: number;
+  remainingCents: number;
+  lineCount: number;
+  createdAt: string;
+  issuedAt: string | null;
+  paidAt: string | null;
+  paymentMethod: string | null;
+  paymentReference: string | null;
+}
+
+export interface InsurerStatementDetail {
+  statement: InsurerStatement;
+  lines: {
+    saleId: string;
+    ticketNumber: string;
+    occurredAt: string;
+    policyNumber: string | null;
+    beneficiaryName: string | null;
+    saleTotalCents: number;
+    amountCents: number;
+  }[];
+}
+
+export interface InsurerReceivable {
+  insurerId: string;
+  insurerName: string;
+  accountCode: string;
+  billedUnpaidCents: number;
+  unbilledCents: number;
+  unbilledSales: number;
+  totalCents: number;
+}
+
+// ---------------------------------------------------------------- ordonnances
+
+export type PrescriptionStatus = 'ACTIVE' | 'EXHAUSTED' | 'EXPIRED' | 'CANCELLED';
+
+export interface Prescription {
+  id: string;
+  customerId: string | null;
+  customerName: string | null;
+  prescriberName: string;
+  prescriberIdentifier: string | null;
+  patientReference: string | null;
+  issuedOn: string;
+  validUntil: string;
+  renewalsAllowed: number;
+  renewalsUsed: number;
+  renewalsRemaining: number;
+  status: PrescriptionStatus;
+  notes: string | null;
+  lastDispensedAt: string | null;
+  nextRenewalDue: string | null;
+  createdAt: string;
+  lines: {
+    lineNo: number;
+    productId: string;
+    cip13: string | null;
+    designation: string | null;
+    listing: DrugListing | null;
+    quantity: number;
+    posology: string | null;
+  }[];
+}
+
+export interface RegisterEntry {
+  ordonnancierNumber: number | null;
+  occurredAt: string;
+  ticketNumber: string;
+  saleId: string;
+  prescriberName: string | null;
+  prescriberIdentifier: string | null;
+  patientReference: string | null;
+  customerName: string | null;
+  cip13: string;
+  designation: string;
+  listing: DrugListing;
+  quantity: number;
+  cashier: string;
+  prescriptionId: string | null;
 }

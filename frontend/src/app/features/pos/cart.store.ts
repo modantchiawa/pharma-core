@@ -1,5 +1,13 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Customer, DrugListing, PaymentMethod, PrescriptionRequest } from '../../core/api/models';
+import {
+  Customer,
+  DrugListing,
+  InsurancePolicy,
+  PaymentMethod,
+  Prescription,
+  PrescriptionRequest,
+  insuredShareCents,
+} from '../../core/api/models';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CachedProduct } from '../../core/offline/pos-database';
 
@@ -20,6 +28,8 @@ export interface CartPayment {
   amountCents: number;
   thirdPartyCode?: string;
   provider?: string;
+  /** Insurance policy covering a THIRD_PARTY_PAYER share. */
+  policyId?: string;
 }
 
 const DISPENSING_PERMISSION: Record<DrugListing, string | null> = {
@@ -42,6 +52,10 @@ export class CartStore {
   readonly payments = signal<CartPayment[]>([]);
   readonly prescription = signal<PrescriptionRequest | null>(null);
   readonly customer = signal<Customer | null>(null);
+  /** Policy the cashier chose for the third-party payer share, among the customer's covers. */
+  readonly policy = signal<InsurancePolicy | null>(null);
+  /** Renewable prescription on file the dispensing counts against. */
+  readonly prescriptionOnFile = signal<Prescription | null>(null);
 
   readonly grossCents = computed(() =>
     this.lines().reduce((sum, l) => sum + l.unitPriceCents * l.quantity, 0),
@@ -65,6 +79,16 @@ export class CartStore {
   );
   readonly itemCount = computed(() => this.lines().reduce((sum, l) => sum + l.quantity, 0));
   readonly requiresPrescription = computed(() => this.lines().some((l) => l.listing !== 'NONE'));
+  /** What the chosen policy covers on the current total: the server applies the same rule. */
+  readonly insuredShareCents = computed(() => {
+    const policy = this.policy();
+    return policy ? insuredShareCents(policy, this.netCents()) : 0;
+  });
+  readonly insuredCents = computed(() =>
+    this.payments()
+      .filter((p) => p.method === 'THIRD_PARTY_PAYER' && p.policyId)
+      .reduce((sum, p) => sum + p.amountCents, 0),
+  );
 
   readonly vatBreakdown = computed(() => {
     const byRate = new Map<number, number>();
@@ -110,6 +134,21 @@ export class CartStore {
       } else if (credit > customer.availableCreditCents) {
         issues.push(`Crédit disponible dépassé pour ${customer.displayName}`);
       }
+    }
+    const insured = this.insuredCents();
+    if (insured > 0) {
+      const policy = this.policy();
+      if (!policy || this.customer()?.id !== policy.customerId) {
+        issues.push('Tiers payant : la police ne correspond pas au client');
+      } else if (insured !== this.insuredShareCents()) {
+        issues.push(
+          `Tiers payant : la part ${policy.insurerName} doit être de ${this.insuredShareCents() / 100}`,
+        );
+      }
+    }
+    const onFile = this.prescriptionOnFile();
+    if (onFile && onFile.renewalsRemaining <= 0) {
+      issues.push('Ordonnance épuisée : aucune délivrance restante');
     }
     return issues;
   });
@@ -210,11 +249,48 @@ export class CartStore {
     return applied;
   }
 
+  /** Replaces any previous insured share by the one the chosen policy covers right now. */
+  applyPolicy(policy: InsurancePolicy): void {
+    this.policy.set(policy);
+    const share = insuredShareCents(policy, this.netCents());
+    this.payments.update((payments) => [
+      ...payments.filter((p) => !(p.method === 'THIRD_PARTY_PAYER' && p.policyId)),
+      ...(share > 0
+        ? [
+            {
+              method: 'THIRD_PARTY_PAYER' as PaymentMethod,
+              amountCents: share,
+              policyId: policy.id,
+            },
+          ]
+        : []),
+    ]);
+  }
+
+  /** The prescription on file pre-fills the prescriber; the sale then counts as one dispensing. */
+  usePrescriptionOnFile(prescription: Prescription | null): void {
+    this.prescriptionOnFile.set(prescription);
+    this.prescription.update((current) =>
+      prescription
+        ? {
+            prescriberName: prescription.prescriberName,
+            prescriberRpps: current?.prescriberRpps,
+            patientReference: prescription.patientReference ?? current?.patientReference,
+            prescriptionId: prescription.id,
+          }
+        : current
+          ? { ...current, prescriptionId: undefined }
+          : null,
+    );
+  }
+
   clear(): void {
     this.lines.set([]);
     this.payments.set([]);
     this.prescription.set(null);
     this.customer.set(null);
+    this.policy.set(null);
+    this.prescriptionOnFile.set(null);
   }
 }
 

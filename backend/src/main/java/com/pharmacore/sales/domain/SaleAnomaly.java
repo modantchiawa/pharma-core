@@ -11,5 +11,13 @@ public enum SaleAnomaly {
     FUTURE_TIMESTAMP,
     STOCK_SHORTFALL,
     CREDIT_NOT_ALLOWED,
-    CREDIT_LIMIT_EXCEEDED
+    CREDIT_LIMIT_EXCEEDED,
+    /** Third-party payer share differs from what the policy covers on this sale. */
+    INSURANCE_SHARE_MISMATCH,
+    /** Policy unknown, inactive, expired or belonging to another customer. */
+    INSURANCE_POLICY_INVALID,
+    /** The renewable prescription attached to the sale is exhausted, expired or cancelled. */
+    PRESCRIPTION_RENEWAL_REFUSED,
+    /** A mobile money or card transaction reference was already used by another sale. */
+    DUPLICATE_PAYMENT_REFERENCE
 }

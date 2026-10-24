@@ -36,9 +36,11 @@ final class SaleRequests {
                     lines.stream().map(line -> new SaleDraft.Line(line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents())).toList(),
                     payments.stream().map(payment -> new SaleDraft.Payment(payment.method(), payment.amountCents(),
-                            payment.thirdPartyCode(), payment.reference(), payment.provider())).toList(),
+                            payment.thirdPartyCode(), payment.reference(), payment.provider(), payment.policyId()))
+                            .toList(),
                     prescription == null ? null : new SaleDraft.Prescription(prescription.prescriberName(),
-                            prescription.prescriberRpps(), prescription.patientReference()));
+                            prescription.prescriberRpps(), prescription.patientReference(),
+                            prescription.prescriptionId()));
         }
     }
 
@@ -52,12 +54,14 @@ final class SaleRequests {
                           @Positive long amountCents,
                           @Size(max = 20) String thirdPartyCode,
                           @Size(max = 64) String reference,
-                          @Size(max = 30) String provider) {
+                          @Size(max = 30) String provider,
+                          UUID policyId) {
     }
 
     record PrescriptionRequest(@Size(max = 150) String prescriberName,
                                @Pattern(regexp = "^[0-9]{11}$") String prescriberRpps,
-                               @Size(max = 64) String patientReference) {
+                               @Size(max = 64) String patientReference,
+                               UUID prescriptionId) {
     }
 
     record SyncBatchRequest(@NotEmpty @Size(max = 200) List<@Valid SaleRequest> sales) {

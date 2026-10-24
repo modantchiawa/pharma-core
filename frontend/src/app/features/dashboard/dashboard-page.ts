@@ -125,9 +125,7 @@ const METHOD_LABELS: Record<string, string> = {
                     class="fill-brand"
                   >
                     <title>
-                      {{ bar.date | date: 'dd/MM' }} : {{ bar.netCents | money }} ({{
-                        bar.count
-                      }}
+                      {{ bar.date | date: 'dd/MM' }} : {{ bar.netCents | money }} ({{ bar.count }}
                       ventes)
                     </title>
                   </rect>
