@@ -71,7 +71,9 @@ pharmacore:
   invoicing:
     certification: ${INVOICE_CERTIFICATION:NONE}
   security:
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:4200}
+    # Origines autorisées (motifs acceptés). Par défaut : tout port local, pour le développement.
+    # En production, l'URL exacte du site (PUBLIC_URL sur le VPS).
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
     issuers:
       - uri: ${OIDC_PLATFORM_ISSUER:http://localhost:8180/realms/pharmacore-platform}
         kind: PLATFORM

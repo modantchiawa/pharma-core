@@ -123,8 +123,11 @@ class ImportController {
     JobView catalogRun(@RequestParam("file") MultipartFile file, @RequestParam(required = false) String mapping,
                        @RequestParam(defaultValue = "false") boolean dryRun,
                        @RequestParam(defaultValue = "true") boolean updateExisting,
-                       @RequestParam(required = false) BigDecimal defaultVatRate) throws IOException {
-        var options = new ImportOptions(dryRun, updateExisting, null, null, defaultVatRate, 2);
+                       @RequestParam(required = false) BigDecimal defaultVatRate,
+                       @RequestParam(defaultValue = "XOF") String currency) throws IOException {
+        // The national reference carries public prices in the market's currency (XOF: no decimals)
+        int scale = Currency.getInstance(currency.toUpperCase()).getDefaultFractionDigits();
+        var options = new ImportOptions(dryRun, updateExisting, null, null, defaultVatRate, scale);
         return imports.run(ImportKind.CATALOG, file.getBytes(), file.getOriginalFilename(), mapping(mapping), options);
     }
 

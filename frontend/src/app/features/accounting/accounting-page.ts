@@ -7,238 +7,341 @@ import { BalanceRow, BalanceSheet, IncomeStatement } from '../../core/api/models
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { Icon } from '../../shared/ui/icon';
 
 type Tab = 'result' | 'balance-sheet' | 'trial-balance';
 
 /** Management accounting: income statement, simplified balance sheet, trial balance, export. */
 @Component({
   selector: 'app-accounting-page',
-  imports: [FormsModule, MoneyPipe, DatePipe, HasPermissionDirective],
+  imports: [FormsModule, MoneyPipe, DatePipe, HasPermissionDirective, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-4 p-4">
-      <div class="flex flex-wrap items-center gap-2">
-        <nav class="flex gap-2" role="tablist">
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Comptabilité</h1>
+          <p class="page-subtitle">
+            Compte de résultat, bilan et balance issus des écritures automatiques (SYSCOHADA)
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <a class="btn btn-secondary" [href]="exportUrl()" download>
+            <app-icon name="download" [size]="16" />
+            Exporter le journal (CSV)
+          </a>
           <button
             type="button"
-            class="rounded px-3 py-1"
-            [class.bg-brand]="tab() === 'result'"
-            [class.text-on-brand]="tab() === 'result'"
-            (click)="open('result')"
+            class="btn btn-secondary"
+            *appHasPermission="'ACCOUNTING_MANAGE'"
+            (click)="closeMonth()"
           >
-            Compte de résultat
+            <app-icon name="lock" [size]="16" />
+            Clôturer le mois de {{ from | date: 'MMMM yyyy' }}
           </button>
-          <button
-            type="button"
-            class="rounded px-3 py-1"
-            [class.bg-brand]="tab() === 'balance-sheet'"
-            [class.text-on-brand]="tab() === 'balance-sheet'"
-            (click)="open('balance-sheet')"
-          >
-            Bilan
-          </button>
-          <button
-            type="button"
-            class="rounded px-3 py-1"
-            [class.bg-brand]="tab() === 'trial-balance'"
-            [class.text-on-brand]="tab() === 'trial-balance'"
-            (click)="open('trial-balance')"
-          >
-            Balance
-          </button>
-        </nav>
-        <label class="text-sm"
-          >Du <input type="date" class="rounded border px-2 py-1" [(ngModel)]="from"
-        /></label>
-        <label class="text-sm"
-          >au <input type="date" class="rounded border px-2 py-1" [(ngModel)]="to"
-        /></label>
-        <button type="button" class="rounded border px-3 py-1" (click)="open(tab())">
-          Actualiser
-        </button>
-        <a class="ml-auto rounded border px-3 py-1" [href]="exportUrl()" download
-          >Exporter le journal (CSV)</a
-        >
-        <button
-          type="button"
-          class="rounded border px-3 py-1"
-          *appHasPermission="'ACCOUNTING_MANAGE'"
-          (click)="closeMonth()"
-        >
-          Clôturer le mois de {{ from | date: 'MMMM yyyy' }}
-        </button>
-      </div>
+        </div>
+      </header>
 
-      @switch (tab()) {
-        @case ('result') {
-          @if (result(); as r) {
-            <table class="w-full max-w-2xl rounded border bg-white text-sm">
-              <tbody>
-                <tr class="border-b">
-                  <td class="p-2">Ventes HT</td>
-                  <td class="p-2 text-right font-semibold">{{ r.salesCents | money }}</td>
-                </tr>
-                <tr>
-                  <td class="p-2 pl-6">Achats HT</td>
-                  <td class="p-2 text-right">{{ r.purchasesCents | money }}</td>
-                </tr>
-                <tr>
-                  <td class="p-2 pl-6">Stock initial</td>
-                  <td class="p-2 text-right">{{ r.openingStockCents | money }}</td>
-                </tr>
-                <tr>
-                  <td class="p-2 pl-6">Stock final</td>
-                  <td class="p-2 text-right">{{ r.closingStockCents | money }}</td>
-                </tr>
-                <tr class="border-b">
-                  <td class="p-2">Coût des marchandises vendues</td>
-                  <td class="p-2 text-right">{{ r.costOfGoodsSoldCents | money }}</td>
-                </tr>
-                <tr class="border-b font-semibold">
-                  <td class="p-2">Marge brute</td>
-                  <td class="p-2 text-right">{{ r.grossMarginCents | money }}</td>
-                </tr>
-                @for (entry of expenses(r); track entry[0]) {
-                  <tr>
-                    <td class="p-2 pl-6">Charge {{ entry[0] }}</td>
-                    <td class="p-2 text-right">{{ entry[1] | money }}</td>
-                  </tr>
-                }
-                <tr>
-                  <td class="p-2">Autres charges</td>
-                  <td class="p-2 text-right">{{ r.otherExpensesCents | money }}</td>
-                </tr>
-                <tr class="border-b">
-                  <td class="p-2">Autres produits</td>
-                  <td class="p-2 text-right">{{ r.otherIncomeCents | money }}</td>
-                </tr>
-                <tr
-                  class="text-lg font-bold"
-                  [class.text-green-700]="r.resultCents >= 0"
-                  [class.text-red-700]="r.resultCents < 0"
-                >
-                  <td class="p-2">Résultat de la période</td>
-                  <td class="p-2 text-right">{{ r.resultCents | money }}</td>
-                </tr>
-              </tbody>
-            </table>
-          }
-        }
-        @case ('balance-sheet') {
-          @if (sheet(); as b) {
-            <div class="grid max-w-4xl gap-4 md:grid-cols-2">
-              <table class="rounded border bg-white text-sm">
-                <thead class="bg-slate-100">
-                  <tr>
-                    <th class="p-2 text-left" colspan="2">
-                      ACTIF au {{ b.asOf | date: 'dd/MM/yyyy' }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td class="p-2">Stock de marchandises (coût moyen)</td>
-                    <td class="p-2 text-right">{{ b.stockCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Créances clients</td>
-                    <td class="p-2 text-right">{{ b.customerReceivablesCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Créances tiers payant</td>
-                    <td class="p-2 text-right">{{ b.thirdPartyReceivablesCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">TVA récupérable</td>
-                    <td class="p-2 text-right">{{ b.vatDeductibleCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Caisse</td>
-                    <td class="p-2 text-right">{{ b.cashCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Banque</td>
-                    <td class="p-2 text-right">{{ b.bankCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Mobile money</td>
-                    <td class="p-2 text-right">{{ b.mobileMoneyCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Chèques et cartes à encaisser</td>
-                    <td class="p-2 text-right">{{ b.chequesCardsCents | money }}</td>
-                  </tr>
-                  <tr class="border-t font-bold">
-                    <td class="p-2">Total actif</td>
-                    <td class="p-2 text-right">{{ b.totalAssetsCents | money }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <table class="rounded border bg-white text-sm">
-                <thead class="bg-slate-100">
-                  <tr>
-                    <th class="p-2 text-left" colspan="2">PASSIF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td class="p-2">Capital</td>
-                    <td class="p-2 text-right">{{ b.capitalCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Résultat cumulé</td>
-                    <td class="p-2 text-right">{{ b.cumulativeResultCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">Dettes fournisseurs</td>
-                    <td class="p-2 text-right">{{ b.suppliersCents | money }}</td>
-                  </tr>
-                  <tr>
-                    <td class="p-2">TVA à reverser</td>
-                    <td class="p-2 text-right">{{ b.vatCollectedCents | money }}</td>
-                  </tr>
-                  <tr class="border-t font-bold">
-                    <td class="p-2">Total passif</td>
-                    <td class="p-2 text-right">{{ b.totalLiabilitiesCents | money }}</td>
-                  </tr>
-                </tbody>
-              </table>
+      <div class="space-y-5">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div class="-mx-1 max-w-full overflow-x-auto px-1">
+            <div class="segmented" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="tab() === 'result'"
+                (click)="open('result')"
+              >
+                Compte de résultat
+              </button>
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="tab() === 'balance-sheet'"
+                (click)="open('balance-sheet')"
+              >
+                Bilan
+              </button>
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="tab() === 'trial-balance'"
+                (click)="open('trial-balance')"
+              >
+                Balance
+              </button>
             </div>
-            <p class="text-xs text-slate-500">
-              Bilan de gestion établi à partir des écritures automatiques (SYSCOHADA). Les états de
-              synthèse officiels sont validés par votre comptable à partir de l'export.
-            </p>
+          </div>
+          <div class="flex flex-wrap items-end gap-2">
+            <label class="block">
+              <span class="label">Du</span>
+              <input type="date" class="input" [(ngModel)]="from" />
+            </label>
+            <label class="block">
+              <span class="label">au</span>
+              <input type="date" class="input" [(ngModel)]="to" />
+            </label>
+            <button type="button" class="btn btn-secondary" (click)="open(tab())">
+              <app-icon name="refresh" [size]="16" />
+              Actualiser
+            </button>
+          </div>
+        </div>
+
+        @if (status(); as text) {
+          <div class="alert alert-info" role="status">
+            <app-icon name="info" [size]="16" class="mt-0.5" />
+            <span>{{ text }}</span>
+          </div>
+        }
+
+        @switch (tab()) {
+          @case ('result') {
+            @if (result(); as r) {
+              <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div class="grid gap-4 sm:grid-cols-3 lg:order-2 lg:grid-cols-1">
+                  <div class="card kpi">
+                    <div class="kpi-label">
+                      <span class="kpi-icon"><app-icon name="receipt" [size]="16" /></span>
+                      Ventes HT
+                    </div>
+                    <div class="kpi-value">{{ r.salesCents | money }}</div>
+                    <div class="kpi-foot">Chiffre d'affaires de la période</div>
+                  </div>
+                  <div class="card kpi">
+                    <div class="kpi-label">
+                      <span class="kpi-icon"><app-icon name="trendUp" [size]="16" /></span>
+                      Marge brute
+                    </div>
+                    <div class="kpi-value">{{ r.grossMarginCents | money }}</div>
+                    <div class="kpi-foot">Ventes moins coût des marchandises</div>
+                  </div>
+                  <div class="card kpi">
+                    <div class="kpi-label">
+                      <span class="kpi-icon"><app-icon name="accounting" [size]="16" /></span>
+                      Résultat de la période
+                    </div>
+                    <div
+                      class="kpi-value"
+                      [class.text-success]="r.resultCents >= 0"
+                      [class.text-danger]="r.resultCents < 0"
+                    >
+                      {{ r.resultCents | money }}
+                    </div>
+                    <div class="kpi-foot">Après charges et autres produits</div>
+                  </div>
+                </div>
+
+                <section class="card min-w-0">
+                  <div class="card-header">
+                    <h2 class="card-title">Compte de résultat</h2>
+                    <span class="text-xs text-muted">
+                      {{ from | date: 'dd/MM/yyyy' }} – {{ to | date: 'dd/MM/yyyy' }}
+                    </span>
+                  </div>
+                  <table class="data-table statement">
+                    <tbody>
+                      <tr class="subtotal">
+                        <td>Ventes HT</td>
+                        <td class="num">{{ r.salesCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td class="pl-8 text-muted">Achats HT</td>
+                        <td class="num">{{ r.purchasesCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td class="pl-8 text-muted">Stock initial</td>
+                        <td class="num">{{ r.openingStockCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td class="pl-8 text-muted">Stock final</td>
+                        <td class="num">{{ r.closingStockCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Coût des marchandises vendues</td>
+                        <td class="num">{{ r.costOfGoodsSoldCents | money }}</td>
+                      </tr>
+                      <tr class="subtotal">
+                        <td>Marge brute</td>
+                        <td class="num">{{ r.grossMarginCents | money }}</td>
+                      </tr>
+                      @for (entry of expenses(r); track entry[0]) {
+                        <tr>
+                          <td class="pl-8 text-muted">
+                            Charge <span class="font-mono text-xs">{{ entry[0] }}</span>
+                          </td>
+                          <td class="num">{{ entry[1] | money }}</td>
+                        </tr>
+                      }
+                      <tr>
+                        <td>Autres charges</td>
+                        <td class="num">{{ r.otherExpensesCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Autres produits</td>
+                        <td class="num">{{ r.otherIncomeCents | money }}</td>
+                      </tr>
+                      <tr
+                        class="total"
+                        [class.text-success]="r.resultCents >= 0"
+                        [class.text-danger]="r.resultCents < 0"
+                      >
+                        <td>Résultat de la période</td>
+                        <td class="num">{{ r.resultCents | money }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+              </div>
+            }
+          }
+          @case ('balance-sheet') {
+            @if (sheet(); as b) {
+              <div class="grid gap-4 md:grid-cols-2">
+                <section class="card">
+                  <div class="card-header">
+                    <h2 class="card-title">Actif</h2>
+                    <span class="text-xs text-muted">au {{ b.asOf | date: 'dd/MM/yyyy' }}</span>
+                  </div>
+                  <table class="data-table statement">
+                    <tbody>
+                      <tr>
+                        <td>Stock de marchandises (coût moyen)</td>
+                        <td class="num">{{ b.stockCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Créances clients</td>
+                        <td class="num">{{ b.customerReceivablesCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Créances tiers payant</td>
+                        <td class="num">{{ b.thirdPartyReceivablesCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>TVA récupérable</td>
+                        <td class="num">{{ b.vatDeductibleCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Caisse</td>
+                        <td class="num">{{ b.cashCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Banque</td>
+                        <td class="num">{{ b.bankCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Mobile money</td>
+                        <td class="num">{{ b.mobileMoneyCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Chèques et cartes à encaisser</td>
+                        <td class="num">{{ b.chequesCardsCents | money }}</td>
+                      </tr>
+                      <tr class="total">
+                        <td>Total actif</td>
+                        <td class="num">{{ b.totalAssetsCents | money }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+                <section class="card self-start">
+                  <div class="card-header">
+                    <h2 class="card-title">Passif</h2>
+                    <span class="text-xs text-muted">au {{ b.asOf | date: 'dd/MM/yyyy' }}</span>
+                  </div>
+                  <table class="data-table statement">
+                    <tbody>
+                      <tr>
+                        <td>Capital</td>
+                        <td class="num">{{ b.capitalCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Résultat cumulé</td>
+                        <td class="num">{{ b.cumulativeResultCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>Dettes fournisseurs</td>
+                        <td class="num">{{ b.suppliersCents | money }}</td>
+                      </tr>
+                      <tr>
+                        <td>TVA à reverser</td>
+                        <td class="num">{{ b.vatCollectedCents | money }}</td>
+                      </tr>
+                      <tr class="total">
+                        <td>Total passif</td>
+                        <td class="num">{{ b.totalLiabilitiesCents | money }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+              </div>
+              <p class="flex items-start gap-2 text-xs text-subtle">
+                <app-icon name="info" [size]="14" class="mt-px" />
+                Bilan de gestion établi à partir des écritures automatiques (SYSCOHADA). Les états
+                de synthèse officiels sont validés par votre comptable à partir de l'export.
+              </p>
+            }
+          }
+          @case ('trial-balance') {
+            <section class="card">
+              <div class="card-header">
+                <h2 class="card-title">Balance générale</h2>
+                <span class="badge">{{ rows().length }} compte(s)</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead class="whitespace-nowrap">
+                    <tr>
+                      <th>Compte</th>
+                      <th>Intitulé</th>
+                      <th class="num text-right">Débit</th>
+                      <th class="num text-right">Crédit</th>
+                      <th class="num text-right">Solde</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of rows(); track row.account) {
+                      <tr>
+                        <td class="font-mono text-xs font-medium">{{ row.account }}</td>
+                        <td class="min-w-48">{{ row.label }}</td>
+                        <td class="num whitespace-nowrap">{{ row.debitCents | money }}</td>
+                        <td class="num whitespace-nowrap">{{ row.creditCents | money }}</td>
+                        <td class="num whitespace-nowrap font-semibold">
+                          {{ row.balanceCents | money }}
+                        </td>
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td colspan="5">
+                          <div class="empty-state">
+                            <app-icon name="accounting" [size]="22" />
+                            <p>Aucune écriture sur la période.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
           }
         }
-        @case ('trial-balance') {
-          <table class="w-full max-w-4xl rounded border bg-white text-sm">
-            <thead class="bg-slate-100 text-left">
-              <tr>
-                <th class="p-2">Compte</th>
-                <th class="p-2">Intitulé</th>
-                <th class="p-2 text-right">Débit</th>
-                <th class="p-2 text-right">Crédit</th>
-                <th class="p-2 text-right">Solde</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of rows(); track row.account) {
-                <tr class="border-t">
-                  <td class="p-2 font-mono">{{ row.account }}</td>
-                  <td class="p-2">{{ row.label }}</td>
-                  <td class="p-2 text-right">{{ row.debitCents | money }}</td>
-                  <td class="p-2 text-right">{{ row.creditCents | money }}</td>
-                  <td class="p-2 text-right font-semibold">{{ row.balanceCents | money }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
-      }
-      @if (status(); as text) {
-        <p class="text-sm" role="status">{{ text }}</p>
-      }
+      </div>
     </div>
+  `,
+  styles: `
+    .statement td.num {
+      white-space: nowrap;
+    }
+    .statement tr.subtotal td {
+      font-weight: 600;
+      background: var(--surface-2);
+    }
+    .statement tr.total td {
+      font-size: 1rem;
+      font-weight: 700;
+      border-top: 1px solid var(--border-strong);
+    }
   `,
 })
 export class AccountingPage {

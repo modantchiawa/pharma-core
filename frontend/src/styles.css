@@ -1,35 +1,747 @@
 @import 'tailwindcss';
 
-/* Brand palette injected at runtime by BrandingService (white-label). */
+/* =====================================================================
+   PharmaCore design system
+   - Brand colors are injected at runtime by BrandingService (white-label).
+   - Neutral and semantic tokens below; light, dark ("garde de nuit") and high-contrast
+     ("comptoir au soleil") themes are switched by attributes on <html> set by
+     DisplayPreferencesService (data-theme, data-contrast, data-density).
+   - Pages use Tailwind utilities plus the component classes of @layer components
+     (.card, .btn, .input, .badge, .data-table, .page-header…).
+   ===================================================================== */
+
 :root {
   --brand-primary: #0f766e;
   --brand-secondary: #134e4a;
   --brand-accent: #f59e0b;
   --brand-on-primary: #ffffff;
+
+  --app-bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --border: #e4e7ec;
+  --border-strong: #cfd5dd;
+  --text: #0f172a;
+  --text-muted: #5b6678;
+  --text-subtle: #8a94a6;
+  --brand-soft: color-mix(in oklab, var(--brand-primary) 10%, var(--surface));
+  --brand-softer: color-mix(in oklab, var(--brand-primary) 5%, var(--surface));
+  --brand-ring: color-mix(in oklab, var(--brand-primary) 45%, transparent);
+  /* Brand color for text and icons: the raw brand on light surfaces, lifted in dark mode. */
+  --brand-text: var(--brand-primary);
+
+  --success: #15803d;
+  --success-soft: #e8f6ee;
+  --warning: #b45309;
+  --warning-soft: #fdf3e3;
+  --danger: #c2410c;
+  --danger-strong: #dc2626;
+  --danger-soft: #fdecec;
+  --info: #1d4ed8;
+  --info-soft: #e8effd;
+
+  --radius-sm: 0.5rem;
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.05);
+  --shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 1px 2px rgb(15 23 42 / 0.04);
+  --shadow-lg: 0 12px 32px -8px rgb(15 23 42 / 0.18), 0 4px 8px -4px rgb(15 23 42 / 0.08);
+
+  --density: 1;
+  --control-h: calc(2.5rem * var(--density));
+  --font-scale: 1;
+  color-scheme: light;
+}
+
+:root[data-density='compact'] {
+  --density: 0.85;
+}
+:root[data-density='large'] {
+  --density: 1.2;
+}
+
+/* Night duty: dark surfaces, the brand stays recognizable. */
+:root[data-theme='dark'] {
+  --app-bg: #0b1016;
+  --surface: #121922;
+  --surface-2: #17202b;
+  --surface-3: #1d2733;
+  --border: #253141;
+  --border-strong: #334255;
+  --text: #e6ebf1;
+  --text-muted: #9aa7b8;
+  --text-subtle: #6f7d90;
+  --brand-soft: color-mix(in oklab, var(--brand-primary) 22%, var(--surface));
+  --brand-softer: color-mix(in oklab, var(--brand-primary) 12%, var(--surface));
+  --brand-text: color-mix(in oklab, var(--brand-primary) 55%, white);
+  --success: #4ade80;
+  --success-soft: #11291c;
+  --warning: #fbbf24;
+  --warning-soft: #2d2410;
+  --danger: #fb923c;
+  --danger-strong: #f87171;
+  --danger-soft: #2e1616;
+  --info: #93c5fd;
+  --info-soft: #132238;
+  --shadow-sm: none;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 40px -10px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+
+  /* Tailwind palette used by pages, inverted so that "bg-slate-50 text-slate-900" reads right */
+  --color-slate-50: #121922;
+  --color-slate-100: #17202b;
+  --color-slate-200: #253141;
+  --color-slate-300: #334255;
+  --color-slate-400: #6f7d90;
+  --color-slate-500: #9aa7b8;
+  --color-slate-600: #b4bfcc;
+  --color-slate-700: #cdd5df;
+  --color-slate-800: #dde3ea;
+  --color-slate-900: #e6ebf1;
+  --color-amber-50: #2d2410;
+  --color-amber-100: #3a2e12;
+  --color-amber-800: #fcd34d;
+  --color-amber-900: #fde68a;
+  --color-red-50: #2e1616;
+  --color-red-100: #3b1a1a;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fca5a5;
+  --color-green-50: #11291c;
+  --color-green-100: #143320;
+  --color-green-700: #86efac;
+  --color-green-800: #86efac;
+  --color-blue-50: #132238;
+  --color-blue-800: #bfdbfe;
+}
+
+/* Sunlit counter: maximal contrast, thicker focus. */
+:root[data-contrast='high'] {
+  --text: #000000;
+  --text-muted: #1f2937;
+  --text-subtle: #374151;
+  --border: #6b7280;
+  --border-strong: #111827;
+  --app-bg: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #f3f4f6;
+}
+:root[data-contrast='high'][data-theme='dark'] {
+  --text: #ffffff;
+  --text-muted: #e5e7eb;
+  --text-subtle: #d1d5db;
+  --border: #9ca3af;
+  --border-strong: #f3f4f6;
+  --app-bg: #000000;
+  --surface: #000000;
+  --surface-2: #0a0a0a;
 }
 
 @theme inline {
   --color-brand: var(--brand-primary);
   --color-brand-dark: var(--brand-secondary);
+  --color-brand-soft: var(--brand-soft);
   --color-accent: var(--brand-accent);
   --color-on-brand: var(--brand-on-primary);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-html,
-body {
-  height: 100%;
-  margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
+/* ------------------------------------------------------------------ base */
+@layer base {
+  /* Tailwind v4 borders default to currentColor: give every border the neutral line color. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    font-size: calc(100% * var(--font-scale));
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--app-bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    color: var(--text);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--brand-primary) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand-ring);
+    outline-offset: 2px;
+  }
+  :root[data-contrast='high'] :focus-visible {
+    outline: 3px solid var(--text);
+  }
+
+  button,
+  [role='button'],
+  summary {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* Form controls: consistent look even where pages only set spacing utilities. */
+  input:where(
+    :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+  ),
+  select,
+  textarea {
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+  input:where(
+      :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+    ):hover,
+  select:hover,
+  textarea:hover {
+    border-color: color-mix(in oklab, var(--border-strong) 60%, var(--text-subtle));
+  }
+  input:where(
+      :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+    ):focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-primary) 18%, transparent);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-subtle);
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--brand-primary);
+    width: 1rem;
+    height: 1rem;
+  }
+  input[type='file'] {
+    font-size: 0.875rem;
+  }
+  input[type='file']::file-selector-button {
+    margin-right: 0.75rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 0.4rem 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a94a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 2rem !important;
+  }
+
+  /* Tables: quiet header, row separators, numbers aligned. */
+  table {
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  thead th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  tbody tr {
+    transition: background-color 100ms ease;
+  }
+
+  code,
+  kbd {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.85em;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+/* ------------------------------------------------------------------ components */
+@layer components {
+  .page {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1440px;
+    padding: calc(1.5rem * var(--density));
+  }
+  .page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .page-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .page-subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: calc(1rem * var(--density)) calc(1.25rem * var(--density));
+    border-bottom: 1px solid var(--border);
+  }
+  .card-title {
+    font-size: 0.95rem;
+    font-weight: 650;
+  }
+  .card-body {
+    padding: calc(1.25rem * var(--density));
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: var(--control-h);
+    padding: 0 calc(1rem * var(--density));
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease,
+      box-shadow 120ms ease,
+      transform 60ms ease;
+    user-select: none;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn-primary {
+    background: var(--brand-primary);
+    color: var(--brand-on-primary);
+    box-shadow:
+      var(--shadow-sm),
+      inset 0 1px 0 rgb(255 255 255 / 0.12);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--brand-primary) 88%, black);
+  }
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .btn-danger {
+    background: var(--danger-strong);
+    color: #fff;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--danger-strong) 88%, black);
+  }
+  .btn-soft {
+    background: var(--brand-soft);
+    color: var(--brand-text);
+  }
+  .btn-soft:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--brand-primary) 16%, var(--surface));
+  }
+  .btn-sm {
+    min-height: calc(2rem * var(--density));
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .btn-lg {
+    min-height: calc(3rem * var(--density));
+    padding: 0 1.5rem;
+    font-size: 1rem;
+    border-radius: var(--radius);
+  }
+  .btn-icon {
+    width: var(--control-h);
+    padding: 0;
+  }
+  .btn-icon.btn-sm {
+    width: calc(2rem * var(--density));
+  }
+
+  .input,
+  .select,
+  .textarea {
+    display: block;
+    width: 100%;
+    min-height: var(--control-h);
+    padding: 0 0.75rem;
+    font-size: 0.875rem;
+  }
+  .textarea {
+    padding: 0.6rem 0.75rem;
+  }
+  .label {
+    display: block;
+    margin-bottom: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    color: var(--text-muted);
+  }
+  .hint {
+    margin-top: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--text-subtle);
+  }
+  .input-with-icon {
+    position: relative;
+  }
+  .input-with-icon > app-icon {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-subtle);
+    pointer-events: none;
+  }
+  .input-with-icon > input {
+    padding-left: 2.4rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 1.4rem;
+    padding: 0 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--surface-3);
+    color: var(--text-muted);
+  }
+  .badge-brand {
+    background: var(--brand-soft);
+    color: var(--brand-text);
+  }
+  .badge-success {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .badge-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+  .badge-danger {
+    background: var(--danger-soft);
+    color: var(--danger-strong);
+  }
+  .badge-info {
+    background: var(--info-soft);
+    color: var(--info);
+  }
+  .dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .alert {
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    font-size: 0.875rem;
+  }
+  .alert-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+    border-color: color-mix(in oklab, var(--warning) 25%, transparent);
+  }
+  .alert-danger {
+    background: var(--danger-soft);
+    color: var(--danger-strong);
+    border-color: color-mix(in oklab, var(--danger-strong) 25%, transparent);
+  }
+  .alert-success {
+    background: var(--success-soft);
+    color: var(--success);
+    border-color: color-mix(in oklab, var(--success) 25%, transparent);
+  }
+  .alert-info {
+    background: var(--info-soft);
+    color: var(--info);
+    border-color: color-mix(in oklab, var(--info) 25%, transparent);
+  }
+
+  .data-table {
+    width: 100%;
+    font-size: 0.875rem;
+  }
+  .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-2);
+    padding: calc(0.6rem * var(--density)) 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table thead th.num {
+    text-align: right;
+  }
+  .data-table tbody td {
+    padding: calc(0.7rem * var(--density)) 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kpi {
+    position: relative;
+    overflow: hidden;
+    padding: calc(1.1rem * var(--density)) calc(1.25rem * var(--density));
+  }
+  .kpi-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    color: var(--text-muted);
+  }
+  .kpi-value {
+    margin-top: 0.6rem;
+    font-size: 1.6rem;
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-foot {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-subtle);
+  }
+  .kpi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.6rem;
+    background: var(--brand-soft);
+    color: var(--brand-text);
+  }
+
+  .segmented {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border-radius: calc(var(--radius-sm) + 0.25rem);
+    background: var(--surface-3);
+  }
+  .segmented > button,
+  .segmented > a {
+    min-height: calc(2rem * var(--density));
+    padding: 0 0.85rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+  .segmented > [aria-selected='true'],
+  .segmented > .active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+  }
+  .empty-state > app-icon {
+    display: inline-flex;
+    width: 3rem;
+    height: 3rem;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--text-subtle);
+  }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    height: 1.3rem;
+    min-width: 1.3rem;
+    padding: 0 0.35rem;
+    border-radius: 0.35rem;
+    border: 1px solid var(--border-strong);
+    border-bottom-width: 2px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+  }
+
+  .skeleton {
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--surface-3), var(--surface-2), var(--surface-3));
+    background-size: 200% 100%;
+    animation: skeleton 1.4s ease-in-out infinite;
+  }
+}
+
+/* Dark mode: hard-coded white surfaces of older pages follow the theme. */
+:root[data-theme='dark'] .bg-white {
+  background-color: var(--surface);
+}
+:root[data-theme='dark'] .text-black {
+  color: var(--text);
+}
+/* Brand-colored text stays readable on dark surfaces (backgrounds keep the raw brand). */
+:root[data-theme='dark'] .text-brand {
+  color: var(--brand-text);
+}
+
+@keyframes skeleton {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-in {
+  animation: fade-in-up 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* The page size (58 mm, 80 mm or A4) is set per print job by PrintSettingsService. */
 @media print {
   @page {
     margin: 0;
+  }
+  body {
+    background: #fff;
   }
 }

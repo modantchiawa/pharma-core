@@ -9,6 +9,19 @@ import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { parseGs1 } from '../../shared/gs1';
+import { Icon } from '../../shared/ui/icon';
+
+const STATUS_LABEL: Record<StockCount['status'], string> = {
+  OPEN: 'En cours',
+  VALIDATED: 'Validé',
+  CANCELLED: 'Annulé',
+};
+
+const STATUS_BADGE: Record<StockCount['status'], string> = {
+  OPEN: 'badge-info',
+  VALIDATED: 'badge-success',
+  CANCELLED: '',
+};
 
 /**
  * Blind physical inventory: the counter scans or picks a lot and types what is on the shelf;
@@ -16,198 +29,313 @@ import { parseGs1 } from '../../shared/gs1';
  */
 @Component({
   selector: 'app-stock-count-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective],
+  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="grid gap-4 p-4 lg:grid-cols-[1fr_340px]">
-      <section class="space-y-3">
-        @if (count(); as c) {
-          <div class="rounded-lg border bg-white p-4">
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <h2 class="text-lg font-semibold">{{ c.label }}</h2>
-                <p class="text-sm text-slate-600">
-                  {{
-                    c.status === 'OPEN'
-                      ? 'En cours'
-                      : c.status === 'VALIDATED'
-                        ? 'Validé'
-                        : 'Annulé'
-                  }}
-                  · démarré le {{ c.startedAt | date: 'dd/MM HH:mm' }}
-                  @if (c.location) {
-                    · emplacement {{ c.location }}
-                  }
-                  · {{ c.countedLines }} / {{ c.lineCount }} lots comptés
-                </p>
-                @if (c.varianceUnits !== undefined) {
-                  <p class="text-sm" [class.text-red-700]="(c.varianceUnits ?? 0) < 0">
-                    Écart : {{ c.varianceUnits }} unité(s),
-                    {{ c.varianceValueCents ?? 0 | money }} au coût
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Inventaire</h1>
+          <p class="page-subtitle">
+            Comptage physique à l'aveugle : les écarts n'apparaissent qu'au pharmacien qui valide
+          </p>
+        </div>
+      </header>
+
+      <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section class="min-w-0 space-y-4">
+          @if (status(); as text) {
+            <div class="alert alert-info" role="status">
+              <app-icon name="info" [size]="16" class="mt-0.5" />
+              <span>{{ text }}</span>
+            </div>
+          }
+          @if (count(); as c) {
+            <div class="card">
+              <div class="card-header flex-wrap items-start">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h2 class="text-lg font-semibold">{{ c.label }}</h2>
+                    <span class="badge" [class]="statusBadge(c.status)">
+                      <span class="dot"></span>{{ statusLabel(c.status) }}
+                    </span>
+                  </div>
+                  <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+                    <span class="inline-flex items-center gap-1.5">
+                      <app-icon name="clock" [size]="14" />
+                      démarré le {{ c.startedAt | date: 'dd/MM HH:mm' }}
+                    </span>
+                    @if (c.location) {
+                      <span class="inline-flex items-center gap-1.5">
+                        <app-icon name="mapPin" [size]="14" />
+                        emplacement {{ c.location }}
+                      </span>
+                    }
                   </p>
+                </div>
+                @if (c.status === 'OPEN') {
+                  <div class="flex gap-2" *appHasPermission="'STOCK_COUNT_VALIDATE'">
+                    <button type="button" class="btn btn-secondary" (click)="cancel(c)">
+                      Annuler
+                    </button>
+                    <button type="button" class="btn btn-primary" (click)="validate(c)">
+                      <app-icon name="check" [size]="16" />
+                      Valider et régulariser
+                    </button>
+                  </div>
                 }
               </div>
-              @if (c.status === 'OPEN') {
-                <div class="flex gap-2" *appHasPermission="'STOCK_COUNT_VALIDATE'">
+
+              <div class="card-body space-y-4">
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div
+                    class="rounded-[var(--radius)] bg-surface-2 p-3"
+                    [class.col-span-2]="c.varianceUnits === undefined"
+                  >
+                    <p class="text-xs font-medium text-muted">Lots comptés</p>
+                    <p class="mt-1 text-lg font-semibold tabular-nums">
+                      {{ c.countedLines }} / {{ c.lineCount }}
+                    </p>
+                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
+                      <div
+                        class="h-full rounded-full bg-brand transition-[width]"
+                        [style.width.%]="progress(c)"
+                      ></div>
+                    </div>
+                  </div>
+                  @if (c.varianceUnits !== undefined) {
+                    <div class="rounded-[var(--radius)] bg-surface-2 p-3">
+                      <p class="text-xs font-medium text-muted">Écart</p>
+                      <p
+                        class="mt-1 text-lg font-semibold tabular-nums"
+                        [class.text-danger]="c.varianceUnits < 0"
+                      >
+                        {{ c.varianceUnits }} unité(s)
+                      </p>
+                    </div>
+                    <div class="col-span-2 rounded-[var(--radius)] bg-surface-2 p-3 sm:col-span-1">
+                      <p class="text-xs font-medium text-muted">Valeur au coût</p>
+                      <p
+                        class="mt-1 text-lg font-semibold tabular-nums"
+                        [class.text-danger]="c.varianceUnits < 0"
+                      >
+                        {{ c.varianceValueCents ?? 0 | money }}
+                      </p>
+                    </div>
+                  }
+                </div>
+
+                @if (c.status === 'OPEN') {
+                  <form class="flex flex-col gap-2 sm:flex-row" (ngSubmit)="scan(c)">
+                    <label class="input-with-icon min-w-0 flex-1">
+                      <app-icon name="barcode" [size]="16" />
+                      <input
+                        class="input"
+                        placeholder="Scanner le code (DataMatrix GS1 ou EAN) ou taper le lot"
+                        aria-label="Code ou lot"
+                        [(ngModel)]="scanInput"
+                        name="scan"
+                        autofocus
+                      />
+                    </label>
+                    <div class="flex gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        class="input num w-24"
+                        placeholder="Qté"
+                        aria-label="Quantité comptée"
+                        [(ngModel)]="scanQuantity"
+                        name="scanQuantity"
+                      />
+                      <button type="submit" class="btn btn-primary flex-1 sm:flex-none">
+                        <app-icon name="counts" [size]="16" />
+                        Compter
+                      </button>
+                    </div>
+                  </form>
+                }
+                <label class="input-with-icon block">
+                  <app-icon name="search" [size]="16" />
+                  <input
+                    type="search"
+                    class="input"
+                    placeholder="Filtrer les lignes (produit, lot)"
+                    aria-label="Filtrer les lignes"
+                    [(ngModel)]="filter"
+                    name="filter"
+                    (ngModelChange)="filterSignal.set($event)"
+                  />
+                </label>
+              </div>
+
+              <div class="overflow-x-auto border-t border-line">
+                <table class="data-table">
+                  <thead class="whitespace-nowrap">
+                    <tr>
+                      <th>Produit</th>
+                      <th>Lot</th>
+                      <th>Péremption</th>
+                      @if (reveal()) {
+                        <th class="num text-right">Attendu</th>
+                      }
+                      <th class="num text-right">Compté</th>
+                      @if (reveal()) {
+                        <th class="num text-right">Écart</th>
+                      }
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (l of visibleLines(); track l.id) {
+                      <tr
+                        [class.variance-row]="
+                          reveal() && l.variance !== undefined && l.variance !== 0
+                        "
+                        [class.text-subtle]="
+                          l.countedQuantity === null || l.countedQuantity === undefined
+                        "
+                      >
+                        <td class="min-w-56">
+                          <p class="font-medium">{{ l.designation }}</p>
+                          <p class="text-xs text-subtle tabular-nums">{{ l.cip13 }}</p>
+                        </td>
+                        <td class="font-mono text-xs">{{ l.lotNumber }}</td>
+                        <td class="whitespace-nowrap">{{ l.expiryDate | date: 'MM/yyyy' }}</td>
+                        @if (reveal()) {
+                          <td class="num">{{ l.expectedQuantity }}</td>
+                        }
+                        <td class="num">
+                          @if (c.status === 'OPEN') {
+                            <input
+                              type="number"
+                              min="0"
+                              class="input num ml-auto min-h-8 w-20"
+                              [attr.aria-label]="'Quantité comptée, lot ' + l.lotNumber"
+                              [ngModel]="l.countedQuantity"
+                              (ngModelChange)="draft[l.id] = $event"
+                              (blur)="countLine(c, l)"
+                              (keydown.enter)="countLine(c, l)"
+                              [name]="'q-' + l.id"
+                            />
+                          } @else {
+                            {{ l.countedQuantity ?? '—' }}
+                          }
+                        </td>
+                        @if (reveal()) {
+                          <td class="num">
+                            @if (l.variance !== undefined && l.variance !== 0) {
+                              <span
+                                class="badge"
+                                [class.badge-danger]="l.variance < 0"
+                                [class.badge-success]="l.variance > 0"
+                                >{{ l.variance > 0 ? '+' : '' }}{{ l.variance }}</span
+                              >
+                            } @else {
+                              <span class="font-semibold">{{ l.variance ?? '' }}</span>
+                            }
+                          </td>
+                        }
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td [attr.colspan]="reveal() ? 6 : 4">
+                          <div class="empty-state">
+                            <app-icon name="search" [size]="22" />
+                            <p>Aucune ligne ne correspond au filtre.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          } @else {
+            <div class="card empty-state py-16">
+              <app-icon name="counts" [size]="22" />
+              <p class="font-medium text-ink">Aucun inventaire ouvert</p>
+              <p>Sélectionnez un inventaire ou démarrez-en un nouveau.</p>
+            </div>
+          }
+        </section>
+
+        <aside class="space-y-4">
+          <form class="card" (ngSubmit)="start()">
+            <div class="card-header">
+              <h3 class="card-title">Nouvel inventaire</h3>
+            </div>
+            <div class="card-body space-y-3">
+              <label class="block">
+                <span class="label">Libellé</span>
+                <input
+                  class="input"
+                  placeholder="Libellé (ex. Rayon A, octobre)"
+                  [(ngModel)]="label"
+                  name="label"
+                  required
+                  maxlength="150"
+                />
+              </label>
+              <label class="block">
+                <span class="label">Emplacement</span>
+                <input
+                  class="input"
+                  placeholder="Emplacement (optionnel)"
+                  [(ngModel)]="location"
+                  name="location"
+                  maxlength="50"
+                />
+              </label>
+              <p class="hint">
+                Les quantités attendues sont figées au démarrage et cachées au compteur.
+              </p>
+              <button type="submit" class="btn btn-primary w-full">
+                <app-icon name="counts" [size]="16" />
+                Démarrer
+              </button>
+            </div>
+          </form>
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Inventaires récents</h3>
+              <span class="badge">{{ recent().length }}</span>
+            </div>
+            <ul class="p-2">
+              @for (c of recent(); track c.id) {
+                <li>
                   <button
                     type="button"
-                    class="rounded bg-brand px-3 py-1 text-on-brand"
-                    (click)="validate(c)"
+                    class="flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-left text-sm transition-colors hover:bg-surface-2"
+                    [class.bg-brand-soft]="c.id === count()?.id"
+                    (click)="open(c.id)"
                   >
-                    Valider et régulariser
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate font-medium">{{ c.label }}</span>
+                      <span class="block text-xs text-subtle tabular-nums">
+                        {{ c.countedLines }}/{{ c.lineCount }} lots ·
+                        {{ c.startedAt | date: 'dd/MM' }}
+                      </span>
+                    </span>
+                    <span class="badge" [class]="statusBadge(c.status)">
+                      {{ statusLabel(c.status) }}
+                    </span>
                   </button>
-                  <button type="button" class="rounded border px-3 py-1" (click)="cancel(c)">
-                    Annuler
-                  </button>
-                </div>
+                </li>
+              } @empty {
+                <li class="empty-state py-6">
+                  <app-icon name="counts" [size]="22" />
+                  <p>Aucun inventaire</p>
+                </li>
               }
-            </div>
-            @if (c.status === 'OPEN') {
-              <form class="mt-3 flex gap-2" (ngSubmit)="scan(c)">
-                <input
-                  class="flex-1 rounded border px-3 py-2"
-                  placeholder="Scanner le code (DataMatrix GS1 ou EAN) ou taper le lot"
-                  [(ngModel)]="scanInput"
-                  name="scan"
-                  autofocus
-                />
-                <input
-                  type="number"
-                  min="0"
-                  class="w-24 rounded border px-3 py-2"
-                  placeholder="Qté"
-                  [(ngModel)]="scanQuantity"
-                  name="scanQuantity"
-                />
-                <button type="submit" class="rounded border px-3">Compter</button>
-              </form>
-            }
-            <input
-              type="search"
-              class="mt-3 w-full rounded border px-3 py-2"
-              placeholder="Filtrer les lignes (produit, lot)"
-              [(ngModel)]="filter"
-              name="filter"
-              (ngModelChange)="filterSignal.set($event)"
-            />
-            <table class="mt-2 w-full text-sm">
-              <thead class="bg-slate-100 text-left">
-                <tr>
-                  <th class="p-2">Produit</th>
-                  <th class="p-2">Lot</th>
-                  <th class="p-2">Péremption</th>
-                  @if (reveal()) {
-                    <th class="p-2 text-right">Attendu</th>
-                  }
-                  <th class="p-2 text-right">Compté</th>
-                  @if (reveal()) {
-                    <th class="p-2 text-right">Écart</th>
-                  }
-                </tr>
-              </thead>
-              <tbody>
-                @for (l of visibleLines(); track l.id) {
-                  <tr
-                    class="border-t"
-                    [class.bg-amber-50]="reveal() && l.variance !== undefined && l.variance !== 0"
-                    [class.text-slate-400]="
-                      l.countedQuantity === null || l.countedQuantity === undefined
-                    "
-                  >
-                    <td class="p-2">
-                      {{ l.designation }} <small class="text-slate-500">{{ l.cip13 }}</small>
-                    </td>
-                    <td class="p-2">{{ l.lotNumber }}</td>
-                    <td class="p-2">{{ l.expiryDate | date: 'MM/yyyy' }}</td>
-                    @if (reveal()) {
-                      <td class="p-2 text-right">{{ l.expectedQuantity }}</td>
-                    }
-                    <td class="p-2 text-right">
-                      @if (c.status === 'OPEN') {
-                        <input
-                          type="number"
-                          min="0"
-                          class="w-20 rounded border px-2 py-1 text-right"
-                          [ngModel]="l.countedQuantity"
-                          (ngModelChange)="draft[l.id] = $event"
-                          (blur)="countLine(c, l)"
-                          (keydown.enter)="countLine(c, l)"
-                          [name]="'q-' + l.id"
-                        />
-                      } @else {
-                        {{ l.countedQuantity ?? '—' }}
-                      }
-                    </td>
-                    @if (reveal()) {
-                      <td class="p-2 text-right font-semibold">{{ l.variance ?? '' }}</td>
-                    }
-                  </tr>
-                }
-              </tbody>
-            </table>
+            </ul>
           </div>
-        } @else {
-          <p class="rounded-lg border bg-white p-4 text-slate-600">
-            Sélectionnez un inventaire ou démarrez-en un nouveau.
-          </p>
-        }
-        @if (status(); as text) {
-          <p class="text-sm" role="status">{{ text }}</p>
-        }
-      </section>
-
-      <aside class="space-y-4">
-        <form class="space-y-2 rounded-lg border bg-white p-4" (ngSubmit)="start()">
-          <h3 class="font-semibold">Nouvel inventaire</h3>
-          <input
-            class="field"
-            placeholder="Libellé (ex. Rayon A, octobre)"
-            [(ngModel)]="label"
-            name="label"
-            required
-            maxlength="150"
-          />
-          <input
-            class="field"
-            placeholder="Emplacement (optionnel)"
-            [(ngModel)]="location"
-            name="location"
-            maxlength="50"
-          />
-          <p class="text-xs text-slate-500">
-            Les quantités attendues sont figées au démarrage et cachées au compteur.
-          </p>
-          <button type="submit" class="w-full rounded bg-brand py-2 text-on-brand">Démarrer</button>
-        </form>
-        <div class="rounded-lg border bg-white p-4">
-          <h3 class="mb-2 font-semibold">Inventaires récents</h3>
-          <ul class="text-sm">
-            @for (c of recent(); track c.id) {
-              <li
-                class="flex cursor-pointer justify-between border-t py-1 hover:bg-slate-50"
-                (click)="open(c.id)"
-              >
-                <span>{{ c.label }}</span>
-                <span class="text-slate-500"
-                  >{{ c.status }} · {{ c.countedLines }}/{{ c.lineCount }}</span
-                >
-              </li>
-            } @empty {
-              <li class="text-slate-500">Aucun inventaire</li>
-            }
-          </ul>
-        </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   `,
   styles: `
-    .field {
-      display: block;
-      width: 100%;
-      margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
+    .variance-row td {
+      background: var(--warning-soft);
     }
   `,
 })
@@ -244,6 +372,18 @@ export class StockCountPage {
 
   constructor() {
     void this.loadRecent();
+  }
+
+  protected statusLabel(status: StockCount['status']): string {
+    return STATUS_LABEL[status];
+  }
+
+  protected statusBadge(status: StockCount['status']): string {
+    return STATUS_BADGE[status];
+  }
+
+  protected progress(c: StockCount): number {
+    return c.lineCount > 0 ? Math.round((c.countedLines / c.lineCount) * 100) : 0;
   }
 
   protected async start(): Promise<void> {

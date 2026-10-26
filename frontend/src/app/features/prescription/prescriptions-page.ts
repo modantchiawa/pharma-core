@@ -14,6 +14,7 @@ import { HasPermissionDirective } from '../../core/auth/has-permission.directive
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CatalogSyncService } from '../../core/offline/catalog-sync.service';
 import { CachedProduct } from '../../core/offline/pos-database';
+import { Icon } from '../../shared/ui/icon';
 
 type Tab = 'register' | 'renewals' | 'file';
 
@@ -27,405 +28,519 @@ interface DraftLine {
 /** Dispensing register (ordonnancier, narcotics) and renewable prescriptions kept on file. */
 @Component({
   selector: 'app-prescriptions-page',
-  imports: [FormsModule, DatePipe, HasPermissionDirective],
+  imports: [FormsModule, DatePipe, HasPermissionDirective, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-4 p-4">
-      <nav class="flex flex-wrap gap-2" role="tablist">
-        <button
-          type="button"
-          class="rounded px-3 py-1"
-          [class.bg-brand]="tab() === 'register'"
-          [class.text-on-brand]="tab() === 'register'"
-          (click)="open('register')"
-          *appHasPermission="'PRESCRIPTION_REGISTER_VIEW'"
-        >
-          Ordonnancier
-        </button>
-        <button
-          type="button"
-          class="rounded px-3 py-1"
-          [class.bg-brand]="tab() === 'renewals'"
-          [class.text-on-brand]="tab() === 'renewals'"
-          (click)="open('renewals')"
-          *appHasPermission="'PRESCRIPTION_DISPENSE'"
-        >
-          Renouvellements à rappeler ({{ due().length }})
-        </button>
-        <button
-          type="button"
-          class="rounded px-3 py-1"
-          [class.bg-brand]="tab() === 'file'"
-          [class.text-on-brand]="tab() === 'file'"
-          (click)="open('file')"
-          *appHasPermission="'PRESCRIPTION_DISPENSE'"
-        >
-          Ordonnances en dossier
-        </button>
-      </nav>
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Ordonnances</h1>
+          <p class="page-subtitle">
+            Ordonnancier des produits listés, renouvellements à rappeler et ordonnances en dossier.
+          </p>
+        </div>
+      </header>
+
+      <div class="mb-5 max-w-full overflow-x-auto">
+        <nav class="segmented [&>button]:whitespace-nowrap" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="tab() === 'register'"
+            (click)="open('register')"
+            *appHasPermission="'PRESCRIPTION_REGISTER_VIEW'"
+          >
+            Ordonnancier
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="inline-flex items-center gap-2"
+            [attr.aria-selected]="tab() === 'renewals'"
+            (click)="open('renewals')"
+            *appHasPermission="'PRESCRIPTION_DISPENSE'"
+          >
+            Renouvellements à rappeler
+            <span class="badge" [class.badge-warning]="due().length > 0">{{ due().length }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="tab() === 'file'"
+            (click)="open('file')"
+            *appHasPermission="'PRESCRIPTION_DISPENSE'"
+          >
+            Ordonnances en dossier
+          </button>
+        </nav>
+      </div>
+
+      @if (status(); as text) {
+        <div class="alert alert-info mb-4" role="status">
+          <app-icon name="info" [size]="18" />
+          <span>{{ text }}</span>
+        </div>
+      }
 
       @switch (tab()) {
         @case ('register') {
-          <div class="flex flex-wrap items-end gap-2 text-sm">
-            <label>Du <input type="date" class="field" [(ngModel)]="from" /></label>
-            <label>au <input type="date" class="field" [(ngModel)]="to" /></label>
-            <label
-              >Liste
-              <select class="field" [(ngModel)]="listing">
-                <option value="">Tous les produits listés</option>
-                <option value="LIST_I">Liste I</option>
-                <option value="LIST_II">Liste II</option>
-                <option value="STUPEFIANT">Stupéfiants (registre spécial)</option>
-              </select></label
-            >
-            <button type="button" class="rounded border px-3 py-1" (click)="loadRegister()">
-              Afficher
-            </button>
-            <a class="ml-auto rounded border px-3 py-1" [href]="registerExportUrl()" download
-              >Exporter (CSV)</a
-            >
-          </div>
-          <table class="w-full rounded border bg-white text-sm">
-            <thead class="bg-slate-100 text-left">
-              <tr>
-                <th class="p-2">N°</th>
-                <th class="p-2">Date</th>
-                <th class="p-2">Prescripteur</th>
-                <th class="p-2">Patient</th>
-                <th class="p-2">Produit</th>
-                <th class="p-2">Liste</th>
-                <th class="p-2 text-right">Qté</th>
-                <th class="p-2">Délivré par</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (e of register(); track $index) {
-                <tr class="border-t">
-                  <td class="p-2 font-mono">{{ e.ordonnancierNumber }}</td>
-                  <td class="p-2">{{ e.occurredAt | date: 'dd/MM/yyyy HH:mm' }}</td>
-                  <td class="p-2">
-                    {{ e.prescriberName }}
-                    @if (e.prescriberIdentifier) {
-                      <small class="text-slate-500">{{ e.prescriberIdentifier }}</small>
-                    }
-                  </td>
-                  <td class="p-2">{{ e.patientReference ?? e.customerName }}</td>
-                  <td class="p-2">
-                    {{ e.designation }} <small class="text-slate-500">{{ e.cip13 }}</small>
-                  </td>
-                  <td class="p-2">
-                    <span
-                      class="rounded px-1 text-xs"
-                      [class.bg-red-100]="e.listing === 'STUPEFIANT'"
-                      [class.bg-amber-100]="e.listing !== 'STUPEFIANT'"
-                      >{{ e.listing }}</span
-                    >
-                  </td>
-                  <td class="p-2 text-right">{{ e.quantity }}</td>
-                  <td class="p-2">{{ e.cashier }}</td>
-                </tr>
-              } @empty {
-                <tr>
-                  <td colspan="8" class="p-4 text-center text-slate-500">
-                    Aucune délivrance de produit listé sur la période
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
-        @case ('renewals') {
-          <p class="text-sm text-slate-600">
-            Patients à rappeler : la dernière délivrance remonte à 28 jours ou plus, ou l'ordonnance
-            expire dans les
-            <input
-              type="number"
-              min="0"
-              max="365"
-              class="w-16 rounded border px-1"
-              [(ngModel)]="withinDays"
-            />
-            jours.
-            <button type="button" class="ml-2 rounded border px-2" (click)="loadDue()">
-              Actualiser
-            </button>
-          </p>
-          <ul class="space-y-2">
-            @for (p of due(); track p.id) {
-              <li class="rounded border bg-white p-3 text-sm">
-                <div class="flex flex-wrap justify-between gap-2">
-                  <strong>{{ p.customerName ?? p.patientReference ?? 'Patient anonyme' }}</strong>
-                  <span>
-                    {{ p.renewalsRemaining }} délivrance(s) restante(s) · valable jusqu'au
-                    {{ p.validUntil | date: 'dd/MM/yyyy' }}
-                    @if (p.nextRenewalDue) {
-                      · prochain renouvellement {{ p.nextRenewalDue | date: 'dd/MM' }}
-                    }
-                  </span>
-                </div>
-                <p class="text-slate-600">
-                  {{ p.prescriberName }} ·
-                  @for (l of p.lines; track l.lineNo) {
-                    {{ l.designation }} ×{{ l.quantity }}
-                    @if (!$last) {
-                      ,
-                    }
-                  }
-                </p>
-              </li>
-            } @empty {
-              <li class="text-slate-500">Aucun rappel à faire</li>
-            }
-          </ul>
-        }
-        @case ('file') {
-          <div class="grid gap-4 lg:grid-cols-[1fr_380px]">
-            <section class="space-y-2">
-              <div class="flex gap-2 text-sm">
-                <input
-                  type="search"
-                  class="field flex-1"
-                  placeholder="Prescripteur ou référence patient"
-                  [(ngModel)]="term"
-                  (keydown.enter)="loadFile()"
-                />
-                <select class="field w-40" [(ngModel)]="statusFilter" (ngModelChange)="loadFile()">
-                  <option value="">Tous états</option>
-                  <option value="ACTIVE">Actives</option>
-                  <option value="EXHAUSTED">Épuisées</option>
-                  <option value="EXPIRED">Expirées</option>
-                  <option value="CANCELLED">Annulées</option>
-                </select>
-                <button type="button" class="rounded border px-3" (click)="loadFile()">
-                  Rechercher
+          <div class="card">
+            <div class="card-header flex-wrap items-end">
+              <div class="grid w-full grid-cols-2 items-end gap-3 sm:flex sm:w-auto sm:flex-wrap">
+                <label class="block">
+                  <span class="label">Du</span>
+                  <input type="date" class="input" [(ngModel)]="from" />
+                </label>
+                <label class="block">
+                  <span class="label">au</span>
+                  <input type="date" class="input" [(ngModel)]="to" />
+                </label>
+                <label class="col-span-2 block">
+                  <span class="label">Liste</span>
+                  <select class="select sm:w-64" [(ngModel)]="listing">
+                    <option value="">Tous les produits listés</option>
+                    <option value="LIST_I">Liste I</option>
+                    <option value="LIST_II">Liste II</option>
+                    <option value="STUPEFIANT">Stupéfiants (registre spécial)</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-secondary col-span-2" (click)="loadRegister()">
+                  <app-icon name="search" [size]="16" />
+                  Afficher
                 </button>
               </div>
-              <table class="w-full rounded border bg-white text-sm">
-                <thead class="bg-slate-100 text-left">
-                  <tr>
-                    <th class="p-2">Patient</th>
-                    <th class="p-2">Prescripteur</th>
-                    <th class="p-2">Produits</th>
-                    <th class="p-2 text-right">Délivrances</th>
-                    <th class="p-2">Validité</th>
-                    <th class="p-2">État</th>
-                    <th class="p-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (p of file(); track p.id) {
-                    <tr class="border-t">
-                      <td class="p-2">{{ p.customerName ?? p.patientReference ?? '—' }}</td>
-                      <td class="p-2">{{ p.prescriberName }}</td>
-                      <td class="p-2">
-                        @for (l of p.lines; track l.lineNo) {
-                          <div>{{ l.designation }} ×{{ l.quantity }}</div>
-                        }
-                      </td>
-                      <td class="p-2 text-right">{{ p.renewalsUsed }} / {{ p.renewalsAllowed }}</td>
-                      <td class="p-2">
-                        {{ p.issuedOn | date: 'dd/MM/yy' }} → {{ p.validUntil | date: 'dd/MM/yy' }}
-                      </td>
-                      <td class="p-2">{{ statusLabel(p.status) }}</td>
-                      <td class="p-2">
-                        @if (p.status === 'ACTIVE') {
-                          <button type="button" class="text-red-700" (click)="cancel(p)">
-                            Annuler
-                          </button>
-                        }
-                      </td>
-                    </tr>
-                  } @empty {
+              <a class="btn btn-ghost" [href]="registerExportUrl()" download>
+                <app-icon name="download" [size]="16" />
+                Exporter (CSV)
+              </a>
+            </div>
+            @if (register().length > 0) {
+              <div class="overflow-x-auto">
+                <table class="data-table whitespace-nowrap">
+                  <thead>
                     <tr>
-                      <td colspan="7" class="p-4 text-center text-slate-500">
-                        Aucune ordonnance en dossier
-                      </td>
+                      <th>N°</th>
+                      <th>Date</th>
+                      <th>Prescripteur</th>
+                      <th>Patient</th>
+                      <th>Produit</th>
+                      <th>Liste</th>
+                      <th class="text-right">Qté</th>
+                      <th>Délivré par</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            </section>
-
-            <form class="space-y-2 rounded-lg border bg-white p-4 text-sm" (ngSubmit)="create()">
-              <h3 class="font-semibold">Mettre une ordonnance en dossier</h3>
-              <div class="relative">
-                <input
-                  type="search"
-                  class="field"
-                  placeholder="Client (facultatif)"
-                  [(ngModel)]="customerTerm"
-                  (ngModelChange)="searchCustomers($event)"
-                  name="customer"
-                />
-                @if (customerResults().length > 0) {
-                  <ul
-                    class="absolute z-10 mt-1 w-full rounded border bg-white shadow"
-                    role="listbox"
-                  >
-                    @for (c of customerResults(); track c.id) {
-                      <li
-                        role="option"
-                        class="cursor-pointer px-2 py-1 hover:bg-slate-100"
-                        (mousedown)="pickCustomer(c)"
-                      >
-                        {{ c.displayName }} <small class="text-slate-500">{{ c.phone }}</small>
-                      </li>
+                  </thead>
+                  <tbody>
+                    @for (e of register(); track $index) {
+                      <tr>
+                        <td class="font-mono text-xs">{{ e.ordonnancierNumber }}</td>
+                        <td class="whitespace-nowrap tabular-nums text-muted">
+                          {{ e.occurredAt | date: 'dd/MM/yyyy HH:mm' }}
+                        </td>
+                        <td>
+                          <p class="font-medium">{{ e.prescriberName }}</p>
+                          @if (e.prescriberIdentifier) {
+                            <p class="text-xs text-subtle">{{ e.prescriberIdentifier }}</p>
+                          }
+                        </td>
+                        <td>{{ e.patientReference ?? e.customerName }}</td>
+                        <td>
+                          <p>{{ e.designation }}</p>
+                          <p class="font-mono text-xs text-subtle">{{ e.cip13 }}</p>
+                        </td>
+                        <td>
+                          <span
+                            class="badge"
+                            [class.badge-danger]="e.listing === 'STUPEFIANT'"
+                            [class.badge-warning]="e.listing !== 'STUPEFIANT'"
+                            >{{ e.listing }}</span
+                          >
+                        </td>
+                        <td class="num font-medium">{{ e.quantity }}</td>
+                        <td class="text-muted">{{ e.cashier }}</td>
+                      </tr>
                     }
-                  </ul>
-                }
-                @if (draftCustomer(); as c) {
-                  <p class="mt-1">
-                    Patient : <strong>{{ c.displayName }}</strong>
-                    <button
-                      type="button"
-                      class="ml-2 text-red-700"
-                      (click)="draftCustomer.set(null)"
-                    >
-                      ✕
-                    </button>
-                  </p>
-                }
+                  </tbody>
+                </table>
               </div>
-              <input
-                class="field"
-                placeholder="Prescripteur"
-                [(ngModel)]="draft.prescriberName"
-                name="prescriber"
-                required
-                maxlength="150"
-              />
-              <input
-                class="field"
-                placeholder="Identifiant du prescripteur"
-                [(ngModel)]="draft.prescriberIdentifier"
-                name="identifier"
-                maxlength="30"
-              />
-              <input
-                class="field"
-                placeholder="Référence patient (si pas de fiche client)"
-                [(ngModel)]="draft.patientReference"
-                name="patient"
-                maxlength="64"
-              />
-              <div class="grid grid-cols-2 gap-2">
-                <label
-                  >Date de l'ordonnance
-                  <input
-                    type="date"
-                    class="field"
-                    [(ngModel)]="draft.issuedOn"
-                    name="issued"
-                    required
-                /></label>
-                <label
-                  >Valable jusqu'au
-                  <input
-                    type="date"
-                    class="field"
-                    [(ngModel)]="draft.validUntil"
-                    name="until"
-                    required
-                /></label>
+            } @else {
+              <div class="empty-state">
+                <app-icon name="prescription" [size]="22" />
+                <p>Aucune délivrance de produit listé sur la période</p>
               </div>
-              <label
-                >Nombre de délivrances autorisées
+            }
+          </div>
+        }
+        @case ('renewals') {
+          <div class="card">
+            <div class="card-header flex-wrap">
+              <p class="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm text-muted">
+                Patients à rappeler : la dernière délivrance remonte à 28 jours ou plus, ou
+                l'ordonnance expire dans les
                 <input
                   type="number"
-                  min="1"
-                  max="24"
-                  class="field"
-                  [(ngModel)]="draft.renewalsAllowed"
-                  name="allowed"
-              /></label>
-              <div class="relative">
-                <input
-                  type="search"
-                  class="field"
-                  placeholder="Ajouter un produit (nom ou code)"
-                  [(ngModel)]="productTerm"
-                  (ngModelChange)="searchProducts($event)"
-                  name="product"
+                  min="0"
+                  max="365"
+                  class="input !inline-block !min-h-8 !w-20 text-right tabular-nums"
+                  [(ngModel)]="withinDays"
                 />
-                @if (productResults().length > 0) {
-                  <ul
-                    class="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded border bg-white shadow"
-                    role="listbox"
+                jours.
+              </p>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="loadDue()">
+                <app-icon name="refresh" [size]="16" />
+                Actualiser
+              </button>
+            </div>
+            <ul class="divide-y divide-[var(--border)]">
+              @for (p of due(); track p.id) {
+                <li class="flex flex-col gap-2 px-5 py-4 text-sm sm:flex-row sm:items-start">
+                  <span
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--warning-soft)] text-warning"
                   >
-                    @for (p of productResults(); track p.productId) {
-                      <li
-                        role="option"
-                        class="cursor-pointer px-2 py-1 hover:bg-slate-100"
-                        (mousedown)="addProduct(p)"
-                      >
-                        {{ p.designation }} <small class="text-slate-500">{{ p.cip13 }}</small>
-                      </li>
-                    }
-                  </ul>
-                }
+                    <app-icon name="bell" [size]="16" />
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <strong class="font-semibold">{{
+                        p.customerName ?? p.patientReference ?? 'Patient anonyme'
+                      }}</strong>
+                      <span class="badge badge-warning">
+                        {{ p.renewalsRemaining }} délivrance(s) restante(s)
+                      </span>
+                    </div>
+                    <p class="mt-1 text-muted">
+                      {{ p.prescriberName }} ·
+                      @for (l of p.lines; track l.lineNo) {
+                        {{ l.designation }} ×{{ l.quantity }}
+                        @if (!$last) {
+                          ,
+                        }
+                      }
+                    </p>
+                    <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
+                      <app-icon name="calendar" [size]="13" />
+                      valable jusqu'au {{ p.validUntil | date: 'dd/MM/yyyy' }}
+                      @if (p.nextRenewalDue) {
+                        · prochain renouvellement {{ p.nextRenewalDue | date: 'dd/MM' }}
+                      }
+                    </p>
+                  </div>
+                </li>
+              } @empty {
+                <li class="empty-state">
+                  <app-icon name="checkCircle" [size]="22" />
+                  <p>Aucun rappel à faire</p>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+        @case ('file') {
+          <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <section class="card min-w-0 self-start">
+              <div class="card-header flex-wrap">
+                <label class="input-with-icon min-w-0 flex-1 basis-56">
+                  <app-icon name="search" [size]="16" />
+                  <input
+                    type="search"
+                    class="input"
+                    placeholder="Prescripteur ou référence patient"
+                    [(ngModel)]="term"
+                    (keydown.enter)="loadFile()"
+                  />
+                </label>
+                <div class="flex gap-2">
+                  <select
+                    class="select !w-40"
+                    [(ngModel)]="statusFilter"
+                    (ngModelChange)="loadFile()"
+                  >
+                    <option value="">Tous états</option>
+                    <option value="ACTIVE">Actives</option>
+                    <option value="EXHAUSTED">Épuisées</option>
+                    <option value="EXPIRED">Expirées</option>
+                    <option value="CANCELLED">Annulées</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" (click)="loadFile()">
+                    Rechercher
+                  </button>
+                </div>
               </div>
-              @for (line of draftLines(); track line.productId) {
-                <div class="flex items-center gap-2">
-                  <span class="flex-1">{{ line.designation }}</span>
+              @if (file().length > 0) {
+                <div class="overflow-x-auto">
+                  <table class="data-table whitespace-nowrap">
+                    <thead>
+                      <tr>
+                        <th>Patient</th>
+                        <th>Prescripteur</th>
+                        <th>Produits</th>
+                        <th class="text-right">Délivrances</th>
+                        <th>Validité</th>
+                        <th>État</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (p of file(); track p.id) {
+                        <tr>
+                          <td class="font-medium">
+                            {{ p.customerName ?? p.patientReference ?? '—' }}
+                          </td>
+                          <td>{{ p.prescriberName }}</td>
+                          <td>
+                            @for (l of p.lines; track l.lineNo) {
+                              <div class="whitespace-nowrap">
+                                {{ l.designation }}
+                                <span class="text-subtle">×{{ l.quantity }}</span>
+                              </div>
+                            }
+                          </td>
+                          <td class="num tabular-nums">
+                            {{ p.renewalsUsed }} / {{ p.renewalsAllowed }}
+                          </td>
+                          <td class="whitespace-nowrap tabular-nums text-muted">
+                            {{ p.issuedOn | date: 'dd/MM/yy' }} →
+                            {{ p.validUntil | date: 'dd/MM/yy' }}
+                          </td>
+                          <td>
+                            <span
+                              class="badge"
+                              [class.badge-success]="p.status === 'ACTIVE'"
+                              [class.badge-warning]="p.status === 'EXPIRED'"
+                              [class.badge-danger]="p.status === 'CANCELLED'"
+                              ><span class="dot"></span>{{ statusLabel(p.status) }}</span
+                            >
+                          </td>
+                          <td class="text-right">
+                            @if (p.status === 'ACTIVE') {
+                              <button
+                                type="button"
+                                class="btn btn-ghost btn-sm text-danger"
+                                (click)="cancel(p)"
+                              >
+                                Annuler
+                              </button>
+                            }
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              } @else {
+                <div class="empty-state">
+                  <app-icon name="prescription" [size]="22" />
+                  <p>Aucune ordonnance en dossier</p>
+                </div>
+              }
+            </section>
+
+            <form class="card self-start" (ngSubmit)="create()">
+              <div class="card-header">
+                <h3 class="card-title">Mettre une ordonnance en dossier</h3>
+                <app-icon name="prescription" [size]="18" class="text-subtle" />
+              </div>
+              <div class="card-body space-y-3 text-sm">
+                <div class="relative">
+                  <span class="label">Patient</span>
+                  <label class="input-with-icon block">
+                    <app-icon name="search" [size]="16" />
+                    <input
+                      type="search"
+                      class="input"
+                      placeholder="Client (facultatif)"
+                      [(ngModel)]="customerTerm"
+                      (ngModelChange)="searchCustomers($event)"
+                      name="customer"
+                    />
+                  </label>
+                  @if (customerResults().length > 0) {
+                    <ul
+                      class="card absolute z-10 mt-1 w-full p-1 shadow-[var(--shadow-lg)]"
+                      role="listbox"
+                    >
+                      @for (c of customerResults(); track c.id) {
+                        <li
+                          role="option"
+                          class="flex cursor-pointer items-center justify-between gap-2 rounded-[var(--radius-sm)] px-3 py-2 hover:bg-surface-3"
+                          (mousedown)="pickCustomer(c)"
+                        >
+                          <span class="font-medium">{{ c.displayName }}</span>
+                          <small class="text-subtle">{{ c.phone }}</small>
+                        </li>
+                      }
+                    </ul>
+                  }
+                  @if (draftCustomer(); as c) {
+                    <div
+                      class="mt-2 flex items-center gap-2 rounded-[var(--radius-sm)] bg-brand-soft px-3 py-2"
+                    >
+                      <app-icon name="user" [size]="16" />
+                      <span class="min-w-0 flex-1 truncate">
+                        Patient : <strong>{{ c.displayName }}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-icon btn-sm"
+                        (click)="draftCustomer.set(null)"
+                        aria-label="Retirer le patient"
+                      >
+                        <app-icon name="x" [size]="16" />
+                      </button>
+                    </div>
+                  }
+                </div>
+                <label class="block">
+                  <span class="label">Prescripteur</span>
+                  <input
+                    class="input"
+                    placeholder="Prescripteur"
+                    [(ngModel)]="draft.prescriberName"
+                    name="prescriber"
+                    required
+                    maxlength="150"
+                  />
+                </label>
+                <div class="space-y-3">
+                  <input
+                    class="input"
+                    placeholder="Identifiant du prescripteur"
+                    [(ngModel)]="draft.prescriberIdentifier"
+                    name="identifier"
+                    maxlength="30"
+                  />
+                  <input
+                    class="input"
+                    placeholder="Référence patient (si pas de fiche client)"
+                    [(ngModel)]="draft.patientReference"
+                    name="patient"
+                    maxlength="64"
+                  />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block">
+                    <span class="label">Date de l'ordonnance</span>
+                    <input
+                      type="date"
+                      class="input"
+                      [(ngModel)]="draft.issuedOn"
+                      name="issued"
+                      required
+                    />
+                  </label>
+                  <label class="block">
+                    <span class="label">Valable jusqu'au</span>
+                    <input
+                      type="date"
+                      class="input"
+                      [(ngModel)]="draft.validUntil"
+                      name="until"
+                      required
+                    />
+                  </label>
+                </div>
+                <label class="block">
+                  <span class="label">Nombre de délivrances autorisées</span>
                   <input
                     type="number"
                     min="1"
-                    class="w-16 rounded border px-1"
-                    [ngModel]="line.quantity"
-                    (ngModelChange)="updateLine(line.productId, { quantity: $event })"
-                    [name]="'q' + line.productId"
+                    max="24"
+                    class="input"
+                    [(ngModel)]="draft.renewalsAllowed"
+                    name="allowed"
                   />
-                  <input
-                    class="w-36 rounded border px-1"
-                    placeholder="Posologie"
-                    [ngModel]="line.posology"
-                    (ngModelChange)="updateLine(line.productId, { posology: $event })"
-                    [name]="'p' + line.productId"
-                    maxlength="200"
-                  />
-                  <button
-                    type="button"
-                    class="text-red-700"
-                    (click)="removeLine(line.productId)"
-                    aria-label="Retirer"
-                  >
-                    ✕
-                  </button>
+                </label>
+                <div class="relative">
+                  <span class="label">Produits</span>
+                  <label class="input-with-icon block">
+                    <app-icon name="pill" [size]="16" />
+                    <input
+                      type="search"
+                      class="input"
+                      placeholder="Ajouter un produit (nom ou code)"
+                      [(ngModel)]="productTerm"
+                      (ngModelChange)="searchProducts($event)"
+                      name="product"
+                    />
+                  </label>
+                  @if (productResults().length > 0) {
+                    <ul
+                      class="card absolute z-10 mt-1 max-h-48 w-full overflow-auto p-1 shadow-[var(--shadow-lg)]"
+                      role="listbox"
+                    >
+                      @for (p of productResults(); track p.productId) {
+                        <li
+                          role="option"
+                          class="flex cursor-pointer items-center justify-between gap-2 rounded-[var(--radius-sm)] px-3 py-2 hover:bg-surface-3"
+                          (mousedown)="addProduct(p)"
+                        >
+                          <span class="min-w-0 truncate font-medium">{{ p.designation }}</span>
+                          <small class="font-mono text-subtle">{{ p.cip13 }}</small>
+                        </li>
+                      }
+                    </ul>
+                  }
                 </div>
-              }
-              <textarea
-                class="field"
-                rows="2"
-                placeholder="Notes"
-                [(ngModel)]="draft.notes"
-                name="notes"
-                maxlength="500"
-              ></textarea>
-              <button
-                type="submit"
-                class="w-full rounded bg-brand py-2 text-on-brand"
-                [disabled]="draftLines().length === 0"
-              >
-                Enregistrer en dossier
-              </button>
+                @if (draftLines().length > 0) {
+                  <ul
+                    class="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-line"
+                  >
+                    @for (line of draftLines(); track line.productId) {
+                      <li class="flex flex-wrap items-center gap-2 px-3 py-2">
+                        <span
+                          class="min-w-0 flex-1 basis-full truncate font-medium sm:basis-auto"
+                          >{{ line.designation }}</span
+                        >
+                        <input
+                          type="number"
+                          min="1"
+                          class="input !min-h-8 !w-16 text-right tabular-nums"
+                          aria-label="Quantité"
+                          [ngModel]="line.quantity"
+                          (ngModelChange)="updateLine(line.productId, { quantity: $event })"
+                          [name]="'q' + line.productId"
+                        />
+                        <input
+                          class="input !min-h-8 min-w-0 flex-1 sm:!w-36 sm:flex-none"
+                          placeholder="Posologie"
+                          [ngModel]="line.posology"
+                          (ngModelChange)="updateLine(line.productId, { posology: $event })"
+                          [name]="'p' + line.productId"
+                          maxlength="200"
+                        />
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-icon btn-sm text-danger"
+                          (click)="removeLine(line.productId)"
+                          aria-label="Retirer"
+                        >
+                          <app-icon name="trash" [size]="16" />
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                }
+                <textarea
+                  class="textarea"
+                  rows="2"
+                  placeholder="Notes"
+                  [(ngModel)]="draft.notes"
+                  name="notes"
+                  maxlength="500"
+                ></textarea>
+                <button
+                  type="submit"
+                  class="btn btn-primary w-full"
+                  [disabled]="draftLines().length === 0"
+                >
+                  <app-icon name="check" [size]="16" />
+                  Enregistrer en dossier
+                </button>
+              </div>
             </form>
           </div>
         }
       }
-      @if (status(); as text) {
-        <p class="text-sm" role="status">{{ text }}</p>
-      }
     </div>
-  `,
-  styles: `
-    .field {
-      display: block;
-      width: 100%;
-      margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
-    }
   `,
 })
 export class PrescriptionsPage {

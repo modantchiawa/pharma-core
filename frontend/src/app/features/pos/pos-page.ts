@@ -33,6 +33,8 @@ import { CartStore, discountPercent } from './cart.store';
 import { PaperFormat, TerminalTicketRequest } from '../../core/api/models';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
 import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
+import { Icon } from '../../shared/ui/icon';
+import { IconName } from '../../shared/ui/icons';
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -40,396 +42,634 @@ import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
  */
 @Component({
   selector: 'app-pos-page',
-  imports: [FormsModule, MoneyPipe, Receipt],
+  imports: [FormsModule, MoneyPipe, Receipt, Icon],
   providers: [CartStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
   template: `
-    <div class="grid h-full gap-4 p-4 lg:grid-cols-[1fr_380px] print:hidden">
-      <section class="flex min-h-0 flex-col gap-3">
+    <div
+      class="grid grid-cols-1 gap-4 p-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_400px] lg:p-5 print:hidden"
+    >
+      <section class="flex min-h-0 min-w-0 flex-col gap-3">
         <div class="relative">
-          <input
-            #search
-            type="search"
-            autocomplete="off"
-            autofocus
-            class="w-full rounded-lg border-2 border-brand px-4 py-3 text-lg focus:outline-none focus:ring-4 focus:ring-brand/30"
-            placeholder="Scanner un code-barres ou rechercher (F2)"
-            [(ngModel)]="term"
-            (ngModelChange)="lookup($event)"
-            (keydown.enter)="scan()"
-            (keydown.arrowdown)="move(1)"
-            (keydown.arrowup)="move(-1)"
-            aria-label="Recherche produit"
-          />
+          <label class="scan input-with-icon">
+            <app-icon name="barcode" [size]="22" />
+            <input
+              #search
+              type="search"
+              autocomplete="off"
+              autofocus
+              class="input"
+              placeholder="Scanner un code-barres ou rechercher un produit"
+              [(ngModel)]="term"
+              (ngModelChange)="lookup($event)"
+              (keydown.enter)="scan()"
+              (keydown.arrowdown)="move(1)"
+              (keydown.arrowup)="move(-1)"
+              aria-label="Recherche produit"
+            />
+            <span class="kbd pointer-events-none absolute top-1/2 right-4 -translate-y-1/2"
+              >F2</span
+            >
+          </label>
           @if (results().length > 0) {
             <ul
-              class="absolute z-10 mt-1 max-h-80 w-full overflow-auto rounded-lg border bg-white shadow-lg"
+              class="results absolute z-20 mt-2 max-h-96 w-full overflow-auto p-1.5"
               role="listbox"
             >
               @for (product of results(); track product.productId; let i = $index) {
                 <li
                   role="option"
                   [attr.aria-selected]="i === highlighted()"
-                  class="flex cursor-pointer justify-between px-4 py-2"
-                  [class.bg-brand]="i === highlighted()"
-                  [class.text-on-brand]="i === highlighted()"
+                  class="flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5"
                   (mousedown)="pick(product)"
                 >
                   <span
-                    >{{ product.designation }}
-                    <small class="opacity-70">{{ product.cip13 }}</small></span
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-muted"
                   >
-                  <span
-                    >{{ product.unitPriceCents | money }} · stock
-                    {{ product.availableQuantity }}
-                    @if (product.availableQuantity === 0 && product.dci) {
-                      <button
-                        type="button"
-                        class="ml-2 rounded border px-2 text-xs"
-                        (mousedown)="$event.stopPropagation(); showAlternatives(product)"
-                      >
-                        Équivalents
-                      </button>
-                    }
+                    <app-icon name="pill" [size]="16" />
                   </span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium">{{ product.designation }}</span>
+                    <span class="block text-xs text-subtle">{{ product.cip13 }}</span>
+                  </span>
+                  @if (product.availableQuantity === 0 && product.dci) {
+                    <button
+                      type="button"
+                      class="btn btn-soft btn-sm"
+                      (mousedown)="$event.stopPropagation(); showAlternatives(product)"
+                    >
+                      <app-icon name="transfer" [size]="14" />
+                      Équivalents
+                    </button>
+                  }
+                  <span
+                    class="badge"
+                    [class.badge-success]="product.availableQuantity > 5"
+                    [class.badge-warning]="
+                      product.availableQuantity > 0 && product.availableQuantity <= 5
+                    "
+                    [class.badge-danger]="product.availableQuantity === 0"
+                  >
+                    stock {{ product.availableQuantity }}
+                  </span>
+                  <span class="num w-28 font-semibold">{{ product.unitPriceCents | money }}</span>
                 </li>
               }
             </ul>
           }
         </div>
         @if (message(); as text) {
-          <p class="rounded bg-amber-100 px-3 py-2 text-amber-900" role="alert">{{ text }}</p>
+          <div class="alert alert-warning" role="alert">
+            <app-icon name="alert" [size]="18" />
+            <span>{{ text }}</span>
+          </div>
         }
 
-        <div class="min-h-0 flex-1 overflow-auto rounded-lg border bg-white">
-          <table class="w-full text-left">
-            <thead class="sticky top-0 bg-slate-100 text-sm">
-              <tr>
-                <th class="p-2">Produit</th>
-                <th class="p-2 w-28">Qté</th>
-                <th class="p-2 w-24">Remise %</th>
-                <th class="p-2 text-right">Montant</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (line of cart.lines(); track line.productId) {
-                <tr class="border-t">
-                  <td class="p-2">
-                    {{ line.designation }}
-                    @if (line.listing !== 'NONE') {
-                      <span class="ml-1 rounded bg-red-100 px-1 text-xs text-red-800">{{
-                        line.listing
-                      }}</span>
-                    }
-                    <div class="text-xs text-slate-500">
-                      {{ line.unitPriceCents | money }} · TVA {{ line.vatRate }} %
-                    </div>
-                  </td>
-                  <td class="p-2">
-                    <input
-                      type="number"
-                      min="0"
-                      class="w-20 rounded border px-2 py-1"
-                      [ngModel]="line.quantity"
-                      (ngModelChange)="cart.setQuantity(line.productId, $event)"
-                      [attr.aria-label]="'Quantité ' + line.designation"
-                    />
-                  </td>
-                  <td class="p-2">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.5"
-                      class="w-20 rounded border px-2 py-1"
-                      [ngModel]="percent(line)"
-                      (ngModelChange)="cart.setDiscountPercent(line.productId, $event)"
-                      [attr.aria-label]="'Remise ' + line.designation"
-                    />
-                  </td>
-                  <td class="p-2 text-right">
-                    {{ line.unitPriceCents * line.quantity - line.discountCents | money }}
-                  </td>
-                  <td class="p-2">
-                    <button
-                      type="button"
-                      class="text-red-700"
-                      (click)="cart.remove(line.productId)"
-                      aria-label="Retirer"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              } @empty {
-                <tr>
-                  <td colspan="5" class="p-8 text-center text-slate-500">
-                    Panier vide : scannez un produit
-                  </td>
-                </tr>
+        <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="card-header">
+            <div class="flex items-center gap-2">
+              <app-icon name="cart" [size]="18" class="text-muted" />
+              <h2 class="card-title">Panier</h2>
+              @if (cart.itemCount() > 0) {
+                <span class="badge badge-brand">{{ cart.itemCount() }} article(s)</span>
               }
-            </tbody>
-          </table>
+            </div>
+            @if (cart.lines().length > 0) {
+              <span class="hidden text-xs text-subtle sm:inline">
+                <span class="kbd">Échap</span> vider le panier
+              </span>
+            }
+          </div>
+          <div class="min-h-0 flex-1 overflow-auto">
+            @if (cart.lines().length > 0) {
+              <table class="data-table">
+                <thead class="sticky top-0 z-10">
+                  <tr>
+                    <th>Produit</th>
+                    <th class="w-36">Qté</th>
+                    <th class="w-28">Remise</th>
+                    <th class="num w-32">Montant</th>
+                    <th class="w-12"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (line of cart.lines(); track line.productId) {
+                    <tr>
+                      <td>
+                        <div class="flex items-center gap-2 font-medium">
+                          {{ line.designation }}
+                          @if (line.listing !== 'NONE') {
+                            <span class="badge badge-danger">{{ line.listing }}</span>
+                          }
+                        </div>
+                        <div class="mt-0.5 text-xs text-subtle">
+                          {{ line.unitPriceCents | money }} · TVA {{ line.vatRate }} %
+                        </div>
+                      </td>
+                      <td>
+                        <div class="stepper">
+                          <button
+                            type="button"
+                            (click)="cart.setQuantity(line.productId, line.quantity - 1)"
+                            [attr.aria-label]="'Diminuer ' + line.designation"
+                          >
+                            <app-icon name="minus" [size]="14" />
+                          </button>
+                          <input
+                            type="number"
+                            min="0"
+                            [ngModel]="line.quantity"
+                            (ngModelChange)="cart.setQuantity(line.productId, $event)"
+                            [attr.aria-label]="'Quantité ' + line.designation"
+                          />
+                          <button
+                            type="button"
+                            (click)="cart.setQuantity(line.productId, line.quantity + 1)"
+                            [attr.aria-label]="'Augmenter ' + line.designation"
+                          >
+                            <app-icon name="plus" [size]="14" />
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            class="input h-9 pr-7"
+                            [ngModel]="percent(line)"
+                            (ngModelChange)="cart.setDiscountPercent(line.productId, $event)"
+                            [attr.aria-label]="'Remise ' + line.designation"
+                          />
+                          <span
+                            class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-subtle"
+                            >%</span
+                          >
+                        </div>
+                      </td>
+                      <td class="num font-semibold">
+                        {{ line.unitPriceCents * line.quantity - line.discountCents | money }}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-icon btn-sm text-muted hover:!text-danger"
+                          (click)="cart.remove(line.productId)"
+                          aria-label="Retirer"
+                        >
+                          <app-icon name="trash" [size]="16" />
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            } @else {
+              <div class="empty-state h-full justify-center">
+                <app-icon name="barcode" [size]="24" />
+                <p class="text-base font-medium text-ink">Panier vide : scannez un produit</p>
+                <p class="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs">
+                  <span><span class="kbd">F2</span> rechercher</span>
+                  <span><span class="kbd">F4</span> espèces</span>
+                  <span><span class="kbd">F5</span> mobile money</span>
+                  <span><span class="kbd">F9</span> valider</span>
+                </p>
+              </div>
+            }
+          </div>
         </div>
       </section>
 
-      <aside class="flex flex-col gap-3 rounded-lg border bg-white p-4">
-        <div class="flex items-baseline justify-between">
-          <span class="text-slate-600">{{ cart.itemCount() }} article(s)</span>
-          <span class="text-3xl font-bold text-brand">{{ cart.netCents() | money }}</span>
-        </div>
-        @if (cart.discountCents() > 0) {
-          <p class="text-right text-sm text-slate-600">
-            dont remises {{ cart.discountCents() | money }}
+      <aside class="card flex min-h-0 flex-col overflow-hidden">
+        <div class="total px-5 py-4">
+          <p class="text-xs font-semibold tracking-wide text-muted uppercase">Total à payer</p>
+          <p class="mt-1 text-4xl font-bold tracking-tight text-brand">
+            {{ cart.netCents() | money }}
           </p>
-        }
+          <p class="mt-1 text-sm text-muted">
+            {{ cart.itemCount() }} article(s)
+            @if (cart.discountCents() > 0) {
+              · dont remises {{ cart.discountCents() | money }}
+            }
+          </p>
+        </div>
 
-        @if (cart.requiresPrescription()) {
-          <fieldset class="rounded border p-2">
-            <legend class="px-1 text-sm font-semibold">Ordonnance</legend>
-            @if (prescriptionsOnFile().length > 0) {
-              <select
-                class="mb-1 w-full rounded border px-2 py-1 text-sm"
-                [ngModel]="cart.prescriptionOnFile()?.id ?? ''"
-                (ngModelChange)="pickPrescription($event)"
-                aria-label="Ordonnance en dossier"
+        <div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
+          @if (cart.requiresPrescription()) {
+            <fieldset class="panel space-y-2">
+              <legend class="panel-title">
+                <app-icon name="prescription" [size]="16" />
+                Ordonnance
+                <span class="badge badge-warning ml-1">requise</span>
+              </legend>
+              @if (prescriptionsOnFile().length > 0) {
+                <select
+                  class="select"
+                  [ngModel]="cart.prescriptionOnFile()?.id ?? ''"
+                  (ngModelChange)="pickPrescription($event)"
+                  aria-label="Ordonnance en dossier"
+                >
+                  <option value="">Ordonnance papier (saisie)</option>
+                  @for (p of prescriptionsOnFile(); track p.id) {
+                    <option [value]="p.id">
+                      {{ p.prescriberName }} · {{ p.renewalsRemaining }} délivrance(s) restante(s) ·
+                      valable jusqu'au {{ p.validUntil }}
+                    </option>
+                  }
+                </select>
+              }
+              <input
+                class="input"
+                placeholder="Prescripteur"
+                [ngModel]="cart.prescription()?.prescriberName"
+                (ngModelChange)="updatePrescription({ prescriberName: $event })"
+                aria-label="Prescripteur"
+              />
+              <div class="grid grid-cols-2 gap-2">
+                <input
+                  class="input"
+                  placeholder="RPPS (11 chiffres)"
+                  [ngModel]="cart.prescription()?.prescriberRpps"
+                  (ngModelChange)="updatePrescription({ prescriberRpps: $event })"
+                  aria-label="RPPS"
+                />
+                <input
+                  class="input"
+                  placeholder="Réf. patient (pseudonyme)"
+                  [ngModel]="cart.prescription()?.patientReference"
+                  (ngModelChange)="updatePrescription({ patientReference: $event })"
+                  aria-label="Référence patient"
+                />
+              </div>
+            </fieldset>
+          }
+
+          <div class="relative">
+            @if (cart.customer(); as c) {
+              <div
+                class="flex items-center gap-3 rounded-[var(--radius)] border bg-surface-2 px-3 py-2"
               >
-                <option value="">Ordonnance papier (saisie)</option>
-                @for (p of prescriptionsOnFile(); track p.id) {
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand"
+                >
+                  <app-icon name="user" [size]="16" />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm font-semibold">{{ c.displayName }}</span>
+                  <span class="block text-xs text-muted"
+                    >dû {{ c.creditBalanceCents | money }}</span
+                  >
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon btn-sm"
+                  (click)="clearCustomer()"
+                  aria-label="Retirer le client"
+                >
+                  <app-icon name="x" [size]="16" />
+                </button>
+              </div>
+            } @else {
+              <label class="input-with-icon">
+                <app-icon name="user" [size]="16" />
+                <input
+                  type="search"
+                  class="input"
+                  placeholder="Client (nom, téléphone) — facultatif"
+                  [(ngModel)]="customerTerm"
+                  (ngModelChange)="searchCustomers($event)"
+                  aria-label="Client"
+                />
+              </label>
+            }
+            @if (customerResults().length > 0) {
+              <ul
+                class="results absolute z-20 mt-2 max-h-56 w-full overflow-auto p-1"
+                role="listbox"
+              >
+                @for (c of customerResults(); track c.id) {
+                  <li
+                    role="option"
+                    class="cursor-pointer rounded-[var(--radius-sm)] px-3 py-2"
+                    (mousedown)="pickCustomer(c)"
+                  >
+                    <span class="block text-sm font-medium">{{ c.displayName }}</span>
+                    <span class="block text-xs text-muted"
+                      >{{ c.phone }} · crédit dispo {{ c.availableCreditCents | money }}</span
+                    >
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+
+          @if (policies().length > 0) {
+            <fieldset class="panel panel-brand space-y-2 text-sm">
+              <legend class="panel-title">
+                <app-icon name="insurance" [size]="16" />
+                Tiers payant
+              </legend>
+              <select
+                class="select"
+                [ngModel]="cart.policy()?.id ?? ''"
+                (ngModelChange)="pickPolicy($event)"
+                aria-label="Police d'assurance"
+              >
+                <option value="">Sans tiers payant</option>
+                @for (p of policies(); track p.id) {
                   <option [value]="p.id">
-                    {{ p.prescriberName }} · {{ p.renewalsRemaining }} délivrance(s) restante(s) ·
-                    valable jusqu'au {{ p.validUntil }}
+                    {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
                   </option>
                 }
               </select>
-            }
-            <input
-              class="mb-1 w-full rounded border px-2 py-1"
-              placeholder="Prescripteur"
-              [ngModel]="cart.prescription()?.prescriberName"
-              (ngModelChange)="updatePrescription({ prescriberName: $event })"
-              aria-label="Prescripteur"
-            />
-            <input
-              class="mb-1 w-full rounded border px-2 py-1"
-              placeholder="RPPS (11 chiffres)"
-              [ngModel]="cart.prescription()?.prescriberRpps"
-              (ngModelChange)="updatePrescription({ prescriberRpps: $event })"
-              aria-label="RPPS"
-            />
-            <input
-              class="w-full rounded border px-2 py-1"
-              placeholder="Référence patient (pseudonyme)"
-              [ngModel]="cart.prescription()?.patientReference"
-              (ngModelChange)="updatePrescription({ patientReference: $event })"
-              aria-label="Référence patient"
-            />
-          </fieldset>
-        }
-
-        <div class="relative">
-          <input
-            type="search"
-            class="w-full rounded border px-2 py-1 text-sm"
-            placeholder="Client (nom, téléphone) — facultatif"
-            [(ngModel)]="customerTerm"
-            (ngModelChange)="searchCustomers($event)"
-            aria-label="Client"
-          />
-          @if (customerResults().length > 0) {
-            <ul
-              class="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded border bg-white shadow"
-              role="listbox"
-            >
-              @for (c of customerResults(); track c.id) {
-                <li
-                  role="option"
-                  class="cursor-pointer px-2 py-1 hover:bg-slate-100"
-                  (mousedown)="pickCustomer(c)"
-                >
-                  {{ c.displayName }}
-                  <small class="text-slate-500"
-                    >{{ c.phone }} · crédit dispo {{ c.availableCreditCents | money }}</small
+              @if (cart.policy(); as policy) {
+                <p class="flex justify-between">
+                  <span class="text-muted"
+                    >Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span
                   >
+                  <strong class="num">{{ cart.insuredShareCents() | money }}</strong>
+                </p>
+                @if (policy.remainingCeilingCents !== null) {
+                  <p class="text-xs text-subtle">
+                    Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
+                  </p>
+                }
+                <p class="flex justify-between">
+                  <span class="text-muted">Reste à charge du patient</span>
+                  <strong class="num">{{
+                    cart.netCents() - cart.insuredShareCents() | money
+                  }}</strong>
+                </p>
+              }
+            </fieldset>
+          }
+
+          <div>
+            <p class="label">Encaissement</p>
+            <div class="grid grid-cols-3 gap-2">
+              @for (method of visibleMethods(); track method.code) {
+                <button type="button" class="method" (click)="pay(method.code)">
+                  <app-icon [name]="method.icon" [size]="20" />
+                  <span>{{ method.label }}</span>
+                  @if (method.key) {
+                    <span class="kbd absolute top-1.5 right-1.5">{{ method.key }}</span>
+                  }
+                </button>
+              }
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="label" for="pos-amount">Montant</label>
+              <input
+                id="pos-amount"
+                type="text"
+                inputmode="decimal"
+                class="input"
+                [(ngModel)]="amount"
+                placeholder="Reste {{ cart.remainingCents() | money }}"
+              />
+            </div>
+            <div>
+              <label class="label" for="pos-provider">Opérateur mobile money</label>
+              <select id="pos-provider" class="select" [(ngModel)]="provider">
+                @for (p of providers; track p) {
+                  <option [value]="p">{{ p.replace('_', ' ') }}</option>
+                }
+              </select>
+            </div>
+          </div>
+          @if (!cashSessionOpen()) {
+            <div class="alert alert-warning text-xs">
+              <app-icon name="alert" [size]="16" />
+              <span
+                >Aucune session de caisse ouverte sur ce poste : les espèces ne seront pas
+                rattachées à un rapport Z.</span
+              >
+            </div>
+          }
+
+          @if (cart.payments().length > 0) {
+            <ul class="divide-y rounded-[var(--radius)] border text-sm">
+              @for (payment of cart.payments(); track $index) {
+                <li class="flex items-center gap-2 px-3 py-2">
+                  <app-icon name="checkCircle" [size]="16" class="text-success" />
+                  <span class="flex-1"
+                    >{{ labelOf(payment.method) }}
+                    @if (payment.provider) {
+                      <span class="text-muted">· {{ payment.provider }}</span>
+                    }
+                    @if (payment.policyId) {
+                      <span class="text-muted">· {{ cart.policy()?.insurerName }}</span>
+                    }
+                  </span>
+                  <span class="num font-medium">{{ payment.amountCents | money }}</span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    (click)="cart.removePayment($index)"
+                    aria-label="Supprimer le règlement"
+                  >
+                    <app-icon name="x" [size]="14" />
+                  </button>
                 </li>
               }
             </ul>
           }
-          @if (cart.customer(); as c) {
-            <p class="mt-1 flex justify-between text-sm">
-              <span
-                >👤 {{ c.displayName }}
-                <small class="text-slate-500">dû {{ c.creditBalanceCents | money }}</small></span
-              >
-              <button
-                type="button"
-                class="text-red-700"
-                (click)="clearCustomer()"
-                aria-label="Retirer le client"
-              >
-                ✕
-              </button>
+
+          @for (issue of cart.blockingIssues(); track issue) {
+            <p class="flex items-start gap-2 text-sm text-danger">
+              <app-icon name="error" [size]="16" class="mt-0.5" />{{ issue }}
+            </p>
+          }
+          @for (warning of cart.stockWarnings(); track warning) {
+            <p class="flex items-start gap-2 text-sm text-warning">
+              <app-icon name="alert" [size]="16" class="mt-0.5" />{{ warning }}
             </p>
           }
         </div>
 
-        @if (policies().length > 0) {
-          <fieldset class="rounded border border-brand/40 bg-brand/5 p-2 text-sm">
-            <legend class="px-1 font-semibold">Tiers payant</legend>
-            <select
-              class="w-full rounded border px-2 py-1"
-              [ngModel]="cart.policy()?.id ?? ''"
-              (ngModelChange)="pickPolicy($event)"
-              aria-label="Police d'assurance"
-            >
-              <option value="">Sans tiers payant</option>
-              @for (p of policies(); track p.id) {
-                <option [value]="p.id">
-                  {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
-                </option>
-              }
-            </select>
-            @if (cart.policy(); as policy) {
-              <p class="mt-1 flex justify-between">
-                <span>Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span>
-                <strong>{{ cart.insuredShareCents() | money }}</strong>
-              </p>
-              @if (policy.remainingCeilingCents !== null) {
-                <p class="text-xs text-slate-600">
-                  Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
-                </p>
-              }
-              <p class="flex justify-between">
-                <span>Reste à charge du patient</span>
-                <strong>{{ cart.netCents() - cart.insuredShareCents() | money }}</strong>
-              </p>
-            }
-          </fieldset>
-        }
-
-        <div class="grid grid-cols-2 gap-2">
-          @for (method of visibleMethods(); track method.code) {
-            <button
-              type="button"
-              class="rounded border-2 border-brand px-2 py-2 font-medium text-brand hover:bg-brand hover:text-on-brand"
-              (click)="pay(method.code)"
-            >
-              {{ method.label }}
-            </button>
-          }
-        </div>
-        <div class="grid grid-cols-2 gap-2 text-sm">
-          <label
-            >Montant
-            <input
-              type="text"
-              inputmode="decimal"
-              class="mt-1 w-full rounded border px-2 py-1"
-              [(ngModel)]="amount"
-              placeholder="Reste {{ cart.remainingCents() | money }}"
-            />
-          </label>
-          <label
-            >Opérateur mobile money
-            <select class="mt-1 w-full rounded border px-2 py-1" [(ngModel)]="provider">
-              @for (p of providers; track p) {
-                <option [value]="p">{{ p.replace('_', ' ') }}</option>
-              }
-            </select>
-          </label>
-        </div>
-        @if (!cashSessionOpen()) {
-          <p class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
-            Aucune session de caisse ouverte sur ce poste : les espèces ne seront pas rattachées à
-            un rapport Z.
+        <div class="space-y-3 border-t bg-surface-2 p-4">
+          <p class="flex items-baseline justify-between font-semibold">
+            <span>Reste à payer</span>
+            <span class="num text-lg">{{ cart.remainingCents() | money }}</span>
           </p>
-        }
-
-        <ul class="text-sm">
-          @for (payment of cart.payments(); track $index) {
-            <li class="flex justify-between">
-              <span
-                >{{ labelOf(payment.method) }}
-                @if (payment.provider) {
-                  · {{ payment.provider }}
-                }
-                @if (payment.policyId) {
-                  · {{ cart.policy()?.insurerName }}
-                }
-              </span>
-              <span
-                >{{ payment.amountCents | money }}
-                <button
-                  type="button"
-                  class="ml-1 text-red-700"
-                  (click)="cart.removePayment($index)"
-                  aria-label="Supprimer le règlement"
-                >
-                  ✕
-                </button></span
-              >
-            </li>
-          }
-        </ul>
-        <p class="flex justify-between font-semibold">
-          <span>Reste à payer</span><span>{{ cart.remainingCents() | money }}</span>
-        </p>
-        @if (cart.changeDueCents() > 0) {
-          <p class="flex justify-between text-lg font-bold text-accent">
-            <span>Rendu monnaie</span><span>{{ cart.changeDueCents() | money }}</span>
-          </p>
-        }
-
-        @for (issue of cart.blockingIssues(); track issue) {
-          <p class="text-sm text-red-700">• {{ issue }}</p>
-        }
-        @for (warning of cart.stockWarnings(); track warning) {
-          <p class="text-sm text-amber-700">⚠ {{ warning }}</p>
-        }
-
-        <button
-          type="button"
-          class="mt-auto rounded-lg bg-brand py-3 text-lg font-bold text-on-brand disabled:opacity-40"
-          [disabled]="!cart.canCheckout() || busy()"
-          (click)="checkout()"
-        >
-          Valider la vente (F9)
-        </button>
-        <p class="text-center text-xs" [class.text-amber-700]="!connectivity.online()">
-          {{
-            connectivity.online()
-              ? 'En ligne'
-              : 'Hors-ligne : la vente sera synchronisée automatiquement'
-          }}
-          · {{ outbox.pendingCount() }} en attente
-        </p>
-        @if (receipt(); as last) {
-          <div class="flex flex-wrap gap-2 text-sm">
-            <button
-              type="button"
-              class="rounded border px-2 py-1"
-              (click)="printReceipt(last, false)"
+          @if (cart.changeDueCents() > 0) {
+            <p
+              class="flex items-baseline justify-between rounded-[var(--radius-sm)] bg-[var(--success-soft)] px-3 py-2 font-bold text-success"
             >
-              Réimprimer le ticket {{ last.ticketNumber }}
-            </button>
-            @if (printing.settings().invoicePaper === 'A4') {
+              <span>Rendu monnaie</span>
+              <span class="num text-xl">{{ cart.changeDueCents() | money }}</span>
+            </p>
+          }
+          <button
+            type="button"
+            class="btn btn-primary btn-lg w-full"
+            [disabled]="!cart.canCheckout() || busy()"
+            (click)="checkout()"
+          >
+            <app-icon name="check" [size]="20" [stroke]="2.25" />
+            Valider la vente
+            <span class="kbd ml-1 !border-white/30 !bg-white/15 !text-on-brand">F9</span>
+          </button>
+          <p
+            class="flex items-center justify-center gap-1.5 text-xs text-muted"
+            [class.!text-warning]="!connectivity.online()"
+          >
+            <app-icon [name]="connectivity.online() ? 'wifi' : 'wifiOff'" [size]="14" />
+            {{
+              connectivity.online()
+                ? 'En ligne'
+                : 'Hors-ligne : la vente sera synchronisée automatiquement'
+            }}
+            · {{ outbox.pendingCount() }} en attente
+          </p>
+          @if (receipt(); as last) {
+            <div class="flex flex-wrap gap-2">
               <button
                 type="button"
-                class="rounded border px-2 py-1"
-                (click)="printReceipt(last, true)"
+                class="btn btn-secondary btn-sm flex-1"
+                (click)="printReceipt(last, false)"
               >
-                Facture A4
+                <app-icon name="printer" [size]="14" />
+                Réimprimer le ticket {{ last.ticketNumber }}
               </button>
-            }
-          </div>
-        }
+              @if (printing.settings().invoicePaper === 'A4') {
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  (click)="printReceipt(last, true)"
+                >
+                  <app-icon name="prescription" [size]="14" />
+                  Facture A4
+                </button>
+              }
+            </div>
+          }
+        </div>
       </aside>
     </div>
 
     @if (receipt(); as data) {
       <div class="hidden print:block"><app-receipt [data]="data" [format]="printFormat()" /></div>
+    }
+  `,
+  styles: `
+    .scan > input {
+      height: 3.5rem;
+      padding-left: 3.25rem;
+      padding-right: 3.5rem;
+      font-size: 1.125rem;
+      border-width: 2px;
+      border-color: color-mix(in oklab, var(--brand-primary) 55%, var(--border));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+    }
+    .scan > app-icon {
+      left: 1rem;
+      color: var(--brand-text);
+    }
+    .results {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-lg);
+    }
+    .results li:hover,
+    .results li[aria-selected='true'] {
+      background: var(--brand-soft);
+    }
+    .total {
+      background: linear-gradient(180deg, var(--brand-softer), var(--surface));
+      border-bottom: 1px solid var(--border);
+    }
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+    }
+    .panel-brand {
+      border-color: color-mix(in oklab, var(--brand-primary) 30%, var(--border));
+      background: var(--brand-softer);
+    }
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0 0.35rem;
+      font-size: 0.8125rem;
+      font-weight: 650;
+    }
+    .method {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      min-height: calc(4.5rem * var(--density));
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      line-height: 1.15;
+      text-align: center;
+      transition:
+        border-color 120ms ease,
+        background-color 120ms ease,
+        transform 80ms ease;
+    }
+    .method > app-icon {
+      color: var(--brand-text);
+    }
+    .method:hover {
+      border-color: var(--brand-primary);
+      background: var(--brand-softer);
+    }
+    .method:active {
+      transform: scale(0.97);
+    }
+    .stepper {
+      display: inline-flex;
+      align-items: center;
+      height: 2.25rem;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .stepper > button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 100%;
+      color: var(--text-muted);
+    }
+    .stepper > button:hover {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+    .stepper > input {
+      width: 3rem;
+      height: 100%;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      text-align: center;
+      font-weight: 600;
+      background: transparent;
+      box-shadow: none;
+      -moz-appearance: textfield;
+    }
+    .stepper > input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
     }
   `,
 })
@@ -464,13 +704,18 @@ export class PosPage {
   protected readonly receipt = signal<ReceiptData | null>(null);
   protected readonly printing = inject(PrintSettingsService);
   protected readonly printFormat = signal<PaperFormat>('MM80');
-  protected readonly methods: { code: PaymentMethod; label: string }[] = [
-    { code: 'CASH', label: 'Espèces (F4)' },
-    { code: 'MOBILE_MONEY', label: 'Mobile money (F5)' },
-    { code: 'CARD', label: 'Carte' },
-    { code: 'THIRD_PARTY_PAYER', label: 'Tiers payant' },
-    { code: 'CREDIT', label: 'Crédit client' },
-    { code: 'CHECK', label: 'Chèque' },
+  protected readonly methods: {
+    code: PaymentMethod;
+    label: string;
+    icon: IconName;
+    key?: string;
+  }[] = [
+    { code: 'CASH', label: 'Espèces', icon: 'cash', key: 'F4' },
+    { code: 'MOBILE_MONEY', label: 'Mobile money', icon: 'mobileMoney', key: 'F5' },
+    { code: 'CARD', label: 'Carte', icon: 'card' },
+    { code: 'THIRD_PARTY_PAYER', label: 'Tiers payant', icon: 'insurance' },
+    { code: 'CREDIT', label: 'Crédit client', icon: 'credit' },
+    { code: 'CHECK', label: 'Chèque', icon: 'receipt' },
   ];
   /** The insured share is computed from the policy, never typed: its button hides once a policy applies. */
   protected readonly visibleMethods = computed(() =>

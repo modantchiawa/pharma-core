@@ -1,6 +1,9 @@
+import { registerLocaleData } from '@angular/common';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import localeFr from '@angular/common/locales/fr';
 import {
   ApplicationConfig,
+  LOCALE_ID,
   inject,
   isDevMode,
   provideAppInitializer,
@@ -16,6 +19,9 @@ import { BrandingService } from './core/branding/branding.service';
 import { SyncOrchestratorService } from './core/offline/sync-orchestrator.service';
 import { NodeInfoService } from './core/api/node-info.service';
 import { DisplayPreferencesService } from './core/ui/display-preferences.service';
+
+// Dates and numbers in French ("mardi 13 octobre", "28,5 %"); amounts go through MoneyPipe.
+registerLocaleData(localeFr);
 
 async function bootstrapSession(): Promise<void> {
   const node = inject(NodeInfoService);
@@ -41,6 +47,7 @@ async function bootstrapSession(): Promise<void> {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    { provide: LOCALE_ID, useValue: 'fr' },
     provideRouter(routes, withComponentInputBinding()),
     provideHttpClient(withInterceptors([authInterceptor])),
     provideAppInitializer(bootstrapSession),
