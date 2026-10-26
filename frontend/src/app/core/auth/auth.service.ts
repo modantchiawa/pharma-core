@@ -13,6 +13,7 @@ const TERMINAL_TOKEN_KEY = 'pharmacore.terminalToken';
 const REFRESH_KEY = 'pharmacore.refreshToken';
 const ACCESS_KEY = 'pharmacore.accessToken';
 const PHARMACY_KEY = 'pharmacore.pharmacy';
+const PLATFORM_TOKEN_KEY = 'pharmacore.platformToken';
 
 interface TokenResponse {
   accessToken: string;
@@ -42,6 +43,10 @@ export class AuthService {
   private readonly accessState = signal<string | null>(sessionStorage.getItem(ACCESS_KEY));
   private readonly mustChange = signal(false);
   private readonly platformUser = signal<User | null>(null);
+  /** Platform token obtained by password in demonstration mode (no identity provider). */
+  private readonly platformToken = signal<string | null>(
+    sessionStorage.getItem(PLATFORM_TOKEN_KEY),
+  );
   private platformManager: UserManager | null = null;
   private refreshing: Promise<string | null> | null = null;
 
@@ -49,8 +54,14 @@ export class AuthService {
   readonly mustChangePassword = this.mustChange.asReadonly();
   readonly accessToken = computed(() =>
     this.realmState() === 'platform'
-      ? (this.platformUser()?.access_token ?? null)
+      ? (this.platformToken() ?? this.platformUser()?.access_token ?? null)
       : this.accessState(),
+  );
+  readonly platformDisplayName = computed(
+    () =>
+      (this.claims()?.['name'] as string | undefined) ??
+      (this.platformUser()?.profile?.name as string | undefined) ??
+      null,
   );
   readonly claims = computed(() => decodeJwtPayload(this.accessToken()));
   readonly tenantId = computed(() => (this.claims()?.['tenant_id'] as string | undefined) ?? null);
@@ -68,6 +79,9 @@ export class AuthService {
 
   async init(): Promise<void> {
     if (this.realmState() === 'platform') {
+      if (this.platformToken()) {
+        return;
+      }
       this.platformUser.set(await this.manager().getUser());
     } else if (!this.isAuthenticated() && localStorage.getItem(REFRESH_KEY)) {
       await this.refresh();
@@ -127,6 +141,13 @@ export class AuthService {
 
   async logout(): Promise<void> {
     if (this.realmState() === 'platform') {
+      if (this.platformToken()) {
+        sessionStorage.removeItem(PLATFORM_TOKEN_KEY);
+        sessionStorage.setItem(REALM_KEY, 'pharmacy');
+        this.platformToken.set(null);
+        this.realmState.set('pharmacy');
+        return;
+      }
       await this.manager().signoutRedirect();
       return;
     }
@@ -172,6 +193,19 @@ export class AuthService {
     await this.manager().signinRedirect({ state: returnUrl });
   }
 
+  /** Demonstration mode: the supervision console opens with a shared password. */
+  async loginPlatformWithPassword(password: string): Promise<void> {
+    const response = await firstValueFrom(
+      this.http.post<{ accessToken: string }>(`${this.env.apiUrl}/auth/platform-login`, {
+        password,
+      }),
+    );
+    sessionStorage.setItem(REALM_KEY, 'platform');
+    sessionStorage.setItem(PLATFORM_TOKEN_KEY, response.accessToken);
+    this.realmState.set('platform');
+    this.platformToken.set(response.accessToken);
+  }
+
   async completePlatformLogin(): Promise<string> {
     const user = await this.manager().signinRedirectCallback();
     this.platformUser.set(user);
@@ -211,6 +245,9 @@ export class AuthService {
   }
 
   private async refreshPlatform(): Promise<string | null> {
+    if (this.platformToken()) {
+      return this.isAuthenticated() ? this.platformToken() : null;
+    }
     try {
       const user = await this.manager().signinSilent();
       this.platformUser.set(user);

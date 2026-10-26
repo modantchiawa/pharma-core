@@ -193,9 +193,6 @@ export class Shell {
       : PHARMACY_NAV.filter((item) => this.permissions.hasAny(...item.permissions)),
   );
   protected readonly userName = computed(
-    () =>
-      this.permissions.profile()?.displayName ??
-      (this.auth.user()?.profile?.name as string | undefined) ??
-      '',
+    () => this.permissions.profile()?.displayName ?? this.auth.platformDisplayName() ?? '',
   );
 }

@@ -61,6 +61,13 @@ pharmacore:
   node:
     mode: ${PHARMACORE_MODE:CLOUD}
     keys-dir: ${PHARMACORE_KEYS_DIR:./data/keys}
+  # Mode démonstration / recette : pharmacies de démo et console éditeur par mot de passe.
+  # Jamais en production.
+  demo:
+    enabled: ${DEMO_ENABLED:false}
+    platform-password: ${DEMO_PLATFORM_PASSWORD:}
+    account-password: ${DEMO_ACCOUNT_PASSWORD:Demo2026!}
+    pin: ${DEMO_PIN:1234}
   invoicing:
     certification: ${INVOICE_CERTIFICATION:NONE}
   security:

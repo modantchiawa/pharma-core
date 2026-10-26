@@ -1,0 +1,48 @@
+# Blueprint Render : backend PharmaCore en mode démo + PostgreSQL managé.
+# Après le premier déploiement, exécuter une fois deploy/demo/init-roles.sql sur la base
+# (voir docs/DEMO.md), puis redéployer le service : Flyway crée le schéma et la démo se charge.
+services:
+  - type: web
+    name: pharmacore-demo-api
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: deploy/demo/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    autoDeploy: true
+    envVars:
+      - key: PHARMACORE_MODE
+        value: CLOUD
+      - key: DEMO_ENABLED
+        value: "true"
+      - key: DEMO_PLATFORM_PASSWORD
+        generateValue: true
+      - key: DEMO_ACCOUNT_PASSWORD
+        value: Demo2026!
+      - key: ALLOWED_ORIGINS
+        value: https://pharmacore-demo.vercel.app
+      - key: DB_URL
+        sync: false
+      - key: DB_MIGRATION_USER
+        value: pharmacore_owner
+      - key: DB_MIGRATION_PASSWORD
+        sync: false
+      - key: DB_APP_USER
+        value: pharmacore_app_login
+      - key: DB_APP_PASSWORD
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "10"
+    disk:
+      name: pharmacore-keys
+      mountPath: /app/data/keys
+      sizeGB: 1
+
+databases:
+  - name: pharmacore-demo-db
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: pharmacore
+    user: pharmacore_admin

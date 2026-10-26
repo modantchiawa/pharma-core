@@ -39,7 +39,7 @@ class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/public/hub/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/pin",
-                                "/api/auth/logout").permitAll()
+                                "/api/auth/logout", "/api/auth/platform-login").permitAll()
                         // STOMP authenticates the CONNECT frame itself (see StompAuthenticationInterceptor)
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/platform/**").hasAuthority(BearerTokenAuthenticator.PLATFORM_ADMIN_AUTHORITY)

@@ -6,6 +6,21 @@ import { AuthService } from '../../core/auth/auth.service';
 import { BrandingService } from '../../core/branding/branding.service';
 import { SyncOrchestratorService } from '../../core/offline/sync-orchestrator.service';
 import { TerminalService } from '../../core/offline/terminal.service';
+import { APP_ENVIRONMENT } from '../../core/config';
+
+interface DemoAccount {
+  role: string;
+  email: string;
+  pharmacy: string;
+}
+
+/** Accounts created by the backend's demonstration seed (pharmacore.demo.enabled). */
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { role: 'Titulaire', email: 'titulaire@sahel.demo', pharmacy: 'sahel' },
+  { role: 'Caissier', email: 'caisse@sahel.demo', pharmacy: 'sahel' },
+  { role: 'Titulaire', email: 'titulaire@lacouroussou.demo', pharmacy: 'lacouroussou' },
+  { role: 'Caissier', email: 'caisse@lacouroussou.demo', pharmacy: 'lacouroussou' },
+];
 
 /**
  * Sign-in without Internet: credentials are checked by the local hub (or the cloud for
@@ -124,13 +139,57 @@ import { TerminalService } from '../../core/offline/terminal.service';
         @if (error(); as text) {
           <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">{{ text }}</p>
         }
-        <button
-          type="button"
-          class="w-full text-xs text-slate-400 underline"
-          (click)="auth.loginPlatform()"
-        >
-          Console éditeur
-        </button>
+        @if (demo) {
+          <details class="rounded border border-dashed border-amber-400 bg-amber-50 p-3 text-xs">
+            <summary class="cursor-pointer font-semibold text-amber-900">
+              Environnement de démonstration · comptes de test
+            </summary>
+            <table class="mt-2 w-full text-left">
+              <tbody>
+                @for (account of demoAccounts; track account.email) {
+                  <tr class="border-t border-amber-200">
+                    <td class="py-1 pr-2">{{ account.role }}</td>
+                    <td class="py-1 pr-2">
+                      <button type="button" class="underline" (click)="useDemoAccount(account)">
+                        {{ account.email }}
+                      </button>
+                    </td>
+                    <td class="py-1">{{ account.pharmacy }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            <p class="mt-2">
+              Mot de passe <code>Demo2026!</code> · PIN <code>1234</code> · poste de démonstration
+              <code>DEMO-1</code>. Les données sont rechargées à chaque redéploiement.
+            </p>
+            <form class="mt-3 flex gap-2" (ngSubmit)="platformDemoLogin()">
+              <input
+                type="password"
+                class="flex-1 rounded border px-2 py-1"
+                placeholder="Mot de passe console éditeur"
+                [(ngModel)]="platformPassword"
+                name="platformPassword"
+                autocomplete="off"
+              />
+              <button
+                type="submit"
+                class="rounded bg-brand px-3 py-1 text-on-brand"
+                [disabled]="busy()"
+              >
+                Console éditeur
+              </button>
+            </form>
+          </details>
+        } @else {
+          <button
+            type="button"
+            class="w-full text-xs text-slate-400 underline"
+            (click)="auth.loginPlatform()"
+          >
+            Console éditeur
+          </button>
+        }
       </section>
     </main>
   `,
@@ -150,6 +209,9 @@ export class LoginPage {
   );
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
+  protected readonly demo = inject(APP_ENVIRONMENT).demo;
+  protected readonly demoAccounts = DEMO_ACCOUNTS;
+  protected platformPassword = '';
   protected pharmacy = this.auth.lastPharmacy() ?? '';
   protected email = this.auth.knownUsers()[0]?.email ?? '';
   protected password = '';
@@ -162,6 +224,29 @@ export class LoginPage {
     const slug = this.node.info()?.pharmacySlug ?? location.hostname.split('.')[0];
     if (slug && slug !== 'localhost' && slug !== 'app' && !/^\d/.test(slug)) {
       void this.branding.loadPublic(slug);
+    }
+  }
+
+  protected useDemoAccount(account: DemoAccount): void {
+    this.mode.set('password');
+    this.pharmacy = account.pharmacy;
+    this.email = account.email;
+    this.password = 'Demo2026!';
+  }
+
+  protected async platformDemoLogin(): Promise<void> {
+    this.busy.set(true);
+    this.error.set(null);
+    try {
+      await this.auth.loginPlatformWithPassword(this.platformPassword);
+      await this.router.navigateByUrl('/platform');
+    } catch (error) {
+      this.error.set(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Console éditeur refusée',
+      );
+    } finally {
+      this.busy.set(false);
+      this.platformPassword = '';
     }
   }
 

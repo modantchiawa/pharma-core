@@ -20,6 +20,8 @@ public class ActorResolver {
     public static final String TYPE_CLAIM = "typ";
     public static final String TYPE_USER = "user";
     public static final String TYPE_HUB_NODE = "hub-node";
+    /** Platform operator token issued by the node itself (demonstration mode). */
+    public static final String TYPE_PLATFORM = "platform";
     public static final String NODE_CLAIM = "node_id";
 
     private final TenantUserLoader loader;
@@ -32,7 +34,11 @@ public class ActorResolver {
         return switch (kind) {
             case PLATFORM -> platformOperator(jwt);
             case TENANT -> tenantUser(jwt);
-            case INTERNAL -> TYPE_HUB_NODE.equals(jwt.getClaimAsString(TYPE_CLAIM)) ? hubNode(jwt) : tenantUser(jwt);
+            case INTERNAL -> switch (String.valueOf(jwt.getClaimAsString(TYPE_CLAIM))) {
+                case TYPE_HUB_NODE -> hubNode(jwt);
+                case TYPE_PLATFORM -> platformOperator(jwt);
+                default -> tenantUser(jwt);
+            };
         };
     }
 
