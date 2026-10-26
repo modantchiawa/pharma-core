@@ -59,7 +59,7 @@ les appairages), `caddy_data` (certificats). Les journaux des conteneurs tournen
 |---|---|
 | `SITE_ADDRESS` | domaine (HTTPS automatique) ou `:80` |
 | `PUBLIC_URL` | origine autorisée par l'API ; identique à l'URL du site |
-| `ACME_EMAIL` | contact Let's Encrypt |
+| `ACME_EMAIL` | contact Let's Encrypt, facultatif ; une adresse invalide (ex. `noreply@localhost`) est ignorée et le certificat est demandé sans e-mail |
 | `POSTGRES_SUPERUSER_PASSWORD`, `DB_MIGRATION_PASSWORD`, `DB_APP_PASSWORD` | secrets de la base |
 | `WEB_BUILD_CONFIG` | `demo` ou `production` (frontend) |
 | `DEMO_ENABLED`, `DEMO_PLATFORM_PASSWORD`, `DEMO_ACCOUNT_PASSWORD`, `DEMO_PIN` | mode démonstration (voir `docs/DEMO.md`) |
