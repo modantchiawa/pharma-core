@@ -5,97 +5,183 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { APP_ENVIRONMENT } from '../../core/config';
+import { Icon } from '../../shared/ui/icon';
 
 /** Password change (forced after a temporary password) and PIN definition. */
 @Component({
   selector: 'app-password-page',
-  imports: [FormsModule],
+  imports: [FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="mx-auto max-w-md space-y-6 p-4">
-      <form class="space-y-3 rounded-lg border bg-white p-4" (ngSubmit)="changePassword()">
-        <h2 class="text-lg font-semibold">Mot de passe</h2>
-        @if (auth.mustChangePassword()) {
-          <p class="rounded bg-amber-100 px-3 py-2 text-sm text-amber-900">
-            Votre mot de passe est temporaire : choisissez-en un nouveau (8 caractères minimum,
-            lettres et chiffres).
+    <div class="page animate-in">
+      <div class="max-w-4xl">
+        <header class="page-header">
+          <div>
+            <h1 class="page-title">Mot de passe et code PIN</h1>
+            <p class="page-subtitle">Sécurité de votre compte et bascule rapide entre vendeurs.</p>
+          </div>
+        </header>
+
+        @if (status(); as text) {
+          <p role="status" class="alert alert-info mb-6">
+            <app-icon name="info" [size]="18" />
+            <span>{{ text }}</span>
           </p>
         }
-        <label class="block text-sm"
-          >Mot de passe actuel<input
-            type="password"
-            class="field"
-            [(ngModel)]="current"
-            name="current"
-            autocomplete="current-password"
-            required
-        /></label>
-        <label class="block text-sm"
-          >Nouveau mot de passe<input
-            type="password"
-            class="field"
-            [(ngModel)]="next"
-            name="next"
-            autocomplete="new-password"
-            required
-            minlength="8"
-        /></label>
-        <label class="block text-sm"
-          >Confirmation<input
-            type="password"
-            class="field"
-            [(ngModel)]="confirm"
-            name="confirm"
-            autocomplete="new-password"
-            required
-        /></label>
-        <button
-          type="submit"
-          class="rounded bg-brand px-4 py-2 text-on-brand"
-          [disabled]="next !== confirm || next.length < 8"
-        >
-          Enregistrer
-        </button>
-      </form>
 
-      <form class="space-y-3 rounded-lg border bg-white p-4" (ngSubmit)="setPin()">
-        <h2 class="text-lg font-semibold">Code PIN (bascule rapide en caisse)</h2>
-        <label class="block text-sm"
-          >Mot de passe<input
-            type="password"
-            class="field"
-            [(ngModel)]="pinPassword"
-            name="pinPassword"
-            autocomplete="current-password"
-            required
-        /></label>
-        <label class="block text-sm"
-          >PIN (4 à 6 chiffres)<input
-            type="password"
-            inputmode="numeric"
-            maxlength="6"
-            class="field"
-            [(ngModel)]="pin"
-            name="pin"
-            required
-        /></label>
-        <button type="submit" class="rounded bg-brand px-4 py-2 text-on-brand">
-          Définir le PIN
-        </button>
-      </form>
-      @if (status(); as text) {
-        <p role="status" class="text-sm">{{ text }}</p>
-      }
+        <div class="space-y-8">
+          <form class="settings-row" (ngSubmit)="changePassword()">
+            <div>
+              <h2 class="flex items-center gap-2 text-[0.95rem] font-semibold">
+                <app-icon name="lock" [size]="16" class="text-muted" />
+                Mot de passe
+              </h2>
+              <p class="mt-1 text-[0.8125rem] leading-relaxed text-muted">
+                8 caractères minimum, lettres et chiffres. Vous serez reconnecté avec le nouveau mot
+                de passe.
+              </p>
+            </div>
+            <div class="card">
+              <div class="card-body space-y-4">
+                @if (auth.mustChangePassword()) {
+                  <p class="alert alert-warning">
+                    <app-icon name="alert" [size]="18" />
+                    <span>
+                      Votre mot de passe est temporaire : choisissez-en un nouveau (8 caractères
+                      minimum, lettres et chiffres).
+                    </span>
+                  </p>
+                }
+                <label class="block"
+                  ><span class="label">Mot de passe actuel</span
+                  ><input
+                    type="password"
+                    class="input"
+                    [(ngModel)]="current"
+                    name="current"
+                    autocomplete="current-password"
+                    required
+                /></label>
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <label class="block"
+                    ><span class="label">Nouveau mot de passe</span
+                    ><input
+                      type="password"
+                      class="input"
+                      [(ngModel)]="next"
+                      name="next"
+                      autocomplete="new-password"
+                      required
+                      minlength="8"
+                  /></label>
+                  <label class="block"
+                    ><span class="label">Confirmation</span
+                    ><input
+                      type="password"
+                      class="input"
+                      [(ngModel)]="confirm"
+                      name="confirm"
+                      autocomplete="new-password"
+                      required
+                  /></label>
+                </div>
+                @if (next.length > 0) {
+                  <ul class="flex flex-wrap gap-2 text-xs">
+                    <li class="badge" [class.badge-success]="next.length >= 8">
+                      <app-icon [name]="next.length >= 8 ? 'check' : 'minus'" [size]="12" />
+                      8 caractères
+                    </li>
+                    <li
+                      class="badge"
+                      [class.badge-success]="confirm.length > 0 && next === confirm"
+                    >
+                      <app-icon
+                        [name]="confirm.length > 0 && next === confirm ? 'check' : 'minus'"
+                        [size]="12"
+                      />
+                      Confirmation identique
+                    </li>
+                  </ul>
+                }
+              </div>
+              <div class="card-footer">
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="next !== confirm || next.length < 8"
+                >
+                  <app-icon name="check" [size]="16" />
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <form class="settings-row" (ngSubmit)="setPin()">
+            <div>
+              <h2 class="flex items-center gap-2 text-[0.95rem] font-semibold">
+                <app-icon name="zap" [size]="16" class="text-muted" />
+                Code PIN (bascule rapide en caisse)
+              </h2>
+              <p class="mt-1 text-[0.8125rem] leading-relaxed text-muted">
+                Pour changer de vendeur sur un poste déjà connecté sans ressaisir de mot de passe.
+              </p>
+            </div>
+            <div class="card">
+              <div class="card-body grid gap-4 sm:grid-cols-2">
+                <label class="block"
+                  ><span class="label">Mot de passe</span
+                  ><input
+                    type="password"
+                    class="input"
+                    [(ngModel)]="pinPassword"
+                    name="pinPassword"
+                    autocomplete="current-password"
+                    required
+                /></label>
+                <label class="block"
+                  ><span class="label">PIN (4 à 6 chiffres)</span
+                  ><input
+                    type="password"
+                    inputmode="numeric"
+                    maxlength="6"
+                    class="input font-mono tracking-[0.3em]"
+                    [(ngModel)]="pin"
+                    name="pin"
+                    required
+                /></label>
+              </div>
+              <div class="card-footer">
+                <button type="submit" class="btn btn-primary">
+                  <app-icon name="key" [size]="16" />
+                  Définir le PIN
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   `,
   styles: `
-    .field {
-      display: block;
-      width: 100%;
-      margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
+    .settings-row {
+      display: grid;
+      gap: 1rem;
+    }
+    @media (min-width: 768px) {
+      .settings-row {
+        grid-template-columns: 15rem minmax(0, 1fr);
+        gap: 2rem;
+      }
+    }
+    .card-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      padding: 0.75rem calc(1.25rem * var(--density));
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 0 0 var(--radius-lg) var(--radius-lg);
     }
   `,
 })
