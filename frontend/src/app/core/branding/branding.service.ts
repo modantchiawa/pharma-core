@@ -8,6 +8,9 @@ import { CurrencyService } from '../ui/currency.service';
 import { isHexColor, readableTextOn } from '../util/color';
 
 const CACHE_KEY = 'pharmacore.branding';
+const LOGO_CACHE_KEY = 'pharmacore.logo';
+/** Data URLs above this size are not cached (localStorage is shared with the offline POS). */
+const LOGO_CACHE_MAX_CHARS = 900_000;
 
 export const DEFAULT_BRANDING: Branding = {
   displayName: 'PharmaCore',
@@ -41,11 +44,15 @@ export class BrandingService {
   private readonly currency = inject(CurrencyService);
   private readonly state = signal<Branding>(readCache() ?? DEFAULT_BRANDING);
   private readonly preview = signal<Partial<Branding> | null>(null);
-  private readonly logo = signal<string | null>(null);
+  private readonly logo = signal<string | null>(readLogoCache());
+  /** Bumped on every logo change: a download started before the change must not undo it. */
+  private logoGeneration = 0;
 
   /** Effective branding, including unsaved changes being previewed in the settings screen. */
   readonly branding = computed<Branding>(() => ({ ...this.state(), ...(this.preview() ?? {}) }));
+  /** Data URL of the cached logo (offline POS, tickets) or public URL before login. */
   readonly logoUrl = this.logo.asReadonly();
+  readonly hasLogo = computed(() => this.logo() !== null);
   readonly onPrimary = computed(() =>
     readableTextOn(safe(this.branding().primaryColor, DEFAULT_BRANDING.primaryColor)),
   );
@@ -69,6 +76,16 @@ export class BrandingService {
       root.setProperty('--brand-on-primary', this.onPrimary());
       this.document.title = b.displayName;
     });
+    // The pharmacy's logo as the browser tab icon (back to the default icon without logo)
+    const favicon = this.document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    const defaultIcon = favicon?.getAttribute('href') ?? null;
+    effect(() => {
+      const logo = this.logo();
+      if (favicon && defaultIcon) {
+        favicon.removeAttribute('type');
+        favicon.href = logo ?? defaultIcon;
+      }
+    });
   }
 
   async load(): Promise<void> {
@@ -91,9 +108,11 @@ export class BrandingService {
         ),
       );
       this.state.set(view.branding);
+      this.logoGeneration++;
+      // The version busts the one-hour public cache after a logo change
       this.setLogo(
         view.hasLogo
-          ? `${this.env.apiUrl}/public/pharmacies/${encodeURIComponent(slug)}/logo`
+          ? `${this.env.apiUrl}/public/pharmacies/${encodeURIComponent(slug)}/logo?v=${view.version}`
           : null,
       );
     } catch {
@@ -109,11 +128,20 @@ export class BrandingService {
     this.apply(view);
   }
 
-  async uploadLogo(file: File): Promise<void> {
+  /** Accepts the prepared logo (see shared/ui/logo-file.ts) as a file or a redrawn image. */
+  async uploadLogo(file: Blob): Promise<void> {
     const form = new FormData();
-    form.append('file', file);
+    form.append('file', file, file instanceof File ? file.name : 'logo');
     const view = await firstValueFrom(
       this.http.put<BrandingView>(`${this.env.apiUrl}/v1/pharmacy/branding/logo`, form),
+    );
+    // The bytes just sent are the new logo: no need to download them back
+    this.apply(view, await toDataUrl(file));
+  }
+
+  async removeLogo(): Promise<void> {
+    const view = await firstValueFrom(
+      this.http.delete<BrandingView>(`${this.env.apiUrl}/v1/pharmacy/branding/logo`),
     );
     this.apply(view);
   }
@@ -122,40 +150,71 @@ export class BrandingService {
     this.preview.set(changes);
   }
 
-  private apply(view: BrandingView): void {
+  private apply(view: BrandingView, logo?: string): void {
     this.currency.set(view.currency);
     this.state.set(view.branding);
     localStorage.setItem(CACHE_KEY, JSON.stringify(view.branding));
-    if (view.hasLogo) {
-      void this.fetchLogo();
-    } else {
+    const generation = ++this.logoGeneration;
+    if (!view.hasLogo) {
       this.setLogo(null);
+    } else if (logo) {
+      this.setLogo(logo);
+    } else {
+      void this.fetchLogo(generation);
     }
   }
 
-  /** The logo endpoint is authenticated: fetch it as a blob and expose an object URL. */
-  private async fetchLogo(): Promise<void> {
+  /**
+   * The logo endpoint is authenticated: fetch it as a blob and keep it as a data URL, cached so
+   * the logo shows at once on the next start and on tickets printed offline.
+   */
+  private async fetchLogo(generation: number): Promise<void> {
     try {
       const blob = await firstValueFrom(
         this.http.get(`${this.env.apiUrl}/v1/pharmacy/branding/logo`, { responseType: 'blob' }),
       );
-      this.setLogo(URL.createObjectURL(blob));
+      const url = await toDataUrl(blob);
+      if (generation === this.logoGeneration) {
+        this.setLogo(url);
+      }
     } catch {
-      this.setLogo(null);
+      // Offline: keep the cached logo
     }
   }
 
   private setLogo(url: string | null): void {
-    const previous = this.logo();
-    if (previous?.startsWith('blob:')) {
-      URL.revokeObjectURL(previous);
-    }
     this.logo.set(url);
+    try {
+      if (url?.startsWith('data:') && url.length <= LOGO_CACHE_MAX_CHARS) {
+        localStorage.setItem(LOGO_CACHE_KEY, url);
+      } else if (url === null) {
+        localStorage.removeItem(LOGO_CACHE_KEY);
+      }
+    } catch {
+      // Storage full or disabled: the logo stays in memory for this session
+    }
   }
 }
 
 function safe(color: string | undefined, fallback: string): string {
   return isHexColor(color) ? color : fallback;
+}
+
+function toDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function readLogoCache(): string | null {
+  try {
+    return localStorage.getItem(LOGO_CACHE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function readCache(): Branding | null {

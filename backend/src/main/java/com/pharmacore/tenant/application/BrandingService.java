@@ -83,6 +83,16 @@ public class BrandingService {
         return view(config);
     }
 
+    @Transactional
+    public BrandingView removeLogo() {
+        var config = load();
+        UUID previous = config.logoAssetId();
+        config.clearLogo(clock.instant());
+        audit.record("LOGO_REMOVED", "PHARMACY_CONFIG", config.tenantId(), Map.of(
+                "assetId", String.valueOf(previous)));
+        return view(config);
+    }
+
     @Transactional(readOnly = true)
     public Optional<Logo> logo() {
         return Optional.ofNullable(load().logoAssetId())
