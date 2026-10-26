@@ -10,15 +10,17 @@ class ValueParsersTest {
 
     @Test
     void readsAmountsAsWrittenInAfricanAndEuropeanExports() {
-        assertThat(ValueParsers.cents("1 250", 0)).contains(125_000L);
-        assertThat(ValueParsers.cents("1250 FCFA", 0)).contains(125_000L);
-        assertThat(ValueParsers.cents("1.250", 0)).contains(125_000L);
-        assertThat(ValueParsers.cents("1,250", 0)).contains(125_000L);
-        assertThat(ValueParsers.cents("1250,00", 0)).contains(125_000L);
+        // XOF has no decimals: minor units are whole francs
+        assertThat(ValueParsers.cents("1 250", 0)).contains(1_250L);
+        assertThat(ValueParsers.cents("1250 FCFA", 0)).contains(1_250L);
+        assertThat(ValueParsers.cents("1.250", 0)).contains(1_250L);
+        assertThat(ValueParsers.cents("1,250", 0)).contains(1_250L);
+        assertThat(ValueParsers.cents("1250,00", 0)).contains(1_250L);
+        assertThat(ValueParsers.cents("12,5", 0)).contains(13L);
+        assertThat(ValueParsers.cents("-300", 0)).contains(-300L);
+        // EUR: cents
         assertThat(ValueParsers.cents("1.250,50", 2)).contains(125_050L);
         assertThat(ValueParsers.cents("12,5", 2)).contains(1_250L);
-        assertThat(ValueParsers.cents("12,5", 0)).contains(1_300L);
-        assertThat(ValueParsers.cents("-300", 0)).contains(-30_000L);
         assertThat(ValueParsers.cents("abc", 0)).isEmpty();
         assertThat(ValueParsers.cents("", 0)).isEmpty();
     }

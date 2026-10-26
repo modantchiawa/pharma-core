@@ -59,10 +59,13 @@ public final class ValueParsers {
         return DIGITS13.matcher(padded).matches() ? Optional.of(padded) : Optional.empty();
     }
 
-    /** "1 250", "1250,00", "1.250,50", "1250 FCFA", "12,5" → cents with the given scale (0 for XOF). */
+    /**
+     * Amount in minor units of the currency: whole francs for XOF ({@code currencyScale} 0),
+     * cents for EUR (2). "1 250", "1250 FCFA", "1.250", "1250,00" → 1250 in XOF; "12,50" → 1250 in EUR.
+     */
     public static Optional<Long> cents(String raw, int currencyScale) {
-        return decimal(raw).map(value -> value.movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact())
-                .map(value -> currencyScale == 0 ? Math.round(value / 100.0) * 100 : value);
+        return decimal(raw).map(value -> value.movePointRight(currencyScale).setScale(0, RoundingMode.HALF_UP)
+                .longValueExact());
     }
 
     public static Optional<BigDecimal> decimal(String raw) {

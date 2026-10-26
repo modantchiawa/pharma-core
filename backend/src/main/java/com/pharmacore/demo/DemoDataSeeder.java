@@ -93,32 +93,32 @@ class DemoDataSeeder {
     }
 
     static final List<Drug> DRUGS = List.of(
-            new Drug("PARACETAMOL 500MG CPR B/16", "PARACETAMOL", "500MG", "Comprimé", "Sanofi", DrugListing.NONE, 65_000),
-            new Drug("DOLIPRANE 1000MG CPR B/8", "PARACETAMOL", "1000MG", "Comprimé", "Sanofi", DrugListing.NONE, 125_000),
-            new Drug("PARACETAMOL BIOGARAN 1000MG CPR B/8", "PARACETAMOL", "1000MG", "Comprimé", "Biogaran", DrugListing.NONE, 85_000),
-            new Drug("EFFERALGAN PEDIATRIQUE SIROP 90ML", "PARACETAMOL", "30MG/ML", "Sirop", "UPSA", DrugListing.NONE, 185_000),
-            new Drug("AMOXICILLINE 500MG GEL B/12", "AMOXICILLINE", "500MG", "Gélule", "Denk", DrugListing.LIST_I, 175_000),
-            new Drug("AMOXICILLINE 1G CPR B/14", "AMOXICILLINE", "1G", "Comprimé", "Sandoz", DrugListing.LIST_I, 350_000),
-            new Drug("AUGMENTIN 1G CPR B/14", "AMOXICILLINE + ACIDE CLAVULANIQUE", "1G/125MG", "Comprimé", "GSK", DrugListing.LIST_I, 695_000),
-            new Drug("COARTEM 80/480MG CPR B/6", "ARTEMETHER + LUMEFANTRINE", "80/480MG", "Comprimé", "Novartis", DrugListing.NONE, 260_000),
-            new Drug("ARTEFAN 80/480MG CPR B/6", "ARTEMETHER + LUMEFANTRINE", "80/480MG", "Comprimé", "Ajanta", DrugListing.NONE, 180_000),
-            new Drug("ARTESUNATE 60MG INJ", "ARTESUNATE", "60MG", "Injectable", "Guilin", DrugListing.LIST_I, 320_000),
-            new Drug("METFORMINE 850MG CPR B/30", "METFORMINE", "850MG", "Comprimé", "Merck", DrugListing.LIST_I, 245_000),
-            new Drug("GLUCOPHAGE 850MG CPR B/30", "METFORMINE", "850MG", "Comprimé", "Merck", DrugListing.LIST_I, 410_000),
-            new Drug("AMLODIPINE 5MG CPR B/30", "AMLODIPINE", "5MG", "Comprimé", "Pfizer", DrugListing.LIST_I, 195_000),
-            new Drug("AMLOR 5MG GEL B/30", "AMLODIPINE", "5MG", "Gélule", "Pfizer", DrugListing.LIST_I, 485_000),
-            new Drug("OMEPRAZOLE 20MG GEL B/14", "OMEPRAZOLE", "20MG", "Gélule", "Zentiva", DrugListing.NONE, 215_000),
-            new Drug("IBUPROFENE 400MG CPR B/20", "IBUPROFENE", "400MG", "Comprimé", "Mylan", DrugListing.NONE, 110_000),
-            new Drug("SRO SACHETS B/10", "SELS DE REHYDRATATION ORALE", "", "Sachet", "ONPPC", DrugListing.NONE, 60_000),
-            new Drug("ZINC 20MG CPR B/10", "ZINC", "20MG", "Comprimé", "ONPPC", DrugListing.NONE, 45_000),
-            new Drug("VITAMINE C 500MG CPR B/30", "ACIDE ASCORBIQUE", "500MG", "Comprimé", "UPSA", DrugListing.NONE, 95_000),
-            new Drug("CHLOROQUINE 100MG CPR B/20", "CHLOROQUINE", "100MG", "Comprimé", "Sanofi", DrugListing.LIST_I, 70_000),
-            new Drug("COTRIMOXAZOLE 480MG CPR B/20", "SULFAMETHOXAZOLE + TRIMETHOPRIME", "480MG", "Comprimé", "Denk", DrugListing.LIST_I, 90_000),
-            new Drug("TRAMADOL 50MG GEL B/20", "TRAMADOL", "50MG", "Gélule", "Grünenthal", DrugListing.STUPEFIANT, 240_000),
-            new Drug("SALBUTAMOL 100µG AEROSOL", "SALBUTAMOL", "100µG", "Aérosol", "GSK", DrugListing.LIST_I, 380_000),
-            new Drug("DICLOFENAC GEL 1% 50G", "DICLOFENAC", "1%", "Gel", "Novartis", DrugListing.NONE, 150_000),
-            new Drug("MOUSTIQUAIRE IMPREGNEE 2 PLACES", "", "", "Accessoire", "Vestergaard", DrugListing.NONE, 350_000),
-            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 250_000));
+            new Drug("PARACETAMOL 500MG CPR B/16", "PARACETAMOL", "500MG", "Comprimé", "Sanofi", DrugListing.NONE, 650),
+            new Drug("DOLIPRANE 1000MG CPR B/8", "PARACETAMOL", "1000MG", "Comprimé", "Sanofi", DrugListing.NONE, 1_250),
+            new Drug("PARACETAMOL BIOGARAN 1000MG CPR B/8", "PARACETAMOL", "1000MG", "Comprimé", "Biogaran", DrugListing.NONE, 850),
+            new Drug("EFFERALGAN PEDIATRIQUE SIROP 90ML", "PARACETAMOL", "30MG/ML", "Sirop", "UPSA", DrugListing.NONE, 1_850),
+            new Drug("AMOXICILLINE 500MG GEL B/12", "AMOXICILLINE", "500MG", "Gélule", "Denk", DrugListing.LIST_I, 1_750),
+            new Drug("AMOXICILLINE 1G CPR B/14", "AMOXICILLINE", "1G", "Comprimé", "Sandoz", DrugListing.LIST_I, 3_500),
+            new Drug("AUGMENTIN 1G CPR B/14", "AMOXICILLINE + ACIDE CLAVULANIQUE", "1G/125MG", "Comprimé", "GSK", DrugListing.LIST_I, 6_950),
+            new Drug("COARTEM 80/480MG CPR B/6", "ARTEMETHER + LUMEFANTRINE", "80/480MG", "Comprimé", "Novartis", DrugListing.NONE, 2_600),
+            new Drug("ARTEFAN 80/480MG CPR B/6", "ARTEMETHER + LUMEFANTRINE", "80/480MG", "Comprimé", "Ajanta", DrugListing.NONE, 1_800),
+            new Drug("ARTESUNATE 60MG INJ", "ARTESUNATE", "60MG", "Injectable", "Guilin", DrugListing.LIST_I, 3_200),
+            new Drug("METFORMINE 850MG CPR B/30", "METFORMINE", "850MG", "Comprimé", "Merck", DrugListing.LIST_I, 2_450),
+            new Drug("GLUCOPHAGE 850MG CPR B/30", "METFORMINE", "850MG", "Comprimé", "Merck", DrugListing.LIST_I, 4_100),
+            new Drug("AMLODIPINE 5MG CPR B/30", "AMLODIPINE", "5MG", "Comprimé", "Pfizer", DrugListing.LIST_I, 1_950),
+            new Drug("AMLOR 5MG GEL B/30", "AMLODIPINE", "5MG", "Gélule", "Pfizer", DrugListing.LIST_I, 4_850),
+            new Drug("OMEPRAZOLE 20MG GEL B/14", "OMEPRAZOLE", "20MG", "Gélule", "Zentiva", DrugListing.NONE, 2_150),
+            new Drug("IBUPROFENE 400MG CPR B/20", "IBUPROFENE", "400MG", "Comprimé", "Mylan", DrugListing.NONE, 1_100),
+            new Drug("SRO SACHETS B/10", "SELS DE REHYDRATATION ORALE", "", "Sachet", "ONPPC", DrugListing.NONE, 600),
+            new Drug("ZINC 20MG CPR B/10", "ZINC", "20MG", "Comprimé", "ONPPC", DrugListing.NONE, 450),
+            new Drug("VITAMINE C 500MG CPR B/30", "ACIDE ASCORBIQUE", "500MG", "Comprimé", "UPSA", DrugListing.NONE, 950),
+            new Drug("CHLOROQUINE 100MG CPR B/20", "CHLOROQUINE", "100MG", "Comprimé", "Sanofi", DrugListing.LIST_I, 700),
+            new Drug("COTRIMOXAZOLE 480MG CPR B/20", "SULFAMETHOXAZOLE + TRIMETHOPRIME", "480MG", "Comprimé", "Denk", DrugListing.LIST_I, 900),
+            new Drug("TRAMADOL 50MG GEL B/20", "TRAMADOL", "50MG", "Gélule", "Grünenthal", DrugListing.STUPEFIANT, 2_400),
+            new Drug("SALBUTAMOL 100µG AEROSOL", "SALBUTAMOL", "100µG", "Aérosol", "GSK", DrugListing.LIST_I, 3_800),
+            new Drug("DICLOFENAC GEL 1% 50G", "DICLOFENAC", "1%", "Gel", "Novartis", DrugListing.NONE, 1_500),
+            new Drug("MOUSTIQUAIRE IMPREGNEE 2 PLACES", "", "", "Accessoire", "Vestergaard", DrugListing.NONE, 3_500),
+            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 2_500));
 
     private final DemoProperties demo;
     private final NodeProperties node;
@@ -278,13 +278,13 @@ class DemoDataSeeder {
             // suppliers
             UUID laborex = procurement.createSupplier(new SupplierEntity.Details("Laborex Niger", "Service commandes",
                     "+22720740000", "+22790740000", "commandes@laborex.ne", "Zone industrielle, Niamey", 1,
-                    "LUN,MER,VEN", 2_500_000, "30 jours", null)).id();
+                    "LUN,MER,VEN", 250_000, "30 jours", null)).id();
             UUID copharni = procurement.createSupplier(new SupplierEntity.Details("Copharni", "M. Abdou",
                     "+22720750000", null, "ventes@copharni.ne", "Avenue du Progrès, Niamey", 2, "MAR,JEU",
-                    1_000_000, "45 jours", null)).id();
+                    100_000, "45 jours", null)).id();
             for (int i = 0; i < products.size(); i++) {
                 ProductEntity product = products.get(i);
-                long purchase = Math.round(product.publicPriceCents() * 0.72 / 100) * 100;
+                long purchase = Math.round(product.publicPriceCents() * 0.72 / 5) * 5;
                 procurement.linkProduct(i % 3 == 0 ? copharni : laborex, product.id(), "REF-" + (1000 + i), purchase,
                         i % 5 == 0 ? 10 : 1, true);
             }
@@ -292,7 +292,7 @@ class DemoDataSeeder {
             // stock: everything in stock, some lots short-dated, a few products at zero for the substitution demo
             for (int i = 0; i < products.size(); i++) {
                 ProductEntity product = products.get(i);
-                long cost = Math.round(product.publicPriceCents() * 0.72 / 100) * 100;
+                long cost = Math.round(product.publicPriceCents() * 0.72 / 5) * 5;
                 int base = 20 + random.nextInt(60);
                 if ((i + index) % 7 == 3) {
                     continue; // out of stock: the counter proposes the equivalent
@@ -307,15 +307,15 @@ class DemoDataSeeder {
 
             // customers, one with a credit account and an insurance policy
             var hadiza = customers.create(new CustomerEntity.Details("Mme Hadiza Moussa", "+22790" + (300000 + index),
-                    null, "Quartier Plateau", 5_000_000, "Cliente régulière"));
+                    null, "Quartier Plateau", 50_000, "Cliente régulière"));
             customers.create(new CustomerEntity.Details("M. Sani Abdoulaye", "+22796" + (400000 + index), null,
-                    "Lacouroussou", 2_000_000, null));
+                    "Lacouroussou", 20_000, null));
             customers.create(new CustomerEntity.Details("École Les Flamboyants", "+22720" + (500000 + index),
-                    "intendance@flamboyants.ne", "Yantala", 15_000_000, "Convention entreprise"));
+                    "intendance@flamboyants.ne", "Yantala", 150_000, "Convention entreprise"));
             var insurer = insurers.create(new InsurerEntity.Details("NIA Assurances", InsurerKind.ASSURANCE, 80,
                     "Service santé", "+22720730000", "sante@niaassurances.ne", "Immeuble NIA, Niamey", 30));
             insurers.createPolicy(insurer.id(), hadiza.id(), new InsurancePolicyEntity.Details(
-                    "NIA-2026-" + (1001 + index), "Hadiza Moussa", 80, 20_000_000L, today.minusMonths(2),
+                    "NIA-2026-" + (1001 + index), "Hadiza Moussa", 80, 200_000L, today.minusMonths(2),
                     today.plusYears(1), true));
 
             // two weeks of sales: the cashier sells over-the-counter products, the pharmacist dispenses
@@ -379,7 +379,7 @@ class DemoDataSeeder {
                     List.of(new SaleDraft.Line(first.id(), 1, first.publicPriceCents(), 0)),
                     List.of(new SaleDraft.Payment(PaymentMethod.CREDIT, first.publicPriceCents(), null, null, null, null)),
                     null));
-            cashSessions.openSession(TERMINAL, 1_000_000);
+            cashSessions.openSession(TERMINAL, 50_000);
             if (rejected > 0) {
                 log.warn("Démonstration : {} vente(s) de {} refusée(s) par les règles métier", rejected, pharmacy.slug());
             }

@@ -64,7 +64,7 @@ class ImportIT extends IntegrationTest {
         call(get("/api/v1/catalog/products?q=" + TRAMADOL), pharmacy.ownerToken(), null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].data.listing").value("STUPEFIANT"))
-                .andExpect(jsonPath("$[0].data.publicPriceCents").value(200_000));
+                .andExpect(jsonPath("$[0].data.publicPriceCents").value(2_000));
 
         // --- pharmacy: product file from Excel, with a product unknown to the reference and one without code
         byte[] products = TabularReadersTest.xlsx("""
@@ -121,7 +121,7 @@ class ImportIT extends IntegrationTest {
                 .andExpect(jsonPath("$.created").value(2));
         call(get("/api/v1/customers/debtors"), pharmacy.ownerToken(), null)
                 .andExpect(jsonPath("$[0].displayName").value("Mme Hadiza Moussa"))
-                .andExpect(jsonPath("$[0].creditBalanceCents").value(1_250_000));
+                .andExpect(jsonPath("$[0].creditBalanceCents").value(12_500));
         send(upload("/api/v1/imports", "clients.csv", customers.getBytes(StandardCharsets.UTF_8)).param("kind", "CUSTOMERS"), pharmacy.ownerToken())
                 .andExpect(jsonPath("$.created").value(1))   // M. Sani has no phone: cannot be matched
                 .andExpect(jsonPath("$.updated").value(1));
