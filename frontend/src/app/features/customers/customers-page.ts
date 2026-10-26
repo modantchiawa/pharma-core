@@ -8,165 +8,247 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { Icon } from '../../shared/ui/icon';
 
 /** Customer files, credit accounts ("ardoises") and settlements. */
 @Component({
   selector: 'app-customers-page',
-  imports: [FormsModule, MoneyPipe, HasPermissionDirective],
+  imports: [FormsModule, MoneyPipe, HasPermissionDirective, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="grid gap-4 p-4 lg:grid-cols-[1fr_380px]">
-      <section class="space-y-3">
-        <div class="flex gap-2">
-          <input
-            type="search"
-            class="flex-1 rounded border px-3 py-2"
-            placeholder="Nom, téléphone ou code"
-            [(ngModel)]="term"
-            (keydown.enter)="search()"
-          />
-          <button type="button" class="rounded border px-3" (click)="search()">Rechercher</button>
-          <button type="button" class="rounded border px-3" (click)="debtors()">Débiteurs</button>
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Clients</h1>
+          <p class="page-subtitle">
+            Fiches clients, comptes crédit (ardoises) et encaissement des créances.
+          </p>
         </div>
-        <table class="w-full rounded border bg-white text-sm">
-          <thead class="bg-slate-100 text-left">
-            <tr>
-              <th class="p-2">Client</th>
-              <th class="p-2">Téléphone</th>
-              <th class="p-2 text-right">Dû</th>
-              <th class="p-2 text-right">Plafond</th>
-              <th class="p-2 text-right">Points</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (c of list(); track c.id) {
-              <tr
-                class="cursor-pointer border-t hover:bg-slate-50"
-                [class.bg-brand-dark]="selected()?.id === c.id"
-                (click)="selected.set(c)"
-              >
-                <td class="p-2">
-                  {{ c.displayName }} <small class="text-slate-500">{{ c.code }}</small>
-                </td>
-                <td class="p-2">{{ c.phone }}</td>
-                <td class="p-2 text-right" [class.text-red-700]="c.creditBalanceCents > 0">
-                  {{ c.creditBalanceCents | money }}
-                </td>
-                <td class="p-2 text-right">{{ c.creditLimitCents | money }}</td>
-                <td class="p-2 text-right">{{ c.loyaltyPoints }}</td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="5" class="p-4 text-center text-slate-500">Aucun client</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </section>
+        <button
+          *appHasPermission="'CUSTOMER_MANAGE'"
+          type="button"
+          class="btn btn-primary"
+          (click)="reset()"
+        >
+          <app-icon name="plus" [size]="16" />
+          Nouveau client
+        </button>
+      </header>
 
-      <aside class="space-y-4" *appHasPermission="'CUSTOMER_MANAGE'">
-        <form class="space-y-2 rounded-lg border bg-white p-4" (ngSubmit)="save()">
-          <h3 class="font-semibold">{{ selected() ? 'Modifier' : 'Nouveau client' }}</h3>
-          <input
-            class="field"
-            placeholder="Nom"
-            [(ngModel)]="form.displayName"
-            name="name"
-            required
-            maxlength="150"
-          />
-          <input
-            class="field"
-            placeholder="Téléphone"
-            [(ngModel)]="form.phone"
-            name="phone"
-            maxlength="30"
-          />
-          <input
-            class="field"
-            placeholder="Adresse"
-            [(ngModel)]="form.address"
-            name="address"
-            maxlength="300"
-          />
-          <label class="block text-sm"
-            >Plafond de crédit<input
-              inputmode="decimal"
-              class="field"
-              [(ngModel)]="form.creditLimit"
-              name="limit"
-          /></label>
-          <textarea
-            class="field"
-            rows="2"
-            placeholder="Notes"
-            [(ngModel)]="form.notes"
-            name="notes"
-          ></textarea>
-          <div class="flex gap-2">
-            <button type="submit" class="rounded bg-brand px-3 py-1 text-on-brand">
-              Enregistrer
-            </button>
-            <button type="button" class="rounded border px-3 py-1" (click)="reset()">
-              Nouveau
-            </button>
-          </div>
-        </form>
-        @if (selected(); as c) {
-          @if (c.creditBalanceCents > 0) {
-            <form class="space-y-2 rounded-lg border bg-white p-4" (ngSubmit)="pay(c)">
-              <h3 class="font-semibold">
-                Encaisser une créance · dû {{ c.creditBalanceCents | money }}
-              </h3>
+      <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <section class="card min-w-0 self-start">
+          <div class="card-header flex-wrap">
+            <label class="input-with-icon min-w-0 flex-1 basis-60">
+              <app-icon name="search" [size]="16" />
               <input
-                inputmode="decimal"
-                class="field"
-                placeholder="Montant"
-                [(ngModel)]="payAmount"
-                name="amount"
-                required
+                type="search"
+                class="input"
+                placeholder="Nom, téléphone ou code"
+                [(ngModel)]="term"
+                (keydown.enter)="search()"
               />
-              <select class="field" [(ngModel)]="payMethod" name="method">
-                <option value="CASH">Espèces</option>
-                <option value="MOBILE_MONEY">Mobile money</option>
-                <option value="CARD">Carte</option>
-                <option value="CHECK">Chèque</option>
-              </select>
-              @if (payMethod === 'MOBILE_MONEY') {
-                <select class="field" [(ngModel)]="provider" name="provider">
-                  @for (p of providers; track p) {
-                    <option [value]="p">{{ p }}</option>
-                  }
-                </select>
-              }
-              <input
-                class="field"
-                placeholder="Référence (optionnel)"
-                [(ngModel)]="reference"
-                name="reference"
-                maxlength="64"
-              />
-              <button type="submit" class="w-full rounded bg-brand py-2 text-on-brand">
-                Encaisser
+            </label>
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-secondary" (click)="search()">Rechercher</button>
+              <button type="button" class="btn btn-ghost" (click)="debtors()">
+                <app-icon name="credit" [size]="16" />
+                Débiteurs
               </button>
-            </form>
+            </div>
+          </div>
+          @if (list().length > 0) {
+            <div class="overflow-x-auto">
+              <table class="data-table whitespace-nowrap">
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th>Téléphone</th>
+                    <th class="text-right">Dû</th>
+                    <th class="text-right">Plafond</th>
+                    <th class="text-right">Points</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (c of list(); track c.id) {
+                    <tr
+                      class="cursor-pointer"
+                      [class.bg-brand-soft]="selected()?.id === c.id"
+                      (click)="selected.set(c)"
+                    >
+                      <td>
+                        <div class="flex items-center gap-3">
+                          <span
+                            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-bold text-muted"
+                            [class.!bg-brand]="selected()?.id === c.id"
+                            [class.!text-on-brand]="selected()?.id === c.id"
+                            >{{ c.displayName.charAt(0) }}</span
+                          >
+                          <div class="min-w-0">
+                            <p class="truncate font-medium">{{ c.displayName }}</p>
+                            <p class="text-xs text-subtle">{{ c.code }}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="whitespace-nowrap text-muted">{{ c.phone }}</td>
+                      <td class="num">
+                        @if (c.creditBalanceCents > 0) {
+                          <span class="font-semibold text-danger">{{
+                            c.creditBalanceCents | money
+                          }}</span>
+                        } @else {
+                          <span class="text-subtle">{{ c.creditBalanceCents | money }}</span>
+                        }
+                      </td>
+                      <td class="num">{{ c.creditLimitCents | money }}</td>
+                      <td class="num text-muted">{{ c.loyaltyPoints }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <div class="empty-state">
+              <app-icon name="customers" [size]="22" />
+              <p>Aucun client</p>
+            </div>
           }
-        }
-        @if (status(); as text) {
-          <p class="text-sm" role="status">{{ text }}</p>
-        }
-      </aside>
+        </section>
+
+        <aside class="space-y-5" *appHasPermission="'CUSTOMER_MANAGE'">
+          @if (status(); as text) {
+            <div class="alert alert-info" role="status">
+              <app-icon name="info" [size]="18" />
+              <span>{{ text }}</span>
+            </div>
+          }
+          <form class="card" (ngSubmit)="save()">
+            <div class="card-header">
+              <h3 class="card-title">{{ selected() ? 'Modifier' : 'Nouveau client' }}</h3>
+              @if (selected(); as c) {
+                <span class="badge">{{ c.code }}</span>
+              } @else {
+                <app-icon name="user" [size]="18" class="text-subtle" />
+              }
+            </div>
+            <div class="card-body space-y-3">
+              <label class="block">
+                <span class="label">Nom</span>
+                <input
+                  class="input"
+                  placeholder="Nom"
+                  [(ngModel)]="form.displayName"
+                  name="name"
+                  required
+                  maxlength="150"
+                />
+              </label>
+              <label class="block">
+                <span class="label">Téléphone</span>
+                <input
+                  class="input"
+                  placeholder="Téléphone"
+                  [(ngModel)]="form.phone"
+                  name="phone"
+                  maxlength="30"
+                />
+              </label>
+              <label class="block">
+                <span class="label">Adresse</span>
+                <input
+                  class="input"
+                  placeholder="Adresse"
+                  [(ngModel)]="form.address"
+                  name="address"
+                  maxlength="300"
+                />
+              </label>
+              <label class="block">
+                <span class="label">Plafond de crédit</span>
+                <input
+                  inputmode="decimal"
+                  class="input text-right tabular-nums"
+                  [(ngModel)]="form.creditLimit"
+                  name="limit"
+                  placeholder="0"
+                />
+              </label>
+              <label class="block">
+                <span class="label">Notes</span>
+                <textarea
+                  class="textarea"
+                  rows="2"
+                  placeholder="Notes"
+                  [(ngModel)]="form.notes"
+                  name="notes"
+                ></textarea>
+              </label>
+              <div class="flex gap-2 pt-1">
+                <button type="submit" class="btn btn-primary flex-1">
+                  <app-icon name="check" [size]="16" />
+                  Enregistrer
+                </button>
+                <button type="button" class="btn btn-secondary" (click)="reset()">Nouveau</button>
+              </div>
+            </div>
+          </form>
+          @if (selected(); as c) {
+            @if (c.creditBalanceCents > 0) {
+              <form class="card" (ngSubmit)="pay(c)">
+                <div class="card-header">
+                  <h3 class="card-title">Encaisser une créance</h3>
+                  <span class="badge badge-danger">dû {{ c.creditBalanceCents | money }}</span>
+                </div>
+                <div class="card-body space-y-3">
+                  <label class="block">
+                    <span class="label">Montant</span>
+                    <input
+                      inputmode="decimal"
+                      class="input text-right tabular-nums"
+                      placeholder="Montant"
+                      [(ngModel)]="payAmount"
+                      name="amount"
+                      required
+                    />
+                  </label>
+                  <div class="grid gap-3" [class.grid-cols-2]="payMethod === 'MOBILE_MONEY'">
+                    <label class="block">
+                      <span class="label">Mode</span>
+                      <select class="select" [(ngModel)]="payMethod" name="method">
+                        <option value="CASH">Espèces</option>
+                        <option value="MOBILE_MONEY">Mobile money</option>
+                        <option value="CARD">Carte</option>
+                        <option value="CHECK">Chèque</option>
+                      </select>
+                    </label>
+                    @if (payMethod === 'MOBILE_MONEY') {
+                      <label class="block">
+                        <span class="label">Opérateur</span>
+                        <select class="select" [(ngModel)]="provider" name="provider">
+                          @for (p of providers; track p) {
+                            <option [value]="p">{{ p }}</option>
+                          }
+                        </select>
+                      </label>
+                    }
+                  </div>
+                  <input
+                    class="input"
+                    placeholder="Référence (optionnel)"
+                    [(ngModel)]="reference"
+                    name="reference"
+                    maxlength="64"
+                  />
+                  <button type="submit" class="btn btn-primary w-full">
+                    <app-icon name="credit" [size]="16" />
+                    Encaisser
+                  </button>
+                </div>
+              </form>
+            }
+          }
+        </aside>
+      </div>
     </div>
-  `,
-  styles: `
-    .field {
-      display: block;
-      width: 100%;
-      margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
-    }
   `,
 })
 export class CustomersPage {

@@ -6,96 +6,163 @@ import { firstValueFrom } from 'rxjs';
 import { MOBILE_MONEY_PROVIDERS, PendingPayment } from '../../core/api/models';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { Icon } from '../../shared/ui/icon';
+
+type PaymentStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED';
+
+const STATUS_LABELS: Record<PaymentStatus, string> = {
+  PENDING: 'En attente du relevé',
+  CONFIRMED: 'Confirmés',
+  REJECTED: 'Rejetés',
+};
 
 /** Mobile money and card receipts ticked against the operator's statement. */
 @Component({
   selector: 'app-payments-page',
-  imports: [FormsModule, DatePipe, MoneyPipe],
+  imports: [FormsModule, DatePipe, MoneyPipe, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-4 p-4">
-      <div class="flex flex-wrap items-end gap-2">
-        <label class="text-sm"
-          >Opérateur
-          <select class="field" [(ngModel)]="provider" name="provider" (change)="load()">
-            <option value="">Tous (mobile money et carte)</option>
-            @for (p of providers; track p) {
-              <option [value]="p">{{ p }}</option>
-            }
-          </select>
-        </label>
-        <label class="text-sm"
-          >État
-          <select class="field" [(ngModel)]="status" name="status" (change)="load()">
-            <option value="PENDING">En attente du relevé</option>
-            <option value="CONFIRMED">Confirmés</option>
-            <option value="REJECTED">Rejetés</option>
-          </select>
-        </label>
-        <p class="ml-auto text-sm text-slate-600">
-          {{ payments().length }} paiement(s) · {{ total() | money }}
-        </p>
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Paiements</h1>
+          <p class="page-subtitle">
+            Pointez les encaissements mobile money et carte sur le relevé de l'opérateur.
+          </p>
+        </div>
+        <button type="button" class="btn btn-secondary" (click)="load()">
+          <app-icon name="refresh" [size]="16" />
+          Actualiser
+        </button>
+      </header>
+
+      <div class="mb-5 grid gap-4 sm:grid-cols-2">
+        <div class="card kpi">
+          <div class="kpi-label">
+            <span class="kpi-icon"><app-icon name="mobileMoney" [size]="16" /></span>Paiements
+          </div>
+          <div class="kpi-value">{{ payments().length }}</div>
+          <div class="kpi-foot">{{ statusLabels[status] }}</div>
+        </div>
+        <div class="card kpi">
+          <div class="kpi-label">
+            <span class="kpi-icon"><app-icon name="banknote" [size]="16" /></span>Montant total
+          </div>
+          <div class="kpi-value">{{ total() | money }}</div>
+          <div class="kpi-foot">{{ provider || 'Tous (mobile money et carte)' }}</div>
+        </div>
       </div>
-      <table class="w-full rounded border bg-white text-sm">
-        <thead class="bg-slate-100 text-left">
-          <tr>
-            <th class="p-2">Date</th>
-            <th class="p-2">Ticket</th>
-            <th class="p-2">Mode</th>
-            <th class="p-2">Référence</th>
-            <th class="p-2 text-right">Montant</th>
-            <th class="p-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (p of payments(); track p.paymentId) {
-            <tr class="border-t">
-              <td class="p-2">{{ p.occurredAt | date: 'dd/MM HH:mm' }}</td>
-              <td class="p-2">{{ p.ticketNumber }}</td>
-              <td class="p-2">{{ p.provider ?? p.method }}</td>
-              <td class="p-2 font-mono">{{ p.reference ?? '—' }}</td>
-              <td class="p-2 text-right">{{ p.amountCents | money }}</td>
-              <td class="p-2 text-right">
-                @if (p.status === 'PENDING') {
-                  <button
-                    type="button"
-                    class="rounded bg-green-700 px-2 py-0.5 text-white"
-                    (click)="confirm(p)"
-                  >
-                    Sur le relevé
-                  </button>
-                  <button
-                    type="button"
-                    class="ml-1 rounded border border-red-700 px-2 py-0.5 text-red-700"
-                    (click)="reject(p)"
-                  >
-                    Absent
-                  </button>
-                } @else if (p.status === 'REJECTED') {
-                  <span class="text-red-700">{{ p.rejectionReason }}</span>
-                }
-              </td>
-            </tr>
-          } @empty {
-            <tr>
-              <td colspan="6" class="p-4 text-center text-slate-500">Aucun paiement</td>
-            </tr>
-          }
-        </tbody>
-      </table>
+
       @if (message(); as text) {
-        <p class="text-sm" role="status">{{ text }}</p>
+        <div class="alert alert-info mb-4" role="status">
+          <app-icon name="info" [size]="18" />
+          <span>{{ text }}</span>
+        </div>
       }
+
+      <div class="card">
+        <div class="card-header flex-wrap">
+          <div
+            class="segmented max-w-full overflow-x-auto [&>button]:whitespace-nowrap"
+            role="tablist"
+            aria-label="État"
+          >
+            @for (option of statusOptions; track option) {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="status === option"
+                (click)="status = option; load()"
+              >
+                {{ statusLabels[option] }}
+              </button>
+            }
+          </div>
+          <label class="flex w-full items-center gap-2 text-sm sm:w-auto">
+            <span class="text-muted">Opérateur</span>
+            <select class="select sm:w-64" [(ngModel)]="provider" name="provider" (change)="load()">
+              <option value="">Tous (mobile money et carte)</option>
+              @for (p of providers; track p) {
+                <option [value]="p">{{ p }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (payments().length > 0) {
+          <div class="overflow-x-auto">
+            <table class="data-table whitespace-nowrap">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Ticket</th>
+                  <th>Mode</th>
+                  <th>Référence</th>
+                  <th class="text-right">Montant</th>
+                  <th class="text-right">Relevé</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (p of payments(); track p.paymentId) {
+                  <tr>
+                    <td class="whitespace-nowrap tabular-nums text-muted">
+                      {{ p.occurredAt | date: 'dd/MM HH:mm' }}
+                    </td>
+                    <td class="font-medium">{{ p.ticketNumber }}</td>
+                    <td>
+                      <span class="inline-flex items-center gap-1.5">
+                        <app-icon
+                          [name]="p.method === 'CARD' ? 'card' : 'mobileMoney'"
+                          [size]="15"
+                          class="text-subtle"
+                        />
+                        {{ p.provider ?? p.method }}
+                      </span>
+                    </td>
+                    <td class="font-mono text-xs">{{ p.reference ?? '—' }}</td>
+                    <td class="num font-medium">{{ p.amountCents | money }}</td>
+                    <td>
+                      <div class="flex items-center justify-end gap-1">
+                        @if (p.status === 'PENDING') {
+                          <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            (click)="confirm(p)"
+                          >
+                            <app-icon name="check" [size]="16" class="text-success" />
+                            Sur le relevé
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-sm text-danger"
+                            (click)="reject(p)"
+                          >
+                            <app-icon name="x" [size]="16" />
+                            Absent
+                          </button>
+                        } @else if (p.status === 'REJECTED') {
+                          <span class="badge badge-danger">
+                            <app-icon name="x" [size]="12" />{{ p.rejectionReason }}
+                          </span>
+                        } @else if (p.status === 'CONFIRMED') {
+                          <span class="badge badge-success">
+                            <app-icon name="check" [size]="12" />Confirmé
+                          </span>
+                        }
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <div class="empty-state">
+            <app-icon name="mobileMoney" [size]="22" />
+            <p>Aucun paiement</p>
+          </div>
+        }
+      </div>
     </div>
-  `,
-  styles: `
-    .field {
-      display: block;
-      margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
-    }
   `,
 })
 export class PaymentsPage {
@@ -103,10 +170,12 @@ export class PaymentsPage {
   private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/payments`;
 
   protected readonly providers = MOBILE_MONEY_PROVIDERS;
+  protected readonly statusLabels = STATUS_LABELS;
+  protected readonly statusOptions = Object.keys(STATUS_LABELS) as PaymentStatus[];
   protected readonly payments = signal<PendingPayment[]>([]);
   protected readonly message = signal<string | null>(null);
   protected provider = '';
-  protected status: 'PENDING' | 'CONFIRMED' | 'REJECTED' = 'PENDING';
+  protected status: PaymentStatus = 'PENDING';
 
   constructor() {
     void this.load();
