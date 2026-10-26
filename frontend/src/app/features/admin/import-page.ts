@@ -6,6 +6,7 @@ import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ImportJob, ImportKindView, ImportPreview } from '../../core/api/models';
 import { APP_ENVIRONMENT } from '../../core/config';
+import { Icon } from '../../shared/ui/icon';
 
 /**
  * Data migration from another program: pick a file (CSV or Excel), check the detected columns,
@@ -14,220 +15,526 @@ import { APP_ENVIRONMENT } from '../../core/config';
  */
 @Component({
   selector: 'app-import-page',
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule, DatePipe, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-4 p-4">
-      <section class="rounded-lg border bg-white p-4">
-        <h2 class="mb-2 text-lg font-semibold">
-          {{ platform ? 'Importer le référentiel des médicaments' : 'Importer des données' }}
-        </h2>
-        <p class="mb-3 text-sm text-slate-600">
-          Fichier CSV (séparateur ; , ou tabulation, encodage Windows ou UTF-8) ou Excel (.xlsx).
-          Les colonnes sont reconnues d'après leurs en-têtes ; vous pouvez corriger la
-          correspondance avant de lancer l'import. Commencez par un essai à blanc.
-        </p>
-        <div class="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
-          <label class="text-sm"
-            >Type de données
-            <select class="field" [(ngModel)]="kind" name="kind" (ngModelChange)="reset()">
-              @for (k of kinds(); track k.kind) {
-                <option [value]="k.kind">{{ k.label }}</option>
-              }
-            </select>
-          </label>
-          <label class="text-sm"
-            >Fichier
-            <input
-              type="file"
-              class="field"
-              accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              (change)="pick($event)"
-            />
-          </label>
-          <div class="flex items-end gap-2">
-            <button type="button" class="rounded border px-3 py-2" (click)="template()">
-              Modèle CSV
-            </button>
-          </div>
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">
+            {{ platform ? 'Importer le référentiel des médicaments' : 'Importer des données' }}
+          </h1>
+          <p class="page-subtitle">
+            Reprise des données d'un autre logiciel depuis un fichier CSV ou Excel, avec essai à
+            blanc avant l'import.
+          </p>
         </div>
-      </section>
+        <button type="button" class="btn btn-secondary" (click)="template()">
+          <app-icon name="download" [size]="16" />
+          Modèle CSV
+        </button>
+      </header>
 
-      @if (preview(); as p) {
-        <section class="rounded-lg border bg-white p-4">
-          <h3 class="font-semibold">
-            Aperçu · {{ p.format
-            }}{{ p.delimiter ? ' (séparateur « ' + p.delimiter + ' »)' : '' }} ·
-            {{ p.rows }} ligne(s)
-          </h3>
-          @if (p.missingRequired.length > 0) {
-            <p class="mt-2 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900" role="alert">
-              Colonnes obligatoires non reconnues : {{ p.missingRequired.join(', ') }}.
-              Choisissez-les ci-dessous.
-            </p>
-          }
-          <div class="mt-3 grid gap-2 md:grid-cols-3">
-            @for (f of p.fields; track f.name) {
-              <label class="text-sm">
-                {{ f.label }}
-                @if (f.required) {
-                  <span class="text-red-700">*</span>
-                }
-                <select
-                  class="field"
-                  [ngModel]="f.column ?? -1"
-                  (ngModelChange)="remap(f.name, $event)"
-                  [name]="'map-' + f.name"
-                >
-                  <option [value]="-1">— ignorer —</option>
-                  @for (h of p.headers; track $index) {
-                    <option [value]="$index">{{ h || 'colonne ' + ($index + 1) }}</option>
+      <ol class="stepper card mb-6" aria-label="Étapes de l'import">
+        @for (s of steps; track s.n) {
+          <li
+            class="step"
+            [class.step-done]="step() > s.n"
+            [class.step-current]="step() === s.n"
+            [attr.aria-current]="step() === s.n ? 'step' : null"
+          >
+            <span class="step-badge">
+              @if (step() > s.n) {
+                <app-icon name="check" [size]="14" [stroke]="2.5" />
+              } @else {
+                {{ s.n }}
+              }
+            </span>
+            <span class="min-w-0">
+              <span class="block text-xs font-semibold md:text-sm">{{ s.title }}</span>
+              <span class="hidden text-xs text-muted md:block">{{ s.text }}</span>
+            </span>
+          </li>
+        }
+      </ol>
+
+      <div class="space-y-6">
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title">Fichier source</h2>
+          </div>
+          <div class="card-body grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <div>
+              <label class="block"
+                ><span class="label">Type de données</span>
+                <select class="select" [(ngModel)]="kind" name="kind" (ngModelChange)="reset()">
+                  @for (k of kinds(); track k.kind) {
+                    <option [value]="k.kind">{{ k.label }}</option>
                   }
                 </select>
               </label>
-            }
-          </div>
-
-          <div class="mt-3 overflow-auto">
-            <table class="w-full text-xs">
-              <thead class="bg-slate-100 text-left">
-                <tr>
-                  <th class="p-1">Ligne</th>
-                  @for (f of p.fields; track f.name) {
-                    <th class="p-1">{{ f.label }}</th>
-                  }
-                  <th class="p-1">Contrôle</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of p.sample; track row.line) {
-                  <tr class="border-t" [class.bg-red-50]="row.error">
-                    <td class="p-1">{{ row.line }}</td>
-                    @for (f of p.fields; track f.name) {
-                      <td class="p-1">{{ row.values[f.name] }}</td>
-                    }
-                    <td class="p-1 text-red-700">{{ row.error ?? '' }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-
-          <div class="mt-4 flex flex-wrap items-end gap-3">
-            @if (!platform) {
-              <label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" [(ngModel)]="updateExisting" name="update" />
-                Mettre à jour les fiches déjà présentes
-              </label>
-            }
-            @if (kind === 'STOCK') {
-              <label class="text-sm"
-                >Lot par défaut<input class="field" [(ngModel)]="defaultLot" name="lot"
-              /></label>
-              <label class="text-sm"
-                >Péremption par défaut<input
-                  type="date"
-                  class="field"
-                  [(ngModel)]="defaultExpiry"
-                  name="expiry"
-              /></label>
-            }
-            @if (kind === 'PRODUCTS' || kind === 'STOCK' || platform) {
-              <label class="text-sm"
-                >TVA par défaut (%)<input
-                  inputmode="decimal"
-                  class="field w-24"
-                  [(ngModel)]="defaultVatRate"
-                  name="vat"
-              /></label>
-            }
-            <button
-              type="button"
-              class="rounded border px-3 py-2"
-              (click)="run(true)"
-              [disabled]="busy() || p.missingRequired.length > 0"
-            >
-              Essai à blanc
-            </button>
-            <button
-              type="button"
-              class="rounded bg-brand px-3 py-2 text-on-brand"
-              (click)="run(false)"
-              [disabled]="busy() || p.missingRequired.length > 0"
-            >
-              {{ busy() ? 'Import en cours…' : 'Importer' }}
-            </button>
+              <p class="hint">
+                Les colonnes sont reconnues d'après leurs en-têtes ; vous pouvez corriger la
+                correspondance avant de lancer l'import.
+              </p>
+            </div>
+            <div class="dropzone" [class.dropzone-filled]="fileName()">
+              <span class="dropzone-icon">
+                <app-icon [name]="fileName() ? 'spreadsheet' : 'import'" [size]="22" />
+              </span>
+              @if (fileName(); as name) {
+                <span class="block max-w-full truncate text-sm font-semibold">{{ name }}</span>
+                <span class="block text-xs text-muted">
+                  <span class="font-medium text-brand">Choisir un autre fichier</span> ou le déposer
+                  ici
+                </span>
+              } @else {
+                <span class="block text-sm font-medium">
+                  <span class="text-brand">Choisir un fichier</span> ou le déposer ici
+                </span>
+                <span class="block text-xs text-subtle">
+                  CSV (séparateur ; , ou tabulation, encodage Windows ou UTF-8) ou Excel (.xlsx)
+                </span>
+              }
+              <input
+                type="file"
+                aria-label="Fichier"
+                accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                (change)="pick($event)"
+              />
+            </div>
           </div>
         </section>
-      }
 
-      @if (result(); as job) {
-        <section class="rounded-lg border bg-white p-4" aria-live="polite">
-          <h3 class="font-semibold">
-            {{ job.dryRun ? 'Essai à blanc' : 'Import' }} · {{ job.fileName }}
-          </h3>
-          <p class="mt-1 text-sm">
-            {{ job.total }} ligne(s) : <strong>{{ job.created }}</strong> créée(s),
-            <strong>{{ job.updated }}</strong> mise(s) à jour,
-            <strong [class.text-red-700]="job.rejected > 0">{{ job.rejected }}</strong> rejetée(s).
+        @if (error(); as text) {
+          <p class="alert alert-danger" role="alert">
+            <app-icon name="error" [size]="18" />
+            <span>{{ text }}</span>
           </p>
-          @if (job.errors.length > 0) {
-            <ul class="mt-2 max-h-60 list-inside list-disc overflow-auto text-sm text-red-800">
-              @for (e of job.errors; track e.line) {
-                <li>Ligne {{ e.line }} : {{ e.message }}</li>
+        }
+
+        @if (preview(); as p) {
+          <section class="card overflow-hidden">
+            <div class="card-header">
+              <div class="min-w-0">
+                <h2 class="card-title">Correspondance des colonnes</h2>
+                <p class="text-xs text-muted">
+                  Aperçu · {{ p.format
+                  }}{{ p.delimiter ? ' (séparateur « ' + p.delimiter + ' »)' : '' }} ·
+                  {{ p.rows }} ligne(s)
+                </p>
+              </div>
+              @if (p.missingRequired.length === 0) {
+                <span class="badge badge-success"
+                  ><app-icon name="check" [size]="12" />Colonnes reconnues</span
+                >
               }
-            </ul>
+            </div>
+            <div class="card-body space-y-4">
+              @if (p.missingRequired.length > 0) {
+                <p class="alert alert-warning" role="alert">
+                  <app-icon name="alert" [size]="18" />
+                  <span>
+                    Colonnes obligatoires non reconnues : {{ p.missingRequired.join(', ') }}.
+                    Choisissez-les ci-dessous.
+                  </span>
+                </p>
+              }
+              <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                @for (f of p.fields; track f.name) {
+                  <label class="block">
+                    <span class="label">
+                      {{ f.label }}
+                      @if (f.required) {
+                        <span class="text-danger">*</span>
+                      }
+                    </span>
+                    <select
+                      class="select"
+                      [class.unmapped]="f.column === null"
+                      [ngModel]="f.column ?? -1"
+                      (ngModelChange)="remap(f.name, $event)"
+                      [name]="'map-' + f.name"
+                    >
+                      <option [value]="-1">— ignorer —</option>
+                      @for (h of p.headers; track $index) {
+                        <option [value]="$index">{{ h || 'colonne ' + ($index + 1) }}</option>
+                      }
+                    </select>
+                  </label>
+                }
+              </div>
+            </div>
+
+            <div class="overflow-x-auto border-t border-line">
+              <table class="data-table sample">
+                <thead>
+                  <tr>
+                    <th class="num">Ligne</th>
+                    <th>Contrôle</th>
+                    @for (f of p.fields; track f.name) {
+                      <th>{{ f.label }}</th>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of p.sample; track row.line) {
+                    <tr [class.row-error]="row.error">
+                      <td class="num text-subtle">{{ row.line }}</td>
+                      <td>
+                        @if (row.error) {
+                          <span class="inline-flex items-center gap-1.5 font-medium text-danger">
+                            <app-icon name="error" [size]="14" />{{ row.error }}
+                          </span>
+                        } @else {
+                          <span class="inline-flex items-center gap-1.5 text-success">
+                            <app-icon name="checkCircle" [size]="14" />OK
+                          </span>
+                        }
+                      </td>
+                      @for (f of p.fields; track f.name) {
+                        <td>{{ row.values[f.name] }}</td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card-footer">
+              <div class="flex flex-1 flex-wrap items-end gap-4">
+                @if (!platform) {
+                  <label class="flex min-h-[var(--control-h)] items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      class="toggle"
+                      [(ngModel)]="updateExisting"
+                      name="update"
+                    />
+                    Mettre à jour les fiches déjà présentes
+                  </label>
+                }
+                @if (kind === 'STOCK') {
+                  <label class="block"
+                    ><span class="label">Lot par défaut</span
+                    ><input class="input w-40" [(ngModel)]="defaultLot" name="lot"
+                  /></label>
+                  <label class="block"
+                    ><span class="label">Péremption par défaut</span
+                    ><input
+                      type="date"
+                      class="input w-44"
+                      [(ngModel)]="defaultExpiry"
+                      name="expiry"
+                  /></label>
+                }
+                @if (kind === 'PRODUCTS' || kind === 'STOCK' || platform) {
+                  <label class="block"
+                    ><span class="label">TVA par défaut (%)</span
+                    ><input
+                      inputmode="decimal"
+                      class="input w-28"
+                      [(ngModel)]="defaultVatRate"
+                      name="vat"
+                  /></label>
+                }
+              </div>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="run(true)"
+                  [disabled]="busy() || p.missingRequired.length > 0"
+                >
+                  <app-icon name="eye" [size]="16" />
+                  Essai à blanc
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  (click)="run(false)"
+                  [disabled]="busy() || p.missingRequired.length > 0"
+                >
+                  <app-icon [name]="busy() ? 'refresh' : 'import'" [size]="16" />
+                  {{ busy() ? 'Import en cours…' : 'Importer' }}
+                </button>
+              </div>
+            </div>
+          </section>
+        }
+
+        @if (result(); as job) {
+          <section class="card" aria-live="polite">
+            <div class="card-header">
+              <div class="min-w-0">
+                <h2 class="card-title">
+                  {{ job.dryRun ? 'Essai à blanc' : 'Import' }} · {{ job.fileName }}
+                </h2>
+                <p class="text-xs text-muted">{{ job.total }} ligne(s) traitée(s)</p>
+              </div>
+              @if (job.dryRun) {
+                <span class="badge badge-info">Aucune donnée enregistrée</span>
+              } @else {
+                <span class="badge badge-success"><span class="dot"></span>Terminé</span>
+              }
+            </div>
+            <div class="card-body space-y-4">
+              <div class="grid gap-3 sm:grid-cols-3">
+                <div class="stat">
+                  <p class="stat-label">Créées</p>
+                  <p class="stat-value text-success">{{ job.created }}</p>
+                </div>
+                <div class="stat">
+                  <p class="stat-label">Mises à jour</p>
+                  <p class="stat-value text-info">{{ job.updated }}</p>
+                </div>
+                <div class="stat">
+                  <p class="stat-label">Rejetées</p>
+                  <p class="stat-value" [class.text-danger]="job.rejected > 0">
+                    {{ job.rejected }}
+                  </p>
+                </div>
+              </div>
+              @if (job.errors.length > 0) {
+                <ul
+                  class="max-h-60 divide-y divide-[var(--border)] overflow-auto rounded-[var(--radius)] border border-line text-sm"
+                >
+                  @for (e of job.errors; track e.line) {
+                    <li class="flex gap-3 px-3 py-2">
+                      <span class="badge badge-danger shrink-0">Ligne {{ e.line }}</span>
+                      <span class="min-w-0">{{ e.message }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          </section>
+        }
+
+        <section class="card overflow-hidden">
+          <div class="card-header">
+            <h2 class="card-title flex items-center gap-2">
+              <app-icon name="clock" [size]="16" class="text-muted" />
+              Historique
+            </h2>
+          </div>
+          @if (history().length > 0) {
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Fichier</th>
+                    <th class="num">Créées</th>
+                    <th class="num">Mises à jour</th>
+                    <th class="num">Rejetées</th>
+                    <th>Par</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (j of history(); track j.id) {
+                    <tr [class.text-muted]="j.dryRun">
+                      <td class="whitespace-nowrap">
+                        {{ j.startedAt | date: 'dd/MM/yyyy HH:mm' }}
+                        @if (j.dryRun) {
+                          <span class="badge ml-1">essai</span>
+                        }
+                      </td>
+                      <td>{{ label(j.kind) }}</td>
+                      <td class="max-w-64 truncate" [attr.title]="j.fileName">{{ j.fileName }}</td>
+                      <td class="num">{{ j.created }}</td>
+                      <td class="num">{{ j.updated }}</td>
+                      <td class="num" [class.text-danger]="j.rejected > 0">{{ j.rejected }}</td>
+                      <td>{{ j.startedBy }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <div class="empty-state">
+              <app-icon name="spreadsheet" [size]="22" />
+              <p>Aucun import pour le moment. Commencez par un essai à blanc.</p>
+            </div>
           }
         </section>
-      }
-      @if (error(); as text) {
-        <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">{{ text }}</p>
-      }
-
-      @if (history().length > 0) {
-        <section class="rounded-lg border bg-white p-4">
-          <h3 class="mb-2 font-semibold">Historique</h3>
-          <table class="w-full text-sm">
-            <thead class="text-left text-slate-500">
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Fichier</th>
-                <th class="text-right">Créées</th>
-                <th class="text-right">Mises à jour</th>
-                <th class="text-right">Rejetées</th>
-                <th>Par</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (j of history(); track j.id) {
-                <tr class="border-t" [class.text-slate-400]="j.dryRun">
-                  <td>
-                    {{ j.startedAt | date: 'dd/MM/yyyy HH:mm' }}{{ j.dryRun ? ' (essai)' : '' }}
-                  </td>
-                  <td>{{ label(j.kind) }}</td>
-                  <td>{{ j.fileName }}</td>
-                  <td class="text-right">{{ j.created }}</td>
-                  <td class="text-right">{{ j.updated }}</td>
-                  <td class="text-right">{{ j.rejected }}</td>
-                  <td>{{ j.startedBy }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </section>
-      }
+      </div>
     </div>
   `,
   styles: `
-    .field {
-      display: block;
+    .stepper {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.25rem;
+      padding: 0.5rem;
+    }
+    .step {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 0.25rem;
+      border-radius: var(--radius);
+      text-align: center;
+      color: var(--text-muted);
+    }
+    @media (min-width: 768px) {
+      .step {
+        flex-direction: row;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        text-align: left;
+      }
+    }
+    .step-current {
+      background: var(--brand-softer);
+      color: var(--text);
+    }
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.9rem;
+      height: 1.9rem;
+      flex-shrink: 0;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 999px;
+      background: var(--surface);
+      font-size: 0.8rem;
+      font-weight: 650;
+      color: var(--text-muted);
+    }
+    .step-current .step-badge {
+      border-color: var(--brand-primary);
+      color: var(--brand-primary);
+      box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand-primary) 14%, transparent);
+    }
+    .step-done .step-badge {
+      border-color: var(--brand-primary);
+      background: var(--brand-primary);
+      color: var(--brand-on-primary);
+    }
+    .dropzone {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      min-height: 9.5rem;
+      padding: 1.25rem;
+      border: 1.5px dashed var(--border-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface-2);
+      text-align: center;
+      transition:
+        border-color 120ms ease,
+        background-color 120ms ease;
+    }
+    .dropzone:hover,
+    .dropzone:has(input:focus-visible) {
+      border-color: var(--brand-primary);
+      background: var(--brand-softer);
+    }
+    .dropzone-filled {
+      border-style: solid;
+      border-color: color-mix(in oklab, var(--brand-primary) 45%, var(--border));
+      background: var(--brand-softer);
+    }
+    .dropzone input {
+      position: absolute;
+      inset: 0;
       width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .dropzone-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 3rem;
+      height: 3rem;
+      margin-bottom: 0.35rem;
+      border: 1px solid var(--border);
+      border-radius: 0.85rem;
+      background: var(--surface);
+      color: var(--brand-primary);
+      box-shadow: var(--shadow-sm);
+    }
+    .unmapped {
+      color: var(--text-subtle);
+    }
+    .sample {
+      font-size: 0.8125rem;
+    }
+    .sample th,
+    .sample td {
+      white-space: nowrap;
+    }
+    .sample tbody tr.row-error,
+    .sample tbody tr.row-error:hover {
+      background: var(--danger-soft);
+    }
+    .card-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: calc(1rem * var(--density)) calc(1.25rem * var(--density));
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .stat {
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      font-weight: 550;
+      color: var(--text-muted);
+    }
+    .stat-value {
       margin-top: 0.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.375rem;
-      padding: 0.375rem 0.5rem;
-      background: white;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .toggle {
+      appearance: none;
+      position: relative;
+      flex-shrink: 0;
+      width: 2.25rem !important;
+      height: 1.3rem !important;
+      border-radius: 999px;
+      background: var(--border-strong);
+      transition: background-color 150ms ease;
+      cursor: pointer;
+    }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 0.15rem;
+      left: 0.15rem;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+      transition: transform 150ms ease;
+    }
+    .toggle:checked {
+      background: var(--brand-primary);
+    }
+    .toggle:checked::after {
+      transform: translateX(0.95rem);
     }
   `,
 })
@@ -241,6 +548,21 @@ export class ImportPage {
   protected readonly history = signal<ImportJob[]>([]);
   protected readonly error = signal<string | null>(null);
   protected readonly busy = signal(false);
+  protected readonly fileName = signal<string | null>(null);
+  protected readonly steps = [
+    { n: 1, title: 'Fichier', text: 'CSV ou Excel' },
+    { n: 2, title: 'Colonnes', text: 'Vérifier la correspondance' },
+    { n: 3, title: 'Essai à blanc', text: 'Contrôle sans enregistrer' },
+    { n: 4, title: 'Import', text: 'Enregistrement des données' },
+  ];
+  /** Current step of the stepper: 5 once a real import has run. */
+  protected readonly step = computed(() => {
+    const job = this.result();
+    if (job) {
+      return job.dryRun ? 4 : 5;
+    }
+    return this.preview() ? 2 : 1;
+  });
   protected kind = this.platform ? 'CATALOG' : 'PRODUCTS';
   protected updateExisting = false;
   protected defaultLot = 'MIGRATION';
@@ -272,6 +594,7 @@ export class ImportPage {
   protected pick(event: Event): void {
     const input = event.target as HTMLInputElement;
     this.file = input.files?.[0] ?? null;
+    this.fileName.set(this.file?.name ?? null);
     this.mapping = {};
     this.result.set(null);
     if (this.file) {
