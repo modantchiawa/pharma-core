@@ -163,6 +163,9 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
               Mot de passe <code>Demo2026!</code> · PIN <code>1234</code> · poste de démonstration
               <code>DEMO-1</code>. Les données sont rechargées à chaque redéploiement.
             </p>
+            <p class="mt-1 text-amber-800">
+              API : <code>{{ apiUrl }}</code>
+            </p>
             <form class="mt-3 flex gap-2" (ngSubmit)="platformDemoLogin()">
               <input
                 type="password"
@@ -210,6 +213,7 @@ export class LoginPage {
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly demo = inject(APP_ENVIRONMENT).demo;
+  protected readonly apiUrl = inject(APP_ENVIRONMENT).apiUrl;
   protected readonly demoAccounts = DEMO_ACCOUNTS;
   protected platformPassword = '';
   protected pharmacy = this.auth.lastPharmacy() ?? '';
@@ -278,17 +282,36 @@ export class LoginPage {
         this.auth.mustChangePassword() ? '/account/password' : this.returnUrl(),
       );
     } catch (error) {
-      const detail = error as { error?: { detail?: string }; status?: number };
-      this.error.set(
-        detail.error?.detail ??
-          (detail.status === 0
-            ? 'Serveur injoignable : vérifiez le réseau de la pharmacie'
-            : 'Connexion refusée'),
-      );
+      this.error.set(loginErrorMessage(error, this.apiUrl));
     } finally {
       this.busy.set(false);
       this.pin = '';
       this.password = '';
     }
   }
+}
+
+/**
+ * A PharmaCore error always carries a readable detail; anything else means the request reached
+ * another program (wrong address or port, proxy) or failed on the way, and says so with the status.
+ */
+export function loginErrorMessage(error: unknown, apiUrl: string): string {
+  const response = error as { error?: { detail?: string }; status?: number; url?: string | null };
+  if (response.error?.detail) {
+    return response.error.detail;
+  }
+  const status = response.status ?? 0;
+  if (status === 0) {
+    return `Serveur injoignable (${apiUrl}) : vérifiez que le backend tourne et le réseau de la pharmacie`;
+  }
+  if (status === 404 || status === 405) {
+    return `Aucun serveur PharmaCore à ${apiUrl} (HTTP ${status}) : vérifiez l'adresse et le port de l'API`;
+  }
+  if (status === 401 || status === 403) {
+    return `Accès refusé par ${apiUrl} (HTTP ${status}) : origine non autorisée (ALLOWED_ORIGINS) ou autre serveur sur ce port`;
+  }
+  if (status >= 500) {
+    return `Erreur du serveur (HTTP ${status}) : consultez le journal du backend`;
+  }
+  return `Connexion refusée (HTTP ${status})`;
 }

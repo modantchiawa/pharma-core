@@ -71,7 +71,9 @@ class SecurityConfiguration {
     @Bean
     CorsConfigurationSource corsConfigurationSource(SecurityProperties properties) {
         var cors = new CorsConfiguration();
-        cors.setAllowedOrigins(properties.allowedOrigins());
+        // Patterns, so that a development setting such as "http://localhost:*" accepts whatever
+        // port the dev server picked; exact origins (production) behave as before.
+        cors.setAllowedOriginPatterns(properties.allowedOrigins());
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key", TenantContextFilter.CORRELATION_HEADER));
         cors.setExposedHeaders(List.of(TenantContextFilter.CORRELATION_HEADER, "ETag"));
