@@ -8,10 +8,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const apiUrl = (process.env.DEMO_API_URL ?? (process.env.npm_lifecycle_event === 'start:demo' ? 'http://localhost:8080/api' : 'https://pharmacore-demo-api.onrender.com/api')).replace(
-  /\/$/,
-  '',
-);
+const apiUrl = (
+  process.env.DEMO_API_URL ??
+  (process.env.npm_lifecycle_event === 'start:demo'
+    ? 'http://localhost:8080/api'
+    : 'https://pharmacore-demo-api.onrender.com/api')
+).replace(/\/$/, '');
 const wsUrl =
   process.env.DEMO_WS_URL ?? apiUrl.replace(/^http/, 'ws').replace(/\/api$/, '') + '/ws';
 const version =
