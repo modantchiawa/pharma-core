@@ -66,10 +66,12 @@ services:
     volumes:
       - keys:/app/data/keys
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
+      # bash explicitement : /dev/tcp n'existe pas dans dash, le /bin/sh de l'image (Ubuntu).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
       interval: 15s
       timeout: 5s
-      start_period: 90s
+      # Premier démarrage d'un petit VPS : migrations Flyway et chargement de la démo.
+      start_period: 180s
       retries: 10
     restart: unless-stopped
     logging: *logging

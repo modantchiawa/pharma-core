@@ -101,7 +101,13 @@ log "Construction et démarrage (plusieurs minutes la première fois)"
 cd "${INSTALL_DIR}"
 APP_VERSION="$(git rev-parse --short HEAD)"
 sed -i "s|^APP_VERSION=.*|APP_VERSION=${APP_VERSION}|" "${ENV_FILE}"
-docker compose -f deploy/vps/docker-compose.yml --env-file "${ENV_FILE}" up -d --build --remove-orphans
+if ! docker compose -f deploy/vps/docker-compose.yml --env-file "${ENV_FILE}" up -d --build --remove-orphans; then
+  echo "Le démarrage a échoué : état des services et journal du backend ci-dessous." >&2
+  docker compose -f deploy/vps/docker-compose.yml --env-file "${ENV_FILE}" ps >&2 || true
+  docker compose -f deploy/vps/docker-compose.yml --env-file "${ENV_FILE}" logs --tail 80 backend >&2 || true
+  echo "Après correction, relancez la même commande d'installation : elle reprend là où elle s'est arrêtée." >&2
+  exit 1
+fi
 
 log "Sauvegarde quotidienne à 02:30 (cron) et scripts d'exploitation"
 chmod +x deploy/vps/*.sh
