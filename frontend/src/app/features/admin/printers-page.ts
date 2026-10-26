@@ -401,7 +401,7 @@ interface Form {
     }
     .terminal-active .terminal-icon {
       background: var(--brand-soft);
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
     .setting {
       display: grid;
@@ -467,7 +467,7 @@ interface Form {
       color: var(--text-subtle);
     }
     .choice:has(input:checked) .choice-icon {
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
     .choice-title {
       font-size: 0.875rem;

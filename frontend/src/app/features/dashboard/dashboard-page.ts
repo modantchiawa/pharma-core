@@ -485,7 +485,7 @@ const METHOD_LABELS: Record<string, string> = {
     }
     .rank.first {
       background: var(--brand-soft);
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
   `,
 })

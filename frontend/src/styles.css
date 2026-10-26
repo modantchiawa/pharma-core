@@ -28,6 +28,8 @@
   --brand-soft: color-mix(in oklab, var(--brand-primary) 10%, var(--surface));
   --brand-softer: color-mix(in oklab, var(--brand-primary) 5%, var(--surface));
   --brand-ring: color-mix(in oklab, var(--brand-primary) 45%, transparent);
+  /* Brand color for text and icons: the raw brand on light surfaces, lifted in dark mode. */
+  --brand-text: var(--brand-primary);
 
   --success: #15803d;
   --success-soft: #e8f6ee;
@@ -72,6 +74,7 @@
   --text-subtle: #6f7d90;
   --brand-soft: color-mix(in oklab, var(--brand-primary) 22%, var(--surface));
   --brand-softer: color-mix(in oklab, var(--brand-primary) 12%, var(--surface));
+  --brand-text: color-mix(in oklab, var(--brand-primary) 55%, white);
   --success: #4ade80;
   --success-soft: #11291c;
   --warning: #fbbf24;
@@ -415,7 +418,7 @@
   }
   .btn-soft {
     background: var(--brand-soft);
-    color: var(--brand-primary);
+    color: var(--brand-text);
   }
   .btn-soft:hover:not(:disabled) {
     background: color-mix(in oklab, var(--brand-primary) 16%, var(--surface));
@@ -493,7 +496,7 @@
   }
   .badge-brand {
     background: var(--brand-soft);
-    color: var(--brand-primary);
+    color: var(--brand-text);
   }
   .badge-success {
     background: var(--success-soft);
@@ -613,7 +616,7 @@
     height: 2rem;
     border-radius: 0.6rem;
     background: var(--brand-soft);
-    color: var(--brand-primary);
+    color: var(--brand-text);
   }
 
   .segmented {
@@ -695,6 +698,10 @@
 }
 :root[data-theme='dark'] .text-black {
   color: var(--text);
+}
+/* Brand-colored text stays readable on dark surfaces (backgrounds keep the raw brand). */
+:root[data-theme='dark'] .text-brand {
+  color: var(--brand-text);
 }
 
 @keyframes skeleton {

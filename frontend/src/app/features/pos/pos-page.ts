@@ -570,7 +570,7 @@ import { IconName } from '../../shared/ui/icons';
     }
     .scan > app-icon {
       left: 1rem;
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
     .results {
       border: 1px solid var(--border);
@@ -626,7 +626,7 @@ import { IconName } from '../../shared/ui/icons';
         transform 80ms ease;
     }
     .method > app-icon {
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
     .method:hover {
       border-color: var(--brand-primary);

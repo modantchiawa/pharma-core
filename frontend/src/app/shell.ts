@@ -569,7 +569,7 @@ interface PaletteEntry {
     }
     .nav-link.nav-active {
       background: var(--brand-soft);
-      color: var(--brand-primary);
+      color: var(--brand-text);
       font-weight: 600;
     }
     .popover {

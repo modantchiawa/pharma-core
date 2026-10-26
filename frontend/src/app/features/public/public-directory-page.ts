@@ -367,7 +367,7 @@ const TYPE_LABEL: Record<PublicGuardSlot['type'], string> = {
       flex-shrink: 0;
       border-radius: 0.65rem;
       background: var(--brand-soft);
-      color: var(--brand-primary);
+      color: var(--brand-text);
     }
     .tile-night {
       background: var(--info-soft);

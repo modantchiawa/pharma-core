@@ -409,7 +409,7 @@ import { Icon } from '../../shared/ui/icon';
     }
     .step-current .step-badge {
       border-color: var(--brand-primary);
-      color: var(--brand-primary);
+      color: var(--brand-text);
       box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand-primary) 14%, transparent);
     }
     .step-done .step-badge {
@@ -462,7 +462,7 @@ import { Icon } from '../../shared/ui/icon';
       border: 1px solid var(--border);
       border-radius: 0.85rem;
       background: var(--surface);
-      color: var(--brand-primary);
+      color: var(--brand-text);
       box-shadow: var(--shadow-sm);
     }
     .unmapped {
