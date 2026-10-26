@@ -4,6 +4,10 @@ Un frontend sur **Vercel** et un backend conteneurisé (Render par défaut, ou t
 **mode démo** : deux pharmacies de Niamey préchargées, des comptes connus, une console éditeur
 ouverte par mot de passe. Les données sont rechargées à chaque redéploiement avec une base vide.
 
+> **Serveur dédié ou VPS** : le chemin recommandé est `docs/VPS.md` (`install.sh --demo`), qui
+> déploie frontend, backend et base sur une seule machine avec HTTPS. Ce document détaille le mode
+> démonstration lui-même et les variantes hébergées (Vercel + Render).
+
 ## Architecture de la démo
 
 | Composant | Où | Rôle |
@@ -15,6 +19,47 @@ ouverte par mot de passe. Les données sont rechargées à chaque redéploiement
 Le backend tourne en mode **CLOUD** : les pharmacies de démo sont « gérées dans le cloud », tout
 est modifiable depuis le navigateur, sans serveur local. Le mode hub (serveur Windows par officine)
 se démontre séparément avec `packaging/windows`.
+
+## 0. Tester en local
+
+### Tout en conteneurs (identique au serveur)
+
+Prérequis : Docker Desktop (Windows, macOS) ou Docker Engine + plugin compose, 6 Go de RAM libres.
+
+```bash
+cp deploy/vps/.env.example deploy/vps/.env
+# dans .env : SITE_ADDRESS=:80  PUBLIC_URL=http://localhost:8088  HTTP_PORT=8088  HTTPS_PORT=8443
+#             WEB_BUILD_CONFIG=demo  DEMO_ENABLED=true  DEMO_PLATFORM_PASSWORD=<au choix>
+docker compose -f deploy/vps/docker-compose.yml --env-file deploy/vps/.env up -d --build
+docker compose -f deploy/vps/docker-compose.yml --env-file deploy/vps/.env logs -f backend   # attendre « Démonstration chargée »
+```
+
+Puis <http://localhost:8088>. Première construction : 5 à 10 minutes (Maven et npm). Arrêt :
+`docker compose -f deploy/vps/docker-compose.yml --env-file deploy/vps/.env down` ; remise à zéro
+des données : ajouter `-v`.
+
+### Mode développeur (rechargement à chaud)
+
+Prérequis : Java 26, Maven 3.9, Node 24, Docker pour PostgreSQL.
+
+```bash
+cp deploy/.env.example deploy/.env                      # mots de passe de la base locale
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d postgres
+
+cd backend
+DEMO_ENABLED=true DEMO_PLATFORM_PASSWORD=demo \
+DB_MIGRATION_PASSWORD=<DB_MIGRATION_PASSWORD du .env> DB_APP_PASSWORD=<DB_APP_PASSWORD du .env> \
+mvn spring-boot:run                                     # http://localhost:8080, données de démo au premier démarrage
+
+cd ../frontend && npm ci && npm run start:demo          # http://localhost:4200, API sur localhost:8080
+```
+
+Sous PowerShell, les variables se posent avec `$env:DEMO_ENABLED="true"` avant `mvn spring-boot:run`.
+`npm start` (sans `:demo`) lance la configuration de développement classique, sans l'encart des
+comptes de test ; les mêmes comptes fonctionnent en saisissant l'identifiant de pharmacie `sahel`.
+
+Tests automatisés : `cd backend && mvn verify` (Testcontainers démarre PostgreSQL tout seul, dont
+`DemoIT` qui rejoue l'amorçage de la démo) et `cd frontend && npm test`.
 
 ## 1. Déployer le backend
 

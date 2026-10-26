@@ -7,7 +7,7 @@ services:
     runtime: docker
     plan: starter
     region: frankfurt
-    dockerfilePath: deploy/demo/Dockerfile
+    dockerfilePath: deploy/docker/backend.Dockerfile
     dockerContext: .
     healthCheckPath: /actuator/health/readiness
     autoDeploy: true

@@ -24,7 +24,7 @@ services:
   backend:
     build:
       context: ../..
-      dockerfile: deploy/demo/Dockerfile
+      dockerfile: deploy/docker/backend.Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
