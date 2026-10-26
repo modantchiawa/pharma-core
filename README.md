@@ -21,8 +21,9 @@ console de supervision éditeur.
 | [`docs/WINDOWS.md`](docs/WINDOWS.md) | Installation en officine, pannes (Internet, courant, matériel), sauvegardes |
 | [`docs/UX.md`](docs/UX.md) | Principes d'interface et système de design personnalisable |
 | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Règles de développement : migrations, RLS, synchronisation, tests |
-| [`docs/DEMO.md`](docs/DEMO.md) | Démo et recette : frontend sur Vercel, backend Docker/Render, comptes et parcours de test |
-| [`deploy/demo/`](deploy/demo) · [`render.yaml`](render.yaml) | Image Docker du backend, compose de démo, rôles PostgreSQL managé, blueprint Render |
+| [`docs/VPS.md`](docs/VPS.md) | **Déploiement sur votre serveur (VPS)** : installation en une commande, HTTPS, mises à jour, sauvegardes |
+| [`docs/DEMO.md`](docs/DEMO.md) | Mode démonstration et recette : comptes de test, données, quinze parcours ; variantes Vercel/Render |
+| [`deploy/vps/`](deploy/vps) · [`deploy/docker/`](deploy/docker) | Compose du serveur (PostgreSQL, backend, Caddy), scripts install/update/backup/restore, images Docker |
 
 ## Démarrage rapide
 

@@ -1,0 +1,107 @@
+# PharmaCore sur un serveur unique (VPS) : PostgreSQL, backend, frontend + reverse proxy Caddy.
+#
+#   cp deploy/vps/.env.example deploy/vps/.env     # ou deploy/vps/install.sh qui le génère
+#   docker compose -f deploy/vps/docker-compose.yml --env-file deploy/vps/.env up -d --build
+#
+# Seul Caddy est exposé (80/443). PostgreSQL et le backend restent sur le réseau interne.
+name: pharmacore
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?}
+      PHARMACORE_OWNER_PASSWORD: ${DB_MIGRATION_PASSWORD:?}
+      PHARMACORE_APP_PASSWORD: ${DB_APP_PASSWORD:?}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-80}
+      - -c
+      - wal_compression=on
+      - -c
+      - log_min_duration_statement=2000
+    volumes:
+      - ../postgres/00-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql.inc:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pharmacore"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/backend.Dockerfile
+    image: pharmacore/backend:${APP_VERSION:-local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/pharmacore
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      PHARMACORE_MODE: CLOUD
+      ALLOWED_ORIGINS: ${PUBLIC_URL:?}
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      DEMO_PLATFORM_PASSWORD: ${DEMO_PLATFORM_PASSWORD:-}
+      DEMO_ACCOUNT_PASSWORD: ${DEMO_ACCOUNT_PASSWORD:-Demo2026!}
+      DEMO_PIN: ${DEMO_PIN:-1234}
+      OIDC_PLATFORM_ISSUER: ${OIDC_PLATFORM_ISSUER:-http://localhost:8180/realms/pharmacore-platform}
+      OIDC_PHARMACY_ISSUER: ${OIDC_PHARMACY_ISSUER:-http://localhost:8180/realms/pharmacore-pharmacies}
+      INVOICE_CERTIFICATION: ${INVOICE_CERTIFICATION:-NONE}
+      JAVA_TOOL_OPTIONS: "-XX:+UseZGC -XX:MaxRAMPercentage=${JAVA_RAM_PERCENT:-60} -Dfile.encoding=UTF-8"
+      TZ: ${TZ:-Africa/Niamey}
+    volumes:
+      - keys:/app/data/keys
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web.Dockerfile
+      args:
+        BUILD_CONFIG: ${WEB_BUILD_CONFIG:-production}
+        GIT_SHA: ${APP_VERSION:-local}
+    image: pharmacore/web:${APP_VERSION:-local}
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pgdata:
+  keys:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

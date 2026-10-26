@@ -4,6 +4,10 @@ Un frontend sur **Vercel** et un backend conteneurisé (Render par défaut, ou t
 **mode démo** : deux pharmacies de Niamey préchargées, des comptes connus, une console éditeur
 ouverte par mot de passe. Les données sont rechargées à chaque redéploiement avec une base vide.
 
+> **Serveur dédié ou VPS** : le chemin recommandé est `docs/VPS.md` (`install.sh --demo`), qui
+> déploie frontend, backend et base sur une seule machine avec HTTPS. Ce document détaille le mode
+> démonstration lui-même et les variantes hébergées (Vercel + Render).
+
 ## Architecture de la démo
 
 | Composant | Où | Rôle |
