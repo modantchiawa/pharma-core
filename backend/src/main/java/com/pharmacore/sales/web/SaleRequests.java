@@ -26,18 +26,21 @@ final class SaleRequests {
                        @NotBlank @Size(max = 40) String ticketNumber,
                        @NotNull Instant occurredAt,
                        UUID cashierUserId,
+                       UUID customerId,
                        @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines,
                        @NotNull @Size(max = 10) List<@Valid PaymentRequest> payments,
                        @Valid PrescriptionRequest prescription) {
 
         SaleDraft toDraft(SaleOrigin origin) {
-            return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId,
+            return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId,
                     lines.stream().map(line -> new SaleDraft.Line(line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents())).toList(),
                     payments.stream().map(payment -> new SaleDraft.Payment(payment.method(), payment.amountCents(),
-                            payment.thirdPartyCode(), payment.reference())).toList(),
+                            payment.thirdPartyCode(), payment.reference(), payment.provider(), payment.policyId()))
+                            .toList(),
                     prescription == null ? null : new SaleDraft.Prescription(prescription.prescriberName(),
-                            prescription.prescriberRpps(), prescription.patientReference()));
+                            prescription.prescriberRpps(), prescription.patientReference(),
+                            prescription.prescriptionId()));
         }
     }
 
@@ -50,12 +53,15 @@ final class SaleRequests {
     record PaymentRequest(@NotNull PaymentMethod method,
                           @Positive long amountCents,
                           @Size(max = 20) String thirdPartyCode,
-                          @Size(max = 64) String reference) {
+                          @Size(max = 64) String reference,
+                          @Size(max = 30) String provider,
+                          UUID policyId) {
     }
 
     record PrescriptionRequest(@Size(max = 150) String prescriberName,
                                @Pattern(regexp = "^[0-9]{11}$") String prescriberRpps,
-                               @Size(max = 64) String patientReference) {
+                               @Size(max = 64) String patientReference,
+                               UUID prescriptionId) {
     }
 
     record SyncBatchRequest(@NotEmpty @Size(max = 200) List<@Valid SaleRequest> sales) {
@@ -67,6 +73,10 @@ final class SaleRequests {
                             Instant lastSyncAt) {
     }
 
-    record ReasonRequest(@NotBlank @Size(max = 255) String reason) {
+    /** Supervisor credentials are only needed when the operation exceeds the pharmacy's thresholds. */
+    record ReasonRequest(@NotBlank @Size(max = 255) String reason,
+                         @Size(max = 40) String terminalId,
+                         @Size(max = 200) String supervisorEmail,
+                         @Size(max = 12) String supervisorPin) {
     }
 }

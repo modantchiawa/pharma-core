@@ -1,0 +1,19 @@
+<!-- WinSW service definition: embedded PostgreSQL for the hub -->
+<service>
+  <id>PharmaCorePostgres</id>
+  <name>PharmaCore PostgreSQL</name>
+  <description>Base de données locale PharmaCore</description>
+  <executable>%BASE%\pgsql\bin\pg_ctl.exe</executable>
+  <arguments>start -D "%BASE%\data\pgdata" -o "-p 5433 -c listen_addresses=127.0.0.1" -w -t 120</arguments>
+  <stopexecutable>%BASE%\pgsql\bin\pg_ctl.exe</stopexecutable>
+  <stoparguments>stop -D "%BASE%\data\pgdata" -m fast -w -t 60</stoparguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>

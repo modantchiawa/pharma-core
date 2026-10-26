@@ -48,6 +48,12 @@ class CatalogController {
         return catalog.search(q, limit).stream().map(ProductView::of).toList();
     }
 
+    /** Substitutes with the same active substance, with this pharmacy's price and stock. */
+    @GetMapping("/api/v1/catalog/products/{productId}/alternatives")
+    List<CatalogService.Alternative> alternatives(@PathVariable UUID productId) {
+        return catalog.alternatives(productId);
+    }
+
     /** Incremental feed consumed by the offline POS (IndexedDB cache). */
     @GetMapping("/api/v1/pos/catalog")
     PosCatalogPage posCatalog(@RequestParam(defaultValue = "1970-01-01T00:00:00Z")

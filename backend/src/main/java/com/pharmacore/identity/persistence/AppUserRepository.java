@@ -27,4 +27,6 @@ public interface AppUserRepository extends JpaRepository<AppUserEntity, UUID> {
     List<AppUserEntity> findAllWithRoles();
 
     boolean existsByEmailIgnoreCase(String email);
+
+    Optional<AppUserEntity> findByEmailIgnoreCase(String email);
 }

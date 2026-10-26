@@ -4,9 +4,10 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
+import { PartnerProduct, ProductPartners } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
-import { APP_ENVIRONMENT } from '../../core/config';
+import { NodeInfoService } from '../../core/api/node-info.service';
 import { CatalogSyncService } from '../../core/offline/catalog-sync.service';
 import { CachedProduct } from '../../core/offline/pos-database';
 import { StompService } from '../../core/realtime/stomp.service';
@@ -55,13 +56,99 @@ const LEVEL_LABEL = {
         *appHasPermission="'NETWORK_STOCK_QUERY'"
       >
         <h2 class="text-lg font-semibold">Disponibilité dans le réseau</h2>
-        <input
-          type="search"
-          class="w-full rounded border px-3 py-2"
-          placeholder="Produit recherché"
-          [(ngModel)]="term"
-          (ngModelChange)="suggest($event)"
-        />
+        <form class="flex gap-2" (ngSubmit)="whoHas()">
+          <input
+            type="search"
+            class="w-full rounded border px-3 py-2"
+            placeholder="Qui a… (nom, molécule ou CIP)"
+            [(ngModel)]="term"
+            name="term"
+            (ngModelChange)="suggest($event)"
+          />
+          <button
+            type="submit"
+            class="rounded border px-3 py-2"
+            [disabled]="term.trim().length < 2"
+          >
+            Qui l'a ?
+          </button>
+        </form>
+        @if (whoHasResults(); as results) {
+          <div class="rounded border bg-slate-50 p-2">
+            <p class="mb-1 text-sm font-medium">
+              {{ results.length }} produit(s) disponible(s) chez des partenaires
+            </p>
+            @for (item of results; track item.productId) {
+              <details class="py-1">
+                <summary class="cursor-pointer">
+                  {{ item.designation }}
+                  <small class="text-slate-500">{{ item.partners.length }} pharmacie(s)</small>
+                </summary>
+                <ul class="ml-4 text-sm">
+                  @for (partner of item.partners; track partner.tenantId) {
+                    <li class="flex items-center justify-between py-0.5">
+                      <span>
+                        {{ partner.pharmacyName }} <small>{{ partner.phone }}</small>
+                      </span>
+                      <span>
+                        {{ label(partner.level) }} ({{ partner.quantity
+                        }}{{ partner.capped ? '+' : '' }})
+                        <button
+                          type="button"
+                          class="ml-2 underline"
+                          (click)="inspectPartner(partner.tenantId, partner.pharmacyName)"
+                        >
+                          voir son stock
+                        </button>
+                      </span>
+                    </li>
+                  }
+                </ul>
+              </details>
+            } @empty {
+              <p class="text-sm text-slate-500">Aucun partenaire ne déclare ce produit.</p>
+            }
+          </div>
+        }
+        @if (partnerName(); as name) {
+          <div class="rounded border bg-white p-2">
+            <form class="flex items-end gap-2" (ngSubmit)="loadPartnerStock()">
+              <label class="flex-1 text-sm"
+                >Stock de {{ name }} pour
+                <input
+                  type="search"
+                  class="mt-1 w-full rounded border px-3 py-1"
+                  [(ngModel)]="partnerTerm"
+                  name="partnerTerm"
+                  placeholder="produit ou molécule"
+                />
+              </label>
+              <button type="submit" class="rounded border px-3 py-1">Chercher</button>
+              <button
+                type="button"
+                class="rounded border px-3 py-1"
+                (click)="partnerName.set(null)"
+              >
+                Fermer
+              </button>
+            </form>
+            <ul class="mt-2 divide-y text-sm">
+              @for (item of partnerStock(); track item.productId) {
+                <li class="flex justify-between py-1">
+                  <span
+                    >{{ item.designation }}
+                    <small class="text-slate-500">{{ item.dci }}</small></span
+                  >
+                  <span
+                    >{{ label(item.level) }} ({{ item.quantity }}{{ item.capped ? '+' : '' }})</span
+                  >
+                </li>
+              } @empty {
+                <li class="py-1 text-slate-500">Rien en stock pour cette recherche.</li>
+              }
+            </ul>
+          </div>
+        }
         <ul>
           @for (p of suggestions(); track p.productId) {
             <li>
@@ -189,11 +276,16 @@ const LEVEL_LABEL = {
 })
 export class NetworkPage {
   private readonly http = inject(HttpClient);
-  private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/network`;
+  private readonly api = `${inject(NodeInfoService).networkApiUrl()}/v1/network`;
   private readonly catalog = inject(CatalogSyncService);
   private readonly auth = inject(AuthService);
 
   protected term = '';
+  protected partnerTerm = '';
+  protected readonly whoHasResults = signal<ProductPartners[] | null>(null);
+  protected readonly partnerName = signal<string | null>(null);
+  protected readonly partnerStock = signal<PartnerProduct[]>([]);
+  private partnerTenant: string | null = null;
   protected readonly suggestions = signal<CachedProduct[]>([]);
   protected readonly selected = signal<CachedProduct | null>(null);
   protected readonly partners = signal<PartnerAvailability[]>([]);
@@ -208,6 +300,52 @@ export class NetworkPage {
         .watch(`/topic/tenants.${tenant}.transfers`)
         .pipe(takeUntilDestroyed(inject(DestroyRef)))
         .subscribe(() => void this.loadTransfers());
+    }
+  }
+
+  /** Across every partner at once: the matching products someone has, from the cloud. */
+  protected async whoHas(): Promise<void> {
+    const q = this.term.trim();
+    if (q.length < 2) {
+      return;
+    }
+    this.suggestions.set([]);
+    this.error.set(null);
+    try {
+      this.whoHasResults.set(
+        await firstValueFrom(
+          this.http.get<ProductPartners[]>(`${this.api}/stock`, { params: { q } }),
+        ),
+      );
+    } catch {
+      this.error.set('Recherche impossible (limite de requêtes atteinte ou hors-ligne)');
+      this.whoHasResults.set([]);
+    }
+  }
+
+  protected inspectPartner(tenantId: string, name: string): void {
+    this.partnerTenant = tenantId;
+    this.partnerName.set(name);
+    this.partnerTerm = this.term.trim();
+    void this.loadPartnerStock();
+  }
+
+  protected async loadPartnerStock(): Promise<void> {
+    const q = this.partnerTerm.trim();
+    if (!this.partnerTenant || q.length < 2) {
+      return;
+    }
+    try {
+      this.partnerStock.set(
+        await firstValueFrom(
+          this.http.get<PartnerProduct[]>(`${this.api}/pharmacies/${this.partnerTenant}/stock`, {
+            params: { q },
+          }),
+        ),
+      );
+    } catch {
+      this.error.set('Recherche impossible (limite de requêtes atteinte ou hors-ligne)');
+      this.partnerStock.set([]);
     }
   }
 

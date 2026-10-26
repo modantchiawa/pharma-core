@@ -25,7 +25,7 @@ public class OidcTrustedIssuerRegistry implements TrustedIssuerRegistry {
     }
 
     @Override
-    public Optional<TrustedIssuer> find(String issuer) {
+    public Optional<TrustedIssuer> find(String issuer, String kid) {
         if (issuer == null || !issuers.containsKey(issuer)) {
             return Optional.empty();
         }

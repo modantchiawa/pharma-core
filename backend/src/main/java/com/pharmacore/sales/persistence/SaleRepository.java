@@ -27,4 +27,13 @@ public interface SaleRepository extends JpaRepository<SaleEntity, UUID> {
 
     @Query("select s from SaleEntity s where s.reviewRequired = true order by s.occurredAt")
     List<SaleEntity> findReviewQueue(Pageable pageable);
+
+    @Query("select s from SaleEntity s where s.certificationStatus = com.pharmacore.sales.persistence.SaleEntity.CertificationStatus.PENDING order by s.occurredAt")
+    List<SaleEntity> findPendingCertification(Pageable pageable);
+
+    @Query("select s from SaleEntity s where s.cashSessionId = :sessionId order by s.occurredAt")
+    List<SaleEntity> findByCashSession(UUID sessionId);
+
+    @Query("select s from SaleEntity s where s.customerId = :customerId order by s.occurredAt desc")
+    List<SaleEntity> findByCustomer(UUID customerId, Pageable pageable);
 }

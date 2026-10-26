@@ -12,6 +12,9 @@ public interface ProductRepository extends JpaRepository<ProductEntity, UUID> {
 
     Optional<ProductEntity> findByCip13(String cip13);
 
+    @Query("SELECT p FROM ProductEntity p WHERE p.cip13 = :code OR p.ean13 = :code ORDER BY CASE WHEN p.cip13 = :code THEN 0 ELSE 1 END")
+    List<ProductEntity> findByAnyCode(String code);
+
     List<ProductEntity> findByIdIn(Collection<UUID> ids);
 
     @Query(value = """

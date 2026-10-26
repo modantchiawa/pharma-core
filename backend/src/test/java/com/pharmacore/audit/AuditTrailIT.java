@@ -55,7 +55,7 @@ class AuditTrailIT extends IntegrationTest {
 
         long events = TenantContext.call(context, () -> tx.execute(status ->
                 jdbc.sql("SELECT count(*) FROM audit_event").query(Long.class).single()));
-        // USER_REGISTERED + TENANT_PROVISIONED; registration/activation belong to the platform chain
-        assertThat(events).isEqualTo(2);
+        // USER_REGISTERED + TENANT_PROVISIONED + LOGIN; registration/activation belong to the platform chain
+        assertThat(events).isEqualTo(3);
     }
 }

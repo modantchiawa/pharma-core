@@ -1,0 +1,29 @@
+<!-- WinSW service definition: PharmaCore hub (Spring Boot) -->
+<service>
+  <id>PharmaCoreHub</id>
+  <name>PharmaCore Hub</name>
+  <description>Serveur local de l'officine PharmaCore (caisse, stocks, synchronisation cloud)</description>
+  <executable>%BASE%\runtime\bin\java.exe</executable>
+  <arguments>-Xms256m -Xmx1g -XX:+UseZGC -XX:+ZGenerational -Dspring.profiles.active=hub -Dfile.encoding=UTF-8 -jar "%BASE%\app\pharmacore-hub.jar"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <env name="PHARMACORE_DATA_DIR" value="%BASE%\data"/>
+  <env name="PHARMACORE_CLOUD_URL" value="%PHARMACORE_CLOUD_URL%"/>
+  <env name="DB_URL" value="jdbc:postgresql://127.0.0.1:5433/pharmacore"/>
+  <env name="DB_APP_USER" value="pharmacore_app_login"/>
+  <env name="DB_MIGRATION_USER" value="pharmacore_owner"/>
+  <env name="DB_APP_PASSWORD" value="%PHARMACORE_DB_APP_PASSWORD%"/>
+  <env name="DB_MIGRATION_PASSWORD" value="%PHARMACORE_DB_OWNER_PASSWORD%"/>
+  <env name="SERVER_PORT" value="8080"/>
+  <depend>PharmaCorePostgres</depend>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>

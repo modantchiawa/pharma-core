@@ -24,8 +24,13 @@ public class StockMovementEntity {
         SALE_CANCELLATION,
         ADJUSTMENT,
         TRANSFER_OUT,
+        TRANSFER_IN,
         RESERVATION,
-        RESERVATION_RELEASE
+        RESERVATION_RELEASE,
+        /** Physical count variance applied at validation (signed). */
+        COUNT_ADJUSTMENT,
+        /** Expired lot taken off the shelf by the daily job (negative). */
+        EXPIRY_WRITE_OFF
     }
 
     @Id
@@ -86,5 +91,13 @@ public class StockMovementEntity {
 
     public int quantity() {
         return quantity;
+    }
+
+    public UUID stockId() {
+        return stockId;
+    }
+
+    public Instant occurredAt() {
+        return occurredAt;
     }
 }

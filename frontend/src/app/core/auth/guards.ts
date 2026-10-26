@@ -1,5 +1,6 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
+import { NodeInfoService } from '../api/node-info.service';
 import { AuthService } from './auth.service';
 import { PermissionService } from './permission.service';
 
@@ -21,3 +22,7 @@ export function permissionGuard(...permissions: string[]): CanActivateFn {
 
 export const platformGuard: CanActivateFn = () =>
   inject(AuthService).isPlatformOperator() || inject(Router).createUrlTree(['/login']);
+
+/** An unpaired hub shows its setup wizard before anything else. */
+export const pairedGuard: CanActivateFn = () =>
+  inject(NodeInfoService).isPaired() || inject(Router).createUrlTree(['/setup']);

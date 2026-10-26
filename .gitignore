@@ -13,3 +13,6 @@ frontend/.angular/
 .vscode/
 *.iml
 .DS_Store
+
+# Worktrees des agents
+.claude/worktrees/

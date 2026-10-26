@@ -22,6 +22,15 @@ public final class SaleRules {
 
     public static Set<SaleAnomaly> evaluate(SaleDraft draft, Map<UUID, CatalogFacts> catalog, SellerProfile seller,
                                             Instant now) {
+        return evaluate(draft, catalog, seller, now, Map.of());
+    }
+
+    /**
+     * @param coverages the policies referenced by third-party payer shares, as resolved by the
+     *                  application; a referenced policy absent from the map is invalid
+     */
+    public static Set<SaleAnomaly> evaluate(SaleDraft draft, Map<UUID, CatalogFacts> catalog, SellerProfile seller,
+                                            Instant now, Map<UUID, CoverageContext> coverages) {
         Set<SaleAnomaly> anomalies = EnumSet.noneOf(SaleAnomaly.class);
         boolean prescriptionNeeded = false;
         for (SaleDraft.Line line : draft.lines()) {
@@ -47,6 +56,10 @@ public final class SaleRules {
         if (draft.paidCents() != draft.netCents()) {
             anomalies.add(SaleAnomaly.PAYMENT_MISMATCH);
         }
+        if (draft.onCredit() && (draft.customerId() == null || !seller.can("CREDIT_SALE"))) {
+            anomalies.add(SaleAnomaly.CREDIT_NOT_ALLOWED);
+        }
+        anomalies.addAll(evaluateCoverage(draft, coverages));
         if (draft.occurredAt().isAfter(now.plus(CLOCK_TOLERANCE))) {
             anomalies.add(SaleAnomaly.FUTURE_TIMESTAMP);
         }
@@ -65,6 +78,24 @@ public final class SaleRules {
                     : new SaleDecision.Reject(anomalies);
             case OFFLINE_REPLAY -> new SaleDecision.Accept(anomalies);
         };
+    }
+
+    /**
+     * Each insured share must be exactly what its policy covers on the sale total (rate, then
+     * monthly ceiling). The cashier never types that amount: the terminal computes it from the
+     * same rule, so a mismatch means a stale policy or a tampered request.
+     */
+    static Set<SaleAnomaly> evaluateCoverage(SaleDraft draft, Map<UUID, CoverageContext> coverages) {
+        Set<SaleAnomaly> anomalies = EnumSet.noneOf(SaleAnomaly.class);
+        draft.insuredSharesByPolicy().forEach((policyId, declared) -> {
+            CoverageContext coverage = coverages.get(policyId);
+            if (coverage == null || !coverage.usable()) {
+                anomalies.add(SaleAnomaly.INSURANCE_POLICY_INVALID);
+            } else if (coverage.expectedShareCents(draft.netCents()) != declared) {
+                anomalies.add(SaleAnomaly.INSURANCE_SHARE_MISMATCH);
+            }
+        });
+        return anomalies;
     }
 
     private static boolean isBlank(String value) {

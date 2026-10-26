@@ -4,7 +4,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '
 import { FormsModule } from '@angular/forms';
 import { Subscription, firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
-import { APP_ENVIRONMENT } from '../../core/config';
+import { NodeInfoService } from '../../core/api/node-info.service';
 import { StompService } from '../../core/realtime/stomp.service';
 
 interface Conversation {
@@ -118,7 +118,7 @@ interface ChatMessage {
 })
 export class ChatPage {
   private readonly http = inject(HttpClient);
-  private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/chat`;
+  private readonly api = `${inject(NodeInfoService).networkApiUrl()}/v1/chat`;
   protected readonly stomp = inject(StompService);
   protected readonly myTenant = inject(AuthService).tenantId;
   protected readonly conversations = signal<Conversation[]>([]);

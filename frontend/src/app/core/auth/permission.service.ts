@@ -39,6 +39,12 @@ export class PermissionService {
     }
   }
 
+  /** Profile returned by the login endpoint, so no second round-trip is needed. */
+  setProfile(me: Me): void {
+    this.profileState.set(me);
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(me));
+  }
+
   clear(): void {
     localStorage.removeItem(PROFILE_KEY);
     this.profileState.set(null);

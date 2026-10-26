@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pharmacore.sales.application.SaleManagementService;
 import com.pharmacore.sales.application.SaleRecordingService;
 import com.pharmacore.sales.application.SaleSyncService;
+import com.pharmacore.sales.application.SupervisorApprovalService;
 import com.pharmacore.sales.application.TerminalHeartbeatService;
 import com.pharmacore.sales.domain.SaleAnomaly;
 import com.pharmacore.sales.domain.SaleOrigin;
@@ -97,7 +98,8 @@ class SaleController {
     @PostMapping("/api/v1/sales/{saleId}/cancellation")
     @PreAuthorize("hasAuthority('SALE_CANCEL')")
     SaleSummary cancel(@PathVariable UUID saleId, @Valid @RequestBody ReasonRequest request) {
-        return SaleSummary.of(management.cancel(saleId, request.reason()));
+        return SaleSummary.of(management.cancel(saleId, request.reason(), request.terminalId(),
+                new SupervisorApprovalService.SupervisorApproval(request.supervisorEmail(), request.supervisorPin())));
     }
 
     @GetMapping("/api/v1/sales/review-queue")
@@ -136,12 +138,14 @@ class SaleController {
 
     record SaleSummary(UUID id, UUID clientSaleId, String ticketNumber, String terminalId, SaleOrigin origin,
                        SaleEntity.Status status, Instant occurredAt, long totalNetCents, boolean reviewRequired,
-                       Set<SaleAnomaly> anomalies, Long ordonnancierNumber) {
+                       Set<SaleAnomaly> anomalies, Long ordonnancierNumber, UUID customerId,
+                       String certificationStatus, String certificationCode, String certificationQr) {
 
         static SaleSummary of(SaleEntity sale) {
             return new SaleSummary(sale.id(), sale.clientSaleId(), sale.ticketNumber(), sale.terminalId(),
                     sale.origin(), sale.status(), sale.occurredAt(), sale.totalNetCents(), sale.reviewRequired(),
-                    sale.anomalies(), sale.ordonnancierNumber());
+                    sale.anomalies(), sale.ordonnancierNumber(), sale.customerId(),
+                    sale.certificationStatus().name(), sale.certificationCode(), sale.certificationQr());
         }
     }
 
@@ -153,7 +157,8 @@ class SaleController {
                     sale.lines().stream().map(line -> new Line(line.lineNo(), line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate())).toList(),
                     sale.payments().stream().map(payment -> new Payment(payment.method().name(),
-                            payment.amountCents(), payment.thirdPartyCode())).toList(),
+                            payment.amountCents(), payment.thirdPartyCode(), payment.provider(),
+                            payment.confirmationStatus().name())).toList(),
                     sale.cancelReason());
         }
     }
@@ -162,6 +167,6 @@ class SaleController {
                 BigDecimal vatRate) {
     }
 
-    record Payment(String method, long amountCents, String thirdPartyCode) {
+    record Payment(String method, long amountCents, String thirdPartyCode, String provider, String confirmationStatus) {
     }
 }

@@ -1,0 +1,49 @@
+# Démo complète sur une machine (serveur de recette, VPS, poste d'un testeur) :
+# PostgreSQL avec les rôles de production + backend en mode démo (données de démonstration,
+# console éditeur par mot de passe). Le frontend est servi par le backend sur http://localhost:8080
+# si le dossier web/ est monté, ou déployé séparément sur Vercel (voir docs/DEMO.md).
+#
+#   cp deploy/demo/.env.example deploy/demo/.env   # puis renseigner les mots de passe
+#   docker compose -f deploy/demo/docker-compose.yml --env-file deploy/demo/.env up -d --build
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?}
+      PHARMACORE_OWNER_PASSWORD: ${DB_MIGRATION_PASSWORD:?}
+      PHARMACORE_APP_PASSWORD: ${DB_APP_PASSWORD:?}
+    volumes:
+      - ../postgres/00-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/init.sql.inc:ro
+      - demo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pharmacore"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/pharmacore
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?}
+      PHARMACORE_MODE: CLOUD
+      DEMO_ENABLED: "true"
+      DEMO_PLATFORM_PASSWORD: ${DEMO_PLATFORM_PASSWORD:?}
+      DEMO_ACCOUNT_PASSWORD: ${DEMO_ACCOUNT_PASSWORD:-Demo2026!}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:8080}
+    ports:
+      - "8080:8080"
+    volumes:
+      - demo-keys:/app/data/keys
+      - ${WEB_DIR:-./web}:/app/web:ro
+    restart: unless-stopped
+
+volumes:
+  demo-pgdata:
+  demo-keys:

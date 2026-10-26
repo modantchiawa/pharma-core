@@ -87,6 +87,22 @@ public class StockService {
                 "delta", Integer.toString(delta), "counted", Integer.toString(countedQuantity), "reason", reason));
     }
 
+    /** Price update at goods receipt (the wholesaler's invoice carries the new public price). */
+    @Transactional
+    public void updateSellingPrice(UUID productId, long sellingPriceCents) {
+        var stock = ledger.lock(List.of(productId)).get(productId);
+        Long previous = stock.sellingPriceCents();
+        if (previous != null && previous == sellingPriceCents) {
+            return;
+        }
+        stock.configure(sellingPriceCents, stock.reorderThreshold(), stock.reorderQuantity(), stock.location(),
+                clock.instant());
+        audit.record("STOCK_PRICE_UPDATED", "STOCK", stock.id(), Map.of(
+                "productId", productId.toString(),
+                "previousPriceCents", String.valueOf(previous),
+                "priceCents", Long.toString(sellingPriceCents)));
+    }
+
     @Transactional
     public void resolveShortfall(UUID productId, String reason) {
         var stock = ledger.lock(List.of(productId)).get(productId);

@@ -6,7 +6,8 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "build:demo": "node scripts/write-demo-env.mjs && ng build --configuration demo"
   },
   "private": true,
   "packageManager": "npm@11.19.1",

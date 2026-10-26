@@ -1,5 +1,6 @@
 export const environment = {
   production: true,
+  demo: false,
   appVersion: '0.1.0',
   apiUrl: '/api',
   wsUrl: '/ws',
