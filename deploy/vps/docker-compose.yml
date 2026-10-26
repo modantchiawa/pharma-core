@@ -87,7 +87,7 @@ services:
         condition: service_healthy
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_EMAIL: ${ACME_EMAIL:-noreply@localhost}
     ports:
       - "80:80"
       - "443:443"
