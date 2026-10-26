@@ -108,6 +108,7 @@ appellent le VPS en HTTPS.
 | Symptôme | Piste |
 |---|---|
 | Certificat non délivré | DNS pas encore propagé ou port 80 fermé ; `docker compose … logs web` |
+| Installation interrompue sur « dependency failed to start » | relancer la même commande d'installation (elle conserve le `.env` et reprend) ; le script affiche le journal du backend en cas d'échec |
 | `backend` reste `starting` | mots de passe de la base modifiés après la première initialisation ; journal du backend |
 | 409 « hub-managed » sur une écriture | l'officine est gérée par son hub : l'opération se fait au comptoir, pas depuis le cloud |
 | Page blanche après mise à jour | vider le cache du service worker (recharger deux fois) ; `ngsw.json` est servi sans cache |
