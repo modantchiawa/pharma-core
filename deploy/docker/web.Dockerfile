@@ -21,4 +21,7 @@ RUN if [ "$BUILD_CONFIG" = "demo" ]; then \
 
 FROM caddy:2-alpine
 COPY deploy/vps/Caddyfile /etc/caddy/Caddyfile
+COPY --chmod=755 deploy/docker/caddy-entrypoint.sh /usr/local/bin/caddy-entrypoint.sh
 COPY --from=build /build/dist/frontend/browser /srv/web
+ENTRYPOINT ["/usr/local/bin/caddy-entrypoint.sh"]
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

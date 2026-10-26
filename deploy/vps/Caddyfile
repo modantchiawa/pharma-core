@@ -1,7 +1,8 @@
 # Point d'entrée unique du serveur : HTTPS automatique (Let's Encrypt) quand SITE_ADDRESS est un
 # nom de domaine, HTTP simple quand c'est ":80" (accès par adresse IP, recette interne).
 {
-	email {$ACME_EMAIL:noreply@localhost}
+	# « email <adresse> » quand ACME_EMAIL est valide, rien sinon (deploy/docker/caddy-entrypoint.sh)
+	{$ACME_EMAIL_DIRECTIVE}
 	servers {
 		trusted_proxies static private_ranges
 	}
