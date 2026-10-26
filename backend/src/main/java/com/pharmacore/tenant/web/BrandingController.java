@@ -16,6 +16,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -53,9 +54,16 @@ class BrandingController {
         return branding.replaceLogo(file.getBytes());
     }
 
+    @DeleteMapping("/api/v1/pharmacy/branding/logo")
+    @PreAuthorize("hasAuthority('CONFIG_BRANDING_MANAGE')")
+    BrandingView removeLogo() {
+        return branding.removeLogo();
+    }
+
     @GetMapping("/api/v1/pharmacy/branding/logo")
     ResponseEntity<byte[]> logo(@RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch) {
-        return serve(branding.logo(), ifNoneMatch);
+        // Revalidated on every display (304 through the ETag): a replaced logo shows at once
+        return serve(branding.logo(), ifNoneMatch, CacheControl.noCache().cachePrivate());
     }
 
     @GetMapping("/api/public/pharmacies/{slug}/branding")
@@ -68,15 +76,15 @@ class BrandingController {
     @GetMapping("/api/public/pharmacies/{slug}/logo")
     ResponseEntity<byte[]> publicLogo(@PathVariable String slug,
                                       @RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch) {
-        return serve(branding.publicLogo(slug), ifNoneMatch);
+        // Cached one hour: the application adds ?v=<branding version> after each change
+        return serve(branding.publicLogo(slug), ifNoneMatch, CacheControl.maxAge(Duration.ofHours(1)).cachePublic());
     }
 
-    private static ResponseEntity<byte[]> serve(Optional<Logo> logo, String ifNoneMatch) {
+    private static ResponseEntity<byte[]> serve(Optional<Logo> logo, String ifNoneMatch, CacheControl cache) {
         if (logo.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         String etag = "\"" + logo.get().sha256() + "\"";
-        var cache = CacheControl.maxAge(Duration.ofHours(1)).cachePublic();
         if (etag.equals(ifNoneMatch)) {
             return ResponseEntity.status(304).eTag(etag).cacheControl(cache).build();
         }

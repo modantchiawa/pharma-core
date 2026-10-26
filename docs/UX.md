@@ -34,6 +34,9 @@
 | Couleurs | Marque de la pharmacie pour les actions principales ; sémantique fixe : vert = en ligne / excédent, ambre = hors-ligne / avertissement, rouge = blocage / manquant |
 | Densité | `data-density="compact|comfortable|large"` sur `<html>` : `--density` multiplie hauteurs de contrôles (`--control-h`) et espacements |
 | Mode sombre | `data-theme="dark"` : surfaces et jetons redéfinis (y compris la palette Tailwind utilisée par d'anciens écrans), conservé par poste ; `data-contrast="high"` renforce bordures, textes et focus |
+| Retours d'action | Notifications brèves (`ToastService`, `<app-toaster>`) en bas au centre : confirmation 3,5 s, erreur 7 s, quatre au plus ; jamais sur le champ de scan ni sur les boutons de validation |
+| Logo | Rubrique en tête de « Identité visuelle » : glisser-déposer ou choix de fichier, PNG/JPEG/WebP/SVG, image réduite à 512 px dans le navigateur (SVG converti en PNG, refusé par le serveur), aperçus barre latérale / connexion / ticket noir et blanc, suppression ; logo mis en cache pour l'affichage immédiat et hors ligne, et repris comme icône d'onglet |
+| Mise en route | Carte « Mise en route de la pharmacie » sur le pilotage pour le titulaire : logo, couleurs, annuaire public ; chaque étape se coche seule, la carte disparaît une fois tout fait ou masquée |
 | Graphiques | Une série = couleur de marque, sans légende ; axe aux graduations rondes, colonnes à extrémité arrondie, infobulle au survol et au focus clavier, vue tableau équivalente |
 | Langue | `LOCALE_ID` `fr` : dates (« mardi 13 octobre ») et nombres (« 28,5 % ») en français ; les montants passent par `MoneyPipe` |
 | Composants | Angular 22 standalone, signals, contrôle de flux natif ; aucun framework de composants lourd |

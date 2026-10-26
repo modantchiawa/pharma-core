@@ -2,9 +2,12 @@ package com.pharmacore.tenancy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -16,6 +19,8 @@ import com.jayway.jsonpath.JsonPath;
 import com.pharmacore.support.IntegrationTest;
 import com.pharmacore.support.TestJwtIssuer;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -75,6 +80,37 @@ class TenantIsolationIT extends IntegrationTest {
                 .andExpect(jsonPath("$.branding.displayName").value("Pharmacie Epsilon"))
                 .andExpect(jsonPath("$.branding.primaryColor").value("#1D4ED8"));
         mvc.perform(get("/api/public/pharmacies/unknown-" + shortId() + "/branding"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void logoIsUploadedServedPubliclyAndRemoved() throws Exception {
+        var theta = onboardPharmacy("Theta");
+        byte[] png = java.util.Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+        mvc.perform(multipart(HttpMethod.PUT, "/api/v1/pharmacy/branding/logo")
+                        .file(new MockMultipartFile("file", "logo.png", "image/png", png))
+                        .header("Authorization", "Bearer " + theta.ownerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasLogo").value(true));
+
+        var served = mvc.perform(get("/api/public/pharmacies/" + theta.slug() + "/logo"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andReturn().getResponse();
+        assertThat(served.getContentAsByteArray()).isEqualTo(png);
+
+        // Declared type is ignored: the bytes decide, and SVG (script carrier) is refused
+        mvc.perform(multipart(HttpMethod.PUT, "/api/v1/pharmacy/branding/logo")
+                        .file(new MockMultipartFile("file", "logo.png", "image/png",
+                                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                        .header("Authorization", "Bearer " + theta.ownerToken()))
+                .andExpect(status().is4xxClientError());
+
+        call(delete("/api/v1/pharmacy/branding/logo"), theta.ownerToken(), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasLogo").value(false));
+        mvc.perform(get("/api/public/pharmacies/" + theta.slug() + "/logo"))
                 .andExpect(status().isNotFound());
     }
 

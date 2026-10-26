@@ -7,7 +7,9 @@ import { HasPermissionDirective } from '../../core/auth/has-permission.directive
 import { BrandingService } from '../../core/branding/branding.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { contrastRatio, isHexColor, readableTextOn } from '../../core/util/color';
+import { ToastService } from '../../core/ui/toast.service';
 import { Icon } from '../../shared/ui/icon';
+import { LogoFileError, prepareLogo } from '../../shared/ui/logo-file';
 import { CartLine } from '../pos/cart.store';
 import { Receipt, ReceiptData } from '../pos/receipt';
 
@@ -44,6 +46,129 @@ const SAMPLE_LINE: CartLine = {
       </header>
 
       <div class="max-w-6xl space-y-8">
+        <section class="settings-row" id="logo">
+          <div>
+            <h2 class="settings-title">Logo</h2>
+            <p class="settings-text">
+              Affiché dans la barre latérale, sur l'écran de connexion, l'onglet du navigateur,
+              l'annuaire public et en tête des tickets.
+            </p>
+          </div>
+          <div class="card overflow-hidden">
+            <div class="card-body grid gap-5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center">
+              <div class="logo-stage" [class.is-empty]="!service.hasLogo()">
+                @if (service.logoUrl(); as logo) {
+                  <img [src]="logo" alt="Logo actuel de la pharmacie" />
+                } @else {
+                  <span class="logo-initials">{{ initials() }}</span>
+                }
+              </div>
+              <div
+                class="dropzone"
+                [class.is-dragging]="dragging()"
+                [class.is-busy]="logoBusy()"
+                (dragover)="onDragOver($event)"
+                (dragleave)="dragging.set(false)"
+                (drop)="onDrop($event)"
+              >
+                <span class="dropzone-icon">
+                  <app-icon
+                    [name]="logoBusy() ? 'refresh' : 'import'"
+                    [size]="20"
+                    [class.spin]="logoBusy()"
+                  />
+                </span>
+                <span class="min-w-0 text-sm">
+                  <span class="block font-medium">
+                    @if (logoBusy()) {
+                      Préparation et envoi du logo…
+                    } @else {
+                      Glissez votre logo ici ou
+                      <span class="text-brand">choisissez un fichier</span>
+                    }
+                  </span>
+                  <span class="block text-xs text-subtle">
+                    PNG, JPEG, WebP ou SVG · les grandes images sont réduites automatiquement
+                  </span>
+                </span>
+                <input
+                  #logoInput
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                  aria-label="Choisir le logo de la pharmacie"
+                  [disabled]="logoBusy()"
+                  (change)="onFilePicked($event)"
+                />
+              </div>
+            </div>
+            <div class="grid gap-3 border-t border-line bg-surface-2 p-4 sm:grid-cols-3">
+              <figure class="preview">
+                <figcaption>Barre latérale</figcaption>
+                <div
+                  class="flex items-center gap-2.5 rounded-lg border border-line bg-surface p-2.5"
+                >
+                  <span class="preview-mark">
+                    @if (service.logoUrl(); as logo) {
+                      <img [src]="logo" alt="" class="h-full w-full object-contain" />
+                    } @else {
+                      {{ initials() }}
+                    }
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-semibold">{{
+                      draft().displayName
+                    }}</span>
+                    <span class="block text-xs text-muted">PharmaCore</span>
+                  </span>
+                </div>
+              </figure>
+              <figure class="preview">
+                <figcaption>Écran de connexion</figcaption>
+                <div class="preview-hero">
+                  <span class="preview-mark !bg-white/95">
+                    @if (service.logoUrl(); as logo) {
+                      <img [src]="logo" alt="" class="h-full w-full object-contain" />
+                    } @else {
+                      <span class="text-brand">{{ initials() }}</span>
+                    }
+                  </span>
+                  <span class="truncate text-sm font-semibold">{{ draft().displayName }}</span>
+                </div>
+              </figure>
+              <figure class="preview">
+                <figcaption>Ticket (impression noir et blanc)</figcaption>
+                <div
+                  class="flex h-[3.75rem] items-center justify-center rounded-lg border border-line bg-white"
+                >
+                  @if (service.logoUrl(); as logo) {
+                    <img
+                      [src]="logo"
+                      alt=""
+                      class="max-h-11 max-w-[70%] object-contain grayscale"
+                    />
+                  } @else {
+                    <span class="text-xs text-neutral-500">Sans logo : le nom seul</span>
+                  }
+                </div>
+              </figure>
+            </div>
+            @if (service.hasLogo()) {
+              <div class="card-footer">
+                <span class="text-xs text-muted">Un nouveau fichier remplace le logo actuel.</span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm ml-auto text-[var(--danger-strong)]"
+                  [disabled]="logoBusy()"
+                  (click)="removeLogo()"
+                >
+                  <app-icon name="trash" [size]="14" />
+                  Retirer le logo
+                </button>
+              </div>
+            }
+          </div>
+        </section>
+
         <form class="space-y-8" (ngSubmit)="save()">
           <section class="settings-row">
             <div>
@@ -191,9 +316,7 @@ const SAMPLE_LINE: CartLine = {
           <section class="settings-row">
             <div>
               <h2 class="settings-title">Ticket de caisse</h2>
-              <p class="settings-text">
-                En-tête et pied de page imprimés sur chaque ticket, avec le logo.
-              </p>
+              <p class="settings-text">En-tête et pied de page imprimés sur chaque ticket.</p>
             </div>
             <div class="card grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_auto]">
               <div class="card-body space-y-4">
@@ -219,32 +342,17 @@ const SAMPLE_LINE: CartLine = {
                     (ngModelChange)="patch({ receiptFooter: $event })"
                   ></textarea>
                 </label>
-                <div>
-                  <span class="label">Logo</span>
-                  <div class="dropzone">
-                    @if (service.logoUrl(); as logo) {
-                      <img
-                        [src]="logo"
-                        alt=""
-                        class="h-12 w-12 shrink-0 rounded-lg bg-white object-contain p-1 ring-1 ring-line"
-                      />
-                    } @else {
-                      <span class="dropzone-icon"><app-icon name="image" [size]="20" /></span>
-                    }
-                    <span class="min-w-0 text-sm">
-                      <span class="block font-medium">
-                        <span class="text-brand">Choisir un fichier</span> ou le déposer ici
-                      </span>
-                      <span class="block text-xs text-subtle">PNG, JPEG ou WebP, 512 Ko max</span>
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      aria-label="Logo (PNG, JPEG ou WebP, 512 Ko max)"
-                      (change)="upload($event)"
-                    />
-                  </div>
-                </div>
+                <p class="flex items-center gap-2 text-xs text-muted">
+                  <app-icon name="image" [size]="14" />
+                  Le logo choisi
+                  <a
+                    href="#logo"
+                    class="font-medium text-brand underline"
+                    (click)="scrollToLogo($event)"
+                    >en haut de la page</a
+                  >
+                  s'imprime en tête des tickets 80 mm et des factures A4.
+                </p>
               </div>
               <div
                 class="flex flex-col items-center gap-3 border-t border-line bg-surface-3 p-5 lg:border-t-0 lg:border-l"
@@ -259,18 +367,9 @@ const SAMPLE_LINE: CartLine = {
           </section>
 
           <div class="save-bar">
-            <p
-              class="min-w-0 items-center gap-2 text-sm text-muted sm:flex"
-              [class.flex]="status()"
-              [class.hidden]="!status()"
-              role="status"
-            >
+            <p class="hidden min-w-0 items-center gap-2 text-sm text-muted sm:flex">
               <app-icon name="info" [size]="16" />
-              @if (status(); as text) {
-                {{ text }}
-              } @else {
-                Aperçu en direct : les modifications s'appliquent à l'enregistrement.
-              }
+              Aperçu en direct : les modifications s'appliquent à l'enregistrement.
             </p>
             <div class="flex flex-1 justify-end gap-2 sm:flex-none">
               <button type="button" class="btn btn-ghost" (click)="reset()">
@@ -397,9 +496,6 @@ const SAMPLE_LINE: CartLine = {
               </div>
             </div>
             <div class="card-footer">
-              @if (sharingStatus(); as text) {
-                <span class="min-w-0 text-sm text-muted" role="status">{{ text }}</span>
-              }
               <button
                 type="submit"
                 class="btn btn-primary ml-auto"
@@ -482,6 +578,7 @@ const SAMPLE_LINE: CartLine = {
         background-color 120ms ease;
     }
     .dropzone:hover,
+    .dropzone.is-dragging,
     .dropzone:has(input:focus-visible) {
       border-color: var(--brand-primary);
       background: var(--brand-softer);
@@ -493,6 +590,100 @@ const SAMPLE_LINE: CartLine = {
       height: 100%;
       opacity: 0;
       cursor: pointer;
+    }
+    .dropzone.is-dragging {
+      border-style: solid;
+      transform: scale(1.01);
+    }
+    .dropzone.is-busy {
+      opacity: 0.75;
+      pointer-events: none;
+    }
+    .dropzone {
+      min-height: 7rem;
+      transition:
+        border-color 120ms ease,
+        background-color 120ms ease,
+        transform 120ms ease;
+    }
+    .spin {
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    .logo-stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 9rem;
+      height: 9rem;
+      margin-inline: auto;
+      padding: 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      /* Checkerboard: shows whether the logo has a transparent background */
+      background: repeating-conic-gradient(var(--surface-3) 0% 25%, var(--surface) 0% 50%) 50% /
+        16px 16px;
+    }
+    .logo-stage img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .logo-stage.is-empty {
+      background: var(--brand-primary);
+      border-color: transparent;
+    }
+    .logo-initials {
+      font-size: 2.5rem;
+      font-weight: 750;
+      letter-spacing: -0.03em;
+      color: var(--brand-on-primary);
+    }
+    .preview {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+    .preview figcaption {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-subtle);
+    }
+    .preview-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.25rem;
+      height: 2.25rem;
+      flex-shrink: 0;
+      overflow: hidden;
+      padding: 0.2rem;
+      border-radius: 0.6rem;
+      background: var(--brand-primary);
+      color: var(--brand-on-primary);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .preview-hero {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      height: 3.75rem;
+      padding: 0 0.75rem;
+      border-radius: 0.5rem;
+      color: var(--brand-on-primary);
+      background: linear-gradient(
+        150deg,
+        var(--brand-primary),
+        color-mix(in oklab, var(--brand-primary) 50%, black)
+      );
     }
     .dropzone-icon {
       display: inline-flex;
@@ -587,9 +778,11 @@ export class BrandingSettingsPage {
     openingHours: null,
     whatsapp: null,
   });
-  protected readonly sharingStatus = signal<string | null>(null);
   protected readonly draft = signal<Branding>({ ...this.service.branding() });
-  protected readonly status = signal<string | null>(null);
+  private readonly toasts = inject(ToastService);
+  protected readonly logoBusy = signal(false);
+  protected readonly dragging = signal(false);
+  protected readonly initials = computed(() => initialsOf(this.draft().displayName));
   protected readonly colors = [
     { key: 'primaryColor', label: 'Principale' },
     { key: 'secondaryColor', label: 'Secondaire' },
@@ -629,7 +822,7 @@ export class BrandingSettingsPage {
 
   protected locate(): void {
     if (!('geolocation' in navigator)) {
-      this.sharingStatus.set('Géolocalisation indisponible sur ce poste');
+      this.toasts.error('Géolocalisation indisponible sur ce poste');
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -638,7 +831,7 @@ export class BrandingSettingsPage {
           latitude: Number(position.coords.latitude.toFixed(6)),
           longitude: Number(position.coords.longitude.toFixed(6)),
         }),
-      () => this.sharingStatus.set('Position refusée ou indisponible'),
+      () => this.toasts.error('Position refusée ou indisponible'),
       { timeout: 10_000 },
     );
   }
@@ -649,13 +842,13 @@ export class BrandingSettingsPage {
         this.http.put<PublicSharing>(this.sharingApi, this.sharing()),
       );
       this.sharing.set(saved);
-      this.sharingStatus.set(
+      this.toasts.success(
         saved.publicListing
           ? 'Annuaire public enregistré : la pharmacie est visible des patients'
           : 'Annuaire public enregistré : la pharmacie reste privée',
       );
     } catch (error) {
-      this.sharingStatus.set(
+      this.toasts.error(
         (error as { error?: { detail?: string } }).error?.detail ??
           'Enregistrement impossible : vérifiez les champs',
       );
@@ -687,26 +880,79 @@ export class BrandingSettingsPage {
   protected async save(): Promise<void> {
     try {
       await this.service.save(this.draft());
-      this.status.set('Identité enregistrée');
+      this.toasts.success('Identité enregistrée');
     } catch {
-      this.status.set('Enregistrement impossible : vérifiez les champs');
+      this.toasts.error('Enregistrement impossible : vérifiez les champs');
     }
   }
 
-  protected async upload(event: Event): Promise<void> {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file) {
-      return;
-    }
-    if (file.size > 512 * 1024) {
-      this.status.set('Logo trop volumineux (512 Ko max)');
-      return;
-    }
-    try {
-      await this.service.uploadLogo(file);
-      this.status.set('Logo mis à jour');
-    } catch {
-      this.status.set('Format de logo refusé');
+  protected onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    this.dragging.set(true);
+  }
+
+  protected onDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.dragging.set(false);
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      void this.uploadLogo(file);
     }
   }
+
+  protected onFilePicked(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) {
+      void this.uploadLogo(file);
+    }
+  }
+
+  protected scrollToLogo(event: Event): void {
+    event.preventDefault();
+    document.getElementById('logo')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  protected async removeLogo(): Promise<void> {
+    this.logoBusy.set(true);
+    try {
+      await this.service.removeLogo();
+      this.toasts.success('Logo retiré : les initiales le remplacent');
+    } catch {
+      this.toasts.error('Le logo n’a pas pu être retiré');
+    } finally {
+      this.logoBusy.set(false);
+    }
+  }
+
+  private async uploadLogo(file: File): Promise<void> {
+    if (this.logoBusy()) {
+      return;
+    }
+    this.logoBusy.set(true);
+    try {
+      await this.service.uploadLogo(await prepareLogo(file));
+      this.toasts.success('Logo mis à jour');
+    } catch (error) {
+      this.toasts.error(
+        error instanceof LogoFileError
+          ? error.message
+          : ((error as { error?: { detail?: string } }).error?.detail ??
+              'Envoi du logo impossible : vérifiez la connexion'),
+      );
+    } finally {
+      this.logoBusy.set(false);
+    }
+  }
+}
+
+function initialsOf(name: string): string {
+  const words = name
+    .replace(/^(pharmacie|officine)\s+(du|de la|de l'|des|de)?\s*/i, '')
+    .split(/\s+/)
+    .filter(Boolean);
+  return (
+    words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? 'P').slice(0, 2)
+  ).toUpperCase();
 }

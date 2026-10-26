@@ -29,6 +29,7 @@ import { TerminalService } from '../../core/offline/terminal.service';
 import { uuidv7 } from '../../core/util/uuid';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { ToastService } from '../../core/ui/toast.service';
 import { CartStore, discountPercent } from './cart.store';
 import { PaperFormat, TerminalTicketRequest } from '../../core/api/models';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
@@ -686,6 +687,8 @@ export class PosPage {
   private readonly http = inject(HttpClient);
   private readonly env = inject(APP_ENVIRONMENT);
   private readonly currency = inject(CurrencyService);
+  private readonly toasts = inject(ToastService);
+  private readonly money = new MoneyPipe();
 
   protected term = '';
   protected amount = '';
@@ -1045,6 +1048,11 @@ export class PosPage {
       };
       this.receipt.set(data);
       this.cart.clear();
+      this.toasts.success(
+        data.changeDueCents > 0
+          ? `Vente ${ticketNumber} enregistrée · rendu ${this.money.transform(data.changeDueCents)}`
+          : `Vente ${ticketNumber} enregistrée`,
+      );
       if (this.printing.settings().autoPrint) {
         void this.printReceipt(data, false);
       }

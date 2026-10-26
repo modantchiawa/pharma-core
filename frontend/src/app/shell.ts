@@ -204,18 +204,29 @@ interface PaletteEntry {
         aria-label="Navigation principale"
       >
         <div class="flex h-16 shrink-0 items-center gap-3 px-4">
-          @if (branding.logoUrl(); as logo) {
-            <img
-              [src]="logo"
-              alt=""
-              class="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-0.5 ring-1 ring-line"
-            />
-          } @else {
-            <span
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-sm font-bold text-on-brand shadow-sm"
-              >{{ initials(branding.branding().displayName) }}</span
-            >
-          }
+          <a
+            [routerLink]="canEditBranding() ? '/admin/branding' : null"
+            fragment="logo"
+            class="brand-mark group"
+            [class.pointer-events-none]="!canEditBranding()"
+            [attr.title]="
+              canEditBranding()
+                ? branding.hasLogo()
+                  ? 'Changer le logo'
+                  : 'Ajouter votre logo'
+                : null
+            "
+            [attr.aria-label]="canEditBranding() ? 'Logo de la pharmacie : modifier' : null"
+          >
+            @if (branding.logoUrl(); as logo) {
+              <img [src]="logo" alt="" class="h-full w-full object-contain" />
+            } @else {
+              <span class="text-sm font-bold">{{ initials(branding.branding().displayName) }}</span>
+            }
+            @if (canEditBranding()) {
+              <span class="brand-mark-edit"><app-icon name="pencil" [size]="12" /></span>
+            }
+          </a>
           @if (expanded()) {
             <div class="min-w-0 leading-tight">
               <p class="truncate text-sm font-semibold">{{ branding.branding().displayName }}</p>
@@ -315,8 +326,10 @@ interface PaletteEntry {
 
       <!-- Main column -->
       <div class="flex min-w-0 flex-1 flex-col">
+        <!-- z-30: the blur makes the header its own stacking context; without a z-index the
+             page content (cards, sticky table headers) painted over its menus -->
         <header
-          class="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/70 lg:px-6 print:hidden"
+          class="relative z-30 flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/70 lg:px-6 print:hidden"
         >
           <button
             type="button"
@@ -450,7 +463,7 @@ interface PaletteEntry {
                 />
               </button>
               @if (menu() === 'user') {
-                <div class="popover right-0 w-60 animate-in p-1.5">
+                <div class="popover right-0 w-64 animate-in p-1.5">
                   <div class="px-3 py-2">
                     <p class="truncate text-sm font-semibold">{{ userName() }}</p>
                     <p class="truncate text-xs text-muted">{{ roleLabel() }}</p>
@@ -461,9 +474,19 @@ interface PaletteEntry {
                       <app-icon name="lock" [size]="16" /> Mot de passe et PIN
                     </a>
                   }
+                  @if (canEditBranding()) {
+                    <a
+                      routerLink="/admin/branding"
+                      fragment="logo"
+                      class="menu-item"
+                      (click)="menu.set(null)"
+                    >
+                      <app-icon name="image" [size]="16" /> Logo et couleurs
+                    </a>
+                  }
                   <button type="button" class="menu-item w-full" (click)="openPalette()">
-                    <app-icon name="command" [size]="16" /> Palette de commandes
-                    <span class="kbd ml-auto">{{ isMac ? '⌘' : 'Ctrl' }} K</span>
+                    <app-icon name="command" [size]="16" /> Recherche rapide
+                    <span class="kbd ml-auto whitespace-nowrap">{{ isMac ? '⌘' : 'Ctrl' }} K</span>
                   </button>
                   <div class="divider my-1"></div>
                   <button
@@ -572,6 +595,48 @@ interface PaletteEntry {
       color: var(--brand-text);
       font-weight: 600;
     }
+    .brand-mark {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      flex-shrink: 0;
+      padding: 0.15rem;
+      border-radius: 0.8rem;
+      background: var(--brand-primary);
+      color: var(--brand-on-primary);
+      box-shadow: var(--shadow-sm);
+    }
+    .brand-mark:has(img) {
+      background: #fff;
+      box-shadow: inset 0 0 0 1px var(--border);
+    }
+    .brand-mark-edit {
+      position: absolute;
+      right: -0.3rem;
+      bottom: -0.3rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.2rem;
+      height: 1.2rem;
+      border: 2px solid var(--surface);
+      border-radius: 999px;
+      background: var(--text);
+      color: var(--surface);
+      opacity: 0;
+      transform: scale(0.8);
+      transition:
+        opacity 120ms ease,
+        transform 120ms ease;
+    }
+    .brand-mark:hover .brand-mark-edit,
+    .brand-mark:focus-visible .brand-mark-edit {
+      opacity: 1;
+      transform: scale(1);
+    }
     .popover {
       position: absolute;
       top: calc(100% + 0.5rem);
@@ -638,6 +703,9 @@ export class Shell {
   private readonly userMenu = viewChild<ElementRef<HTMLElement>>('userMenu');
 
   protected readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  protected readonly canEditBranding = computed(() =>
+    this.permissions.hasAny('CONFIG_BRANDING_MANAGE'),
+  );
   protected readonly collapsed = signal(readCollapsed());
   protected readonly mobileOpen = signal(false);
   protected readonly expanded = computed(() => !this.collapsed() || this.mobileOpen());

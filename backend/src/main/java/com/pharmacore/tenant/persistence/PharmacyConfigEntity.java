@@ -135,6 +135,12 @@ public class PharmacyConfigEntity {
         this.updatedAt = now;
     }
 
+    /** Back to the initials badge; the asset row stays for the audit trail. */
+    public void clearLogo(Instant now) {
+        this.logoAssetId = null;
+        this.updatedAt = now;
+    }
+
     /** What the pharmacy chooses to expose in the public directory. */
     public void updatePublicSharing(PublicSharing sharing, Instant now) {
         this.publicListing = sharing.publicListing();

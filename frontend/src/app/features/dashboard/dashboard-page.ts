@@ -19,6 +19,7 @@ import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { columnPath, niceCeiling } from '../../shared/ui/chart';
 import { Icon } from '../../shared/ui/icon';
+import { SetupChecklist } from './setup-checklist';
 
 interface Bar {
   date: string;
@@ -55,7 +56,7 @@ const METHOD_LABELS: Record<string, string> = {
 /** Steering dashboard: sales, margin, payment mix, best sellers, stock exposure, receivables. */
 @Component({
   selector: 'app-dashboard-page',
-  imports: [FormsModule, MoneyPipe, DatePipe, DecimalPipe, Icon],
+  imports: [FormsModule, MoneyPipe, DatePipe, DecimalPipe, Icon, SetupChecklist],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in space-y-5">
@@ -101,6 +102,8 @@ const METHOD_LABELS: Record<string, string> = {
           </div>
         </form>
       </header>
+
+      <app-setup-checklist />
 
       @if (data(); as d) {
         <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicateurs">
