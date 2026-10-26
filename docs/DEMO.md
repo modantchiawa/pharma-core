@@ -135,7 +135,7 @@ Le script `frontend/scripts/write-demo-env.mjs` génère `environment.demo.ts` a
 | Caissier | `lacouroussou` | `caisse@lacouroussou.demo` | `Demo2026!` | `1234` |
 | Console éditeur | — | bouton « Console éditeur » | `DEMO_PLATFORM_PASSWORD` | — |
 
-L'écran de connexion affiche ces comptes dans un encart « Environnement de démonstration » ; un
+L'écran de connexion affiche ces comptes dans un encart « Comptes de démonstration » ; un
 clic pré-remplit le formulaire. Le mot de passe des comptes se change avec `DEMO_ACCOUNT_PASSWORD`,
 le PIN avec `DEMO_PIN`.
 

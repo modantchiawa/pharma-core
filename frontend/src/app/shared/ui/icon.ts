@@ -54,7 +54,10 @@ export class Icon {
       for (const [key, value] of Object.entries(attributes)) {
         this.renderer.setAttribute(svg, key, value);
       }
-      const children = (node[2] ?? []) as readonly (readonly [string, Record<string, string | number>])[];
+      const children = (node[2] ?? []) as readonly (readonly [
+        string,
+        Record<string, string | number>,
+      ])[];
       for (const [tag, attrs] of children) {
         const child = this.renderer.createElement(tag, SVG_NS) as SVGElement;
         for (const [key, value] of Object.entries(attrs)) {

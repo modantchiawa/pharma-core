@@ -38,9 +38,25 @@ const PHARMACY_NAV: NavGroup[] = [
   {
     label: 'Comptoir',
     items: [
-      { path: '/pos', label: 'Vente', icon: 'cart', permissions: ['SALE_CREATE'], hint: 'F2 pour scanner' },
-      { path: '/cash', label: 'Caisse', icon: 'cash', permissions: ['CASH_SESSION_MANAGE', 'REPORT_VIEW'] },
-      { path: '/cash/payments', label: 'Paiements', icon: 'mobileMoney', permissions: ['PAYMENT_RECONCILE'] },
+      {
+        path: '/pos',
+        label: 'Vente',
+        icon: 'cart',
+        permissions: ['SALE_CREATE'],
+        hint: 'F2 pour scanner',
+      },
+      {
+        path: '/cash',
+        label: 'Caisse',
+        icon: 'cash',
+        permissions: ['CASH_SESSION_MANAGE', 'REPORT_VIEW'],
+      },
+      {
+        path: '/cash/payments',
+        label: 'Paiements',
+        icon: 'mobileMoney',
+        permissions: ['PAYMENT_RECONCILE'],
+      },
       { path: '/customers', label: 'Clients', icon: 'customers', permissions: ['CUSTOMER_MANAGE'] },
       {
         path: '/prescriptions',
@@ -48,7 +64,12 @@ const PHARMACY_NAV: NavGroup[] = [
         icon: 'prescription',
         permissions: ['PRESCRIPTION_DISPENSE', 'PRESCRIPTION_REGISTER_VIEW'],
       },
-      { path: '/insurance', label: 'Tiers payant', icon: 'insurance', permissions: ['INSURANCE_VIEW', 'INSURANCE_MANAGE'] },
+      {
+        path: '/insurance',
+        label: 'Tiers payant',
+        icon: 'insurance',
+        permissions: ['INSURANCE_VIEW', 'INSURANCE_MANAGE'],
+      },
     ],
   },
   {
@@ -61,14 +82,29 @@ const PHARMACY_NAV: NavGroup[] = [
         icon: 'counts',
         permissions: ['STOCK_COUNT', 'STOCK_COUNT_VALIDATE'],
       },
-      { path: '/procurement', label: 'Commandes', icon: 'procurement', permissions: ['PROCUREMENT_VIEW'] },
+      {
+        path: '/procurement',
+        label: 'Commandes',
+        icon: 'procurement',
+        permissions: ['PROCUREMENT_VIEW'],
+      },
     ],
   },
   {
     label: 'Gestion',
     items: [
-      { path: '/dashboard', label: 'Pilotage', icon: 'dashboard', permissions: ['DASHBOARD_VIEW', 'REPORT_VIEW'] },
-      { path: '/accounting', label: 'Comptabilité', icon: 'accounting', permissions: ['ACCOUNTING_VIEW'] },
+      {
+        path: '/dashboard',
+        label: 'Pilotage',
+        icon: 'dashboard',
+        permissions: ['DASHBOARD_VIEW', 'REPORT_VIEW'],
+      },
+      {
+        path: '/accounting',
+        label: 'Comptabilité',
+        icon: 'accounting',
+        permissions: ['ACCOUNTING_VIEW'],
+      },
     ],
   },
   {
@@ -78,7 +114,11 @@ const PHARMACY_NAV: NavGroup[] = [
         path: '/network',
         label: 'Pharmacies partenaires',
         icon: 'network',
-        permissions: ['NETWORK_STOCK_QUERY', 'NETWORK_TRANSFER_REQUEST', 'NETWORK_TRANSFER_RESPOND'],
+        permissions: [
+          'NETWORK_STOCK_QUERY',
+          'NETWORK_TRANSFER_REQUEST',
+          'NETWORK_TRANSFER_RESPOND',
+        ],
       },
       { path: '/guards', label: 'Gardes', icon: 'guards', permissions: ['GUARD_VIEW'] },
       { path: '/chat', label: 'Messagerie', icon: 'chat', permissions: ['NETWORK_CHAT'] },
@@ -87,10 +127,30 @@ const PHARMACY_NAV: NavGroup[] = [
   {
     label: 'Administration',
     items: [
-      { path: '/admin/branding', label: 'Identité visuelle', icon: 'branding', permissions: ['CONFIG_BRANDING_MANAGE'] },
-      { path: '/admin/roles', label: 'Utilisateurs et droits', icon: 'roles', permissions: ['ROLE_MANAGE'] },
-      { path: '/admin/import', label: 'Import de données', icon: 'import', permissions: ['DATA_IMPORT'] },
-      { path: '/admin/printers', label: 'Imprimantes', icon: 'printer', permissions: ['PRINTER_MANAGE'] },
+      {
+        path: '/admin/branding',
+        label: 'Identité visuelle',
+        icon: 'branding',
+        permissions: ['CONFIG_BRANDING_MANAGE'],
+      },
+      {
+        path: '/admin/roles',
+        label: 'Utilisateurs et droits',
+        icon: 'roles',
+        permissions: ['ROLE_MANAGE'],
+      },
+      {
+        path: '/admin/import',
+        label: 'Import de données',
+        icon: 'import',
+        permissions: ['DATA_IMPORT'],
+      },
+      {
+        path: '/admin/printers',
+        label: 'Imprimantes',
+        icon: 'printer',
+        permissions: ['PRINTER_MANAGE'],
+      },
       { path: '/admin/hub', label: 'Serveur local', icon: 'server', permissions: ['HUB_ADMIN'] },
     ],
   },
@@ -145,7 +205,11 @@ interface PaletteEntry {
       >
         <div class="flex h-16 shrink-0 items-center gap-3 px-4">
           @if (branding.logoUrl(); as logo) {
-            <img [src]="logo" alt="" class="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-0.5 ring-1 ring-line" />
+            <img
+              [src]="logo"
+              alt=""
+              class="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-0.5 ring-1 ring-line"
+            />
           } @else {
             <span
               class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-sm font-bold text-on-brand shadow-sm"
@@ -180,7 +244,9 @@ interface PaletteEntry {
           @for (group of nav(); track group.label) {
             <div class="mt-4 first:mt-2">
               @if (expanded()) {
-                <p class="px-3 pb-1.5 text-[0.7rem] font-semibold uppercase tracking-wider text-subtle">
+                <p
+                  class="px-3 pb-1.5 text-[0.7rem] font-semibold uppercase tracking-wider text-subtle"
+                >
                   {{ group.label }}
                 </p>
               } @else {
@@ -219,9 +285,15 @@ interface PaletteEntry {
             >
               <app-icon [name]="connectivity.online() ? 'wifi' : 'wifiOff'" [size]="16" />
               @if (expanded()) {
-                <span class="font-semibold">{{ connectivity.online() ? 'En ligne' : 'Hors ligne' }}</span>
+                <span class="font-semibold">{{
+                  connectivity.online() ? 'En ligne' : 'Hors ligne'
+                }}</span>
                 <span class="ml-auto text-[0.7rem] opacity-80">
-                  {{ outbox.pendingCount() > 0 ? outbox.pendingCount() + ' en attente' : 'synchronisé' }}
+                  {{
+                    outbox.pendingCount() > 0
+                      ? outbox.pendingCount() + ' en attente'
+                      : 'synchronisé'
+                  }}
                 </span>
               }
             </div>
@@ -264,7 +336,11 @@ interface PaletteEntry {
           <div class="ml-auto flex items-center gap-1.5">
             @if (!auth.isPlatformOperator()) {
               @if (outbox.rejectedCount() > 0) {
-                <a routerLink="/admin/hub" class="badge badge-danger" title="Ventes refusées par le serveur">
+                <a
+                  routerLink="/admin/hub"
+                  class="badge badge-danger"
+                  title="Ventes refusées par le serveur"
+                >
                   <app-icon name="alert" [size]="13" /> {{ outbox.rejectedCount() }} rejet(s)
                 </a>
               }
@@ -285,7 +361,9 @@ interface PaletteEntry {
               type="button"
               class="btn btn-ghost btn-icon"
               (click)="toggleTheme()"
-              [attr.title]="display.preferences().darkMode ? 'Mode clair' : 'Mode sombre (garde de nuit)'"
+              [attr.title]="
+                display.preferences().darkMode ? 'Mode clair' : 'Mode sombre (garde de nuit)'
+              "
             >
               <app-icon [name]="display.preferences().darkMode ? 'sun' : 'moon'" />
             </button>
@@ -362,8 +440,14 @@ interface PaletteEntry {
                   class="flex h-8 w-8 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand"
                   >{{ initials(userName()) }}</span
                 >
-                <span class="hidden max-w-[10rem] truncate text-sm font-medium md:block">{{ userName() }}</span>
-                <app-icon name="chevronDown" [size]="16" class="hidden text-subtle md:inline-flex" />
+                <span class="hidden max-w-[10rem] truncate text-sm font-medium md:block">{{
+                  userName()
+                }}</span>
+                <app-icon
+                  name="chevronDown"
+                  [size]="16"
+                  class="hidden text-subtle md:inline-flex"
+                />
               </button>
               @if (menu() === 'user') {
                 <div class="popover right-0 w-60 animate-in p-1.5">
@@ -382,7 +466,11 @@ interface PaletteEntry {
                     <span class="kbd ml-auto">{{ isMac ? '⌘' : 'Ctrl' }} K</span>
                   </button>
                   <div class="divider my-1"></div>
-                  <button type="button" class="menu-item w-full text-[var(--danger-strong)]" (click)="logout()">
+                  <button
+                    type="button"
+                    class="menu-item w-full text-[var(--danger-strong)]"
+                    (click)="logout()"
+                  >
                     <app-icon name="logout" [size]="16" /> Déconnexion
                   </button>
                 </div>
@@ -396,7 +484,9 @@ interface PaletteEntry {
             <app-icon name="lock" [size]="18" />
             <span
               >Votre mot de passe est temporaire.
-              <a routerLink="/account/password" class="font-semibold underline">Changez-le maintenant</a>.</span
+              <a routerLink="/account/password" class="font-semibold underline"
+                >Changez-le maintenant</a
+              >.</span
             >
           </div>
         }
@@ -582,7 +672,10 @@ export class Shell {
     let best: { label: string; group: string; length: number } | null = null;
     for (const group of this.nav()) {
       for (const item of group.items) {
-        if ((path === item.path || path.startsWith(item.path + '/')) && (!best || item.path.length > best.length)) {
+        if (
+          (path === item.path || path.startsWith(item.path + '/')) &&
+          (!best || item.path.length > best.length)
+        ) {
           best = { label: item.label, group: group.label, length: item.path.length };
         }
       }
@@ -615,13 +708,17 @@ export class Shell {
     );
     const actions: PaletteEntry[] = [
       {
-        label: this.display.preferences().darkMode ? 'Passer en mode clair' : 'Passer en mode sombre',
+        label: this.display.preferences().darkMode
+          ? 'Passer en mode clair'
+          : 'Passer en mode sombre',
         group: 'Affichage',
         icon: this.display.preferences().darkMode ? 'sun' : 'moon',
         run: () => this.toggleTheme(),
       },
       {
-        label: this.display.preferences().highContrast ? 'Contraste normal' : 'Contraste élevé (soleil)',
+        label: this.display.preferences().highContrast
+          ? 'Contraste normal'
+          : 'Contraste élevé (soleil)',
         group: 'Affichage',
         icon: 'eye',
         run: () => this.display.update({ highContrast: !this.display.preferences().highContrast }),
@@ -752,7 +849,11 @@ export class Shell {
     const target = event.target as Node;
     const open = this.menu();
     const container =
-      open === 'display' ? this.displayMenu()?.nativeElement : open === 'user' ? this.userMenu()?.nativeElement : null;
+      open === 'display'
+        ? this.displayMenu()?.nativeElement
+        : open === 'user'
+          ? this.userMenu()?.nativeElement
+          : null;
     if (container && !container.contains(target)) {
       this.menu.set(null);
     }

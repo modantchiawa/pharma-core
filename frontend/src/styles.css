@@ -217,7 +217,9 @@
   }
 
   /* Form controls: consistent look even where pages only set spacing utilities. */
-  input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])),
+  input:where(
+    :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+  ),
   select,
   textarea {
     background-color: var(--surface);
@@ -228,12 +230,16 @@
       border-color 120ms ease,
       box-shadow 120ms ease;
   }
-  input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])):hover,
+  input:where(
+      :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+    ):hover,
   select:hover,
   textarea:hover {
     border-color: color-mix(in oklab, var(--border-strong) 60%, var(--text-subtle));
   }
-  input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])):focus,
+  input:where(
+      :not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])
+    ):focus,
   select:focus,
   textarea:focus {
     outline: none;
@@ -554,6 +560,9 @@
     padding: calc(0.6rem * var(--density)) 1rem;
     text-align: left;
     border-bottom: 1px solid var(--border);
+  }
+  .data-table thead th.num {
+    text-align: right;
   }
   .data-table tbody td {
     padding: calc(0.7rem * var(--density)) 1rem;
