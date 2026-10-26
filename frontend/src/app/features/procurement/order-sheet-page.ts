@@ -7,6 +7,7 @@ import { ProposalLine, ProposalSheet, PurchaseOrder, Supplier } from '../../core
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { Icon } from '../../shared/ui/icon';
 
 const REASON_LABELS: Record<string, string> = {
   BELOW_TARGET: 'sous la couverture',
@@ -15,186 +16,298 @@ const REASON_LABELS: Record<string, string> = {
   LOST_SALES: 'ventes perdues',
 };
 
+const REASON_BADGE: Record<string, string> = {
+  BELOW_THRESHOLD: 'badge-warning',
+  EXPIRING_REPLACEMENT: 'badge-info',
+  LOST_SALES: 'badge-danger',
+};
+
+const ORDER_STATUS: Record<PurchaseOrder['status'], { label: string; badge: string }> = {
+  DRAFT: { label: 'Brouillon', badge: '' },
+  SENT: { label: 'Envoyée', badge: 'badge-info' },
+  PARTIALLY_RECEIVED: { label: 'Reçue en partie', badge: 'badge-warning' },
+  RECEIVED: { label: 'Reçue', badge: 'badge-success' },
+  CANCELLED: { label: 'Annulée', badge: 'badge-danger' },
+};
+
 /**
  * Tomorrow's order sheet: the system proposes, the pharmacist adjusts quantities, then the
  * order is sent (text for WhatsApp/e-mail, or printed) and later received lot by lot.
  */
 @Component({
   selector: 'app-order-sheet-page',
-  imports: [FormsModule, MoneyPipe, DatePipe, DecimalPipe, HasPermissionDirective],
+  imports: [FormsModule, MoneyPipe, DatePipe, DecimalPipe, HasPermissionDirective, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-4 p-4">
-      <nav class="flex gap-2" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          class="rounded px-3 py-1"
-          [class.bg-brand]="tab() === 'proposal'"
-          [class.text-on-brand]="tab() === 'proposal'"
-          (click)="tab.set('proposal')"
-        >
-          Fiche de commande
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="rounded px-3 py-1"
-          [class.bg-brand]="tab() === 'orders'"
-          [class.text-on-brand]="tab() === 'orders'"
-          (click)="openOrders()"
-        >
-          Commandes
-        </button>
-      </nav>
-
-      @if (tab() === 'proposal') {
-        <div class="flex flex-wrap items-center gap-2">
-          <select
-            class="rounded border px-2 py-1"
-            [(ngModel)]="supplierId"
-            (ngModelChange)="loadProposal()"
-          >
-            <option [ngValue]="null">Tous les fournisseurs</option>
-            @for (s of suppliers(); track s.id) {
-              <option [ngValue]="s.id">{{ s.details.name }}</option>
-            }
-          </select>
-          <button type="button" class="rounded border px-3 py-1" (click)="loadProposal()">
-            Recalculer
-          </button>
-          @if (sheet(); as sheet) {
-            <span class="text-sm text-slate-600"
-              >Pour le {{ sheet.date | date: 'dd/MM/yyyy' }} · vitesse de vente sur
-              {{ sheet.periodDays }} jours · estimation
-              {{ sheet.estimatedTotalCents | money }}</span
-            >
-          }
+    <div class="page animate-in">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Commandes fournisseurs</h1>
+          <p class="page-subtitle">
+            Le système propose, vous ajustez les quantités, puis la commande part au fournisseur
+          </p>
+        </div>
+        @if (tab() === 'proposal') {
           <button
             type="button"
-            class="ml-auto rounded bg-brand px-3 py-1 text-on-brand"
+            class="btn btn-primary"
             *appHasPermission="'PROCUREMENT_MANAGE'"
             [disabled]="!supplierId || selectedCount() === 0"
             (click)="createOrder()"
           >
+            <app-icon name="plus" [size]="16" />
             Créer la commande ({{ selectedCount() }} lignes)
           </button>
-        </div>
-        @if (!supplierId) {
-          <p class="text-sm text-amber-800">
-            Choisissez un fournisseur pour transformer la proposition en commande.
-          </p>
         }
-        <table class="w-full rounded border bg-white text-sm">
-          <thead class="bg-slate-100 text-left">
-            <tr>
-              <th class="p-2"></th>
-              <th class="p-2">Produit</th>
-              <th class="p-2">Fournisseur</th>
-              <th class="p-2 text-right">Dispo</th>
-              <th class="p-2 text-right">En cmd</th>
-              <th class="p-2 text-right">Vente/j</th>
-              <th class="p-2 text-right">Cible</th>
-              <th class="p-2 text-right">Proposé</th>
-              <th class="p-2 text-right">À commander</th>
-              <th class="p-2">Motif</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (line of sheet()?.lines ?? []; track line.productId) {
-              <tr class="border-t">
-                <td class="p-2">
-                  <input
-                    type="checkbox"
-                    [checked]="quantities()[line.productId] > 0"
-                    (change)="toggle(line, $event)"
-                  />
-                </td>
-                <td class="p-2">
-                  {{ line.designation }} <small class="text-slate-500">{{ line.cip13 }}</small>
-                </td>
-                <td class="p-2">{{ line.supplierName ?? '—' }}</td>
-                <td class="p-2 text-right">
-                  {{ line.available }}
-                  @if (line.expiringSoon > 0) {
-                    <small class="text-amber-700">(-{{ line.expiringSoon }} périm.)</small>
+      </header>
+
+      <div class="space-y-5">
+        <div class="segmented" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap"
+            [attr.aria-selected]="tab() === 'proposal'"
+            (click)="tab.set('proposal')"
+          >
+            <app-icon name="spreadsheet" [size]="15" />
+            Fiche de commande
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap"
+            [attr.aria-selected]="tab() === 'orders'"
+            (click)="openOrders()"
+          >
+            <app-icon name="procurement" [size]="15" />
+            Commandes
+          </button>
+        </div>
+
+        @if (status(); as text) {
+          <div class="alert alert-info" role="status">
+            <app-icon name="info" [size]="16" class="mt-0.5" />
+            <span>{{ text }}</span>
+          </div>
+        }
+
+        @if (tab() === 'proposal') {
+          @if (sheet(); as sheet) {
+            <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
+              <div class="card kpi col-span-2 sm:col-span-1">
+                <div class="kpi-label">
+                  <span class="kpi-icon"><app-icon name="banknote" [size]="16" /></span>
+                  Estimation
+                </div>
+                <div class="kpi-value">{{ sheet.estimatedTotalCents | money }}</div>
+                <div class="kpi-foot">Au prix d'achat des lignes proposées</div>
+              </div>
+              <div class="card kpi">
+                <div class="kpi-label">
+                  <span class="kpi-icon"><app-icon name="spreadsheet" [size]="16" /></span>
+                  Lignes proposées
+                </div>
+                <div class="kpi-value">{{ sheet.lines.length }}</div>
+                <div class="kpi-foot">{{ selectedCount() }} sélectionnée(s)</div>
+              </div>
+              <div class="card kpi col-span-2 max-sm:order-last sm:col-span-1">
+                <div class="kpi-label">
+                  <span class="kpi-icon"><app-icon name="calendar" [size]="16" /></span>
+                  Livraison visée
+                </div>
+                <div class="kpi-value">{{ sheet.date | date: 'dd/MM/yyyy' }}</div>
+                <div class="kpi-foot">Fiche du jour pour demain</div>
+              </div>
+              <div class="card kpi">
+                <div class="kpi-label">
+                  <span class="kpi-icon"><app-icon name="activity" [size]="16" /></span>
+                  Vitesse de vente
+                </div>
+                <div class="kpi-value">{{ sheet.periodDays }} jours</div>
+                <div class="kpi-foot">Période d'observation des ventes</div>
+              </div>
+            </div>
+          }
+
+          <section class="card">
+            <div class="card-header flex-wrap">
+              <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <select
+                  class="select w-full sm:w-64"
+                  aria-label="Fournisseur"
+                  [(ngModel)]="supplierId"
+                  (ngModelChange)="loadProposal()"
+                >
+                  <option [ngValue]="null">Tous les fournisseurs</option>
+                  @for (s of suppliers(); track s.id) {
+                    <option [ngValue]="s.id">{{ s.details.name }}</option>
                   }
-                </td>
-                <td class="p-2 text-right">{{ line.onOrder }}</td>
-                <td class="p-2 text-right">{{ line.dailyDemand | number: '1.1-1' }}</td>
-                <td class="p-2 text-right">{{ line.targetStock }}</td>
-                <td class="p-2 text-right">
-                  {{ line.suggestedQuantity }}
-                  <small class="text-slate-500">(×{{ line.packSize }})</small>
-                </td>
-                <td class="p-2 text-right">
-                  <input
-                    type="number"
-                    min="0"
-                    [step]="line.packSize"
-                    class="w-20 rounded border px-1 text-right"
-                    [ngModel]="quantities()[line.productId]"
-                    (ngModelChange)="setQuantity(line, $event)"
-                  />
-                </td>
-                <td class="p-2 text-xs text-slate-600">{{ reasons(line) }}</td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="10" class="p-6 text-center text-slate-500">
-                  Rien à commander : le stock couvre la demande prévue.
-                </td>
-              </tr>
+                </select>
+                <button type="button" class="btn btn-secondary" (click)="loadProposal()">
+                  <app-icon name="refresh" [size]="16" />
+                  Recalculer
+                </button>
+              </div>
+            </div>
+            @if (!supplierId) {
+              <div class="border-b border-line p-4">
+                <div class="alert alert-warning">
+                  <app-icon name="alert" [size]="16" class="mt-0.5" />
+                  <span
+                    >Choisissez un fournisseur pour transformer la proposition en commande.</span
+                  >
+                </div>
+              </div>
             }
-          </tbody>
-        </table>
-      } @else {
-        <table class="w-full rounded border bg-white text-sm">
-          <thead class="bg-slate-100 text-left">
-            <tr>
-              <th class="p-2">N°</th>
-              <th class="p-2">Fournisseur</th>
-              <th class="p-2">Statut</th>
-              <th class="p-2">Créée</th>
-              <th class="p-2 text-right">Montant</th>
-              <th class="p-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (o of orders(); track o.id) {
-              <tr class="border-t">
-                <td class="p-2">{{ o.number }}</td>
-                <td class="p-2">{{ o.supplierName }}</td>
-                <td class="p-2">{{ o.status }}</td>
-                <td class="p-2">{{ o.createdAt | date: 'dd/MM HH:mm' }}</td>
-                <td class="p-2 text-right">{{ o.totalCents | money }}</td>
-                <td class="p-2 text-right">
-                  <button type="button" class="underline" (click)="copyText(o)">
-                    Copier le texte
-                  </button>
-                  @if (o.status === 'DRAFT') {
-                    <button
-                      type="button"
-                      class="ml-2 rounded bg-brand px-2 text-on-brand"
-                      *appHasPermission="'PROCUREMENT_MANAGE'"
-                      (click)="send(o)"
-                    >
-                      Envoyer
-                    </button>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead class="whitespace-nowrap">
+                  <tr>
+                    <th class="w-10"><span class="sr-only">Sélection</span></th>
+                    <th>Produit</th>
+                    <th>Fournisseur</th>
+                    <th class="num text-right">Dispo</th>
+                    <th class="num text-right">En cmd</th>
+                    <th class="num text-right">Vente/j</th>
+                    <th class="num text-right">Cible</th>
+                    <th class="num text-right">Proposé</th>
+                    <th class="num text-right">À commander</th>
+                    <th>Motif</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (line of sheet()?.lines ?? []; track line.productId) {
+                    <tr>
+                      <td>
+                        <input
+                          type="checkbox"
+                          [attr.aria-label]="'Commander ' + line.designation"
+                          [checked]="quantities()[line.productId] > 0"
+                          (change)="toggle(line, $event)"
+                        />
+                      </td>
+                      <td class="min-w-56">
+                        <p class="font-medium">{{ line.designation }}</p>
+                        <p class="text-xs text-subtle tabular-nums">{{ line.cip13 }}</p>
+                      </td>
+                      <td class="whitespace-nowrap text-muted">{{ line.supplierName ?? '—' }}</td>
+                      <td class="num whitespace-nowrap">
+                        {{ line.available }}
+                        @if (line.expiringSoon > 0) {
+                          <span class="badge badge-warning ml-1"
+                            >-{{ line.expiringSoon }} périm.</span
+                          >
+                        }
+                      </td>
+                      <td class="num">{{ line.onOrder }}</td>
+                      <td class="num">{{ line.dailyDemand | number: '1.1-1' }}</td>
+                      <td class="num">{{ line.targetStock }}</td>
+                      <td class="num whitespace-nowrap">
+                        {{ line.suggestedQuantity }}
+                        <span class="text-xs text-subtle">×{{ line.packSize }}</span>
+                      </td>
+                      <td class="num">
+                        <input
+                          type="number"
+                          min="0"
+                          [step]="line.packSize"
+                          class="input num ml-auto min-h-8 w-20"
+                          [attr.aria-label]="'Quantité à commander, ' + line.designation"
+                          [ngModel]="quantities()[line.productId]"
+                          (ngModelChange)="setQuantity(line, $event)"
+                        />
+                      </td>
+                      <td>
+                        <div class="flex flex-wrap gap-1">
+                          @for (r of line.reasons; track r) {
+                            <span class="badge" [class]="reasonBadge(r)">{{ reasonLabel(r) }}</span>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="10">
+                        <div class="empty-state">
+                          <app-icon name="checkCircle" [size]="22" />
+                          <p>Rien à commander : le stock couvre la demande prévue.</p>
+                        </div>
+                      </td>
+                    </tr>
                   }
-                </td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="6" class="p-6 text-center text-slate-500">Aucune commande</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      }
-      @if (status(); as text) {
-        <p class="text-sm" role="status">{{ text }}</p>
-      }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        } @else {
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title">Historique des commandes</h2>
+              <span class="badge">{{ orders().length }}</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead class="whitespace-nowrap">
+                  <tr>
+                    <th>N°</th>
+                    <th>Fournisseur</th>
+                    <th>Statut</th>
+                    <th>Créée</th>
+                    <th class="num text-right">Montant</th>
+                    <th><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (o of orders(); track o.id) {
+                    <tr>
+                      <td class="font-mono text-xs font-medium">{{ o.number }}</td>
+                      <td class="min-w-40">{{ o.supplierName }}</td>
+                      <td>
+                        <span class="badge" [class]="orderBadge(o.status)">
+                          <span class="dot"></span>{{ orderLabel(o.status) }}
+                        </span>
+                      </td>
+                      <td class="whitespace-nowrap text-muted">
+                        {{ o.createdAt | date: 'dd/MM HH:mm' }}
+                      </td>
+                      <td class="num whitespace-nowrap font-medium">{{ o.totalCents | money }}</td>
+                      <td>
+                        <div class="flex justify-end gap-1.5">
+                          <button type="button" class="btn btn-ghost btn-sm" (click)="copyText(o)">
+                            <app-icon name="copy" [size]="14" />
+                            Copier le texte
+                          </button>
+                          @if (o.status === 'DRAFT') {
+                            <button
+                              type="button"
+                              class="btn btn-primary btn-sm"
+                              *appHasPermission="'PROCUREMENT_MANAGE'"
+                              (click)="send(o)"
+                            >
+                              <app-icon name="send" [size]="14" />
+                              Envoyer
+                            </button>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="6">
+                        <div class="empty-state">
+                          <app-icon name="procurement" [size]="22" />
+                          <p>Aucune commande</p>
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        }
+      </div>
     </div>
   `,
 })
@@ -219,6 +332,22 @@ export class OrderSheetPage {
 
   protected reasons(line: ProposalLine): string {
     return line.reasons.map((r) => REASON_LABELS[r] ?? r).join(', ');
+  }
+
+  protected reasonLabel(reason: string): string {
+    return REASON_LABELS[reason] ?? reason;
+  }
+
+  protected reasonBadge(reason: string): string {
+    return REASON_BADGE[reason] ?? '';
+  }
+
+  protected orderLabel(status: PurchaseOrder['status']): string {
+    return ORDER_STATUS[status]?.label ?? status;
+  }
+
+  protected orderBadge(status: PurchaseOrder['status']): string {
+    return ORDER_STATUS[status]?.badge ?? '';
   }
 
   protected toggle(line: ProposalLine, event: Event): void {
