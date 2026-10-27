@@ -9,7 +9,11 @@ export interface Toast {
 }
 
 /** How long a toast stays on screen; errors stay longer so they can be read. */
-const DURATION_MS: Record<ToastKind, number> = { success: 3500, info: 4500, error: 7000 };
+export const TOAST_DURATION_MS: Record<ToastKind, number> = {
+  success: 3500,
+  info: 4500,
+  error: 7000,
+};
 const MAX_VISIBLE = 4;
 
 /**
@@ -42,6 +46,6 @@ export class ToastService {
   private show(kind: ToastKind, message: string): void {
     const toast: Toast = { id: this.nextId++, kind, message };
     this.items.update((items) => [...items, toast].slice(-MAX_VISIBLE));
-    setTimeout(() => this.dismiss(toast.id), DURATION_MS[kind]);
+    setTimeout(() => this.dismiss(toast.id), TOAST_DURATION_MS[kind]);
   }
 }

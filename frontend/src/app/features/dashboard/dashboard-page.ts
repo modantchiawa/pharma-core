@@ -20,7 +20,10 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { columnPath, niceCeiling } from '../../shared/ui/chart';
+import { staggerDelay } from '../../shared/ui/motion';
+import { AnimatedNumber } from '../../shared/ui/animated-number';
 import { Icon } from '../../shared/ui/icon';
+import { Sparkline } from '../../shared/ui/sparkline';
 import { DailyCountCard } from '../control/daily-count-card';
 import { SetupChecklist } from './setup-checklist';
 
@@ -39,6 +42,8 @@ const CHART_HEIGHT = 260;
 const PLOT_BOTTOM = 230;
 const PLOT_HEIGHT = 210;
 const AXIS_WIDTH = 52;
+/** Longest column animation: 30 staggered columns of 700 ms. */
+const CHART_INTRO_MS = 1400;
 
 const PRESETS = [
   { days: 0, label: "Aujourd'hui" },
@@ -68,6 +73,8 @@ const METHOD_LABELS: Record<string, string> = {
     Icon,
     SetupChecklist,
     DailyCountCard,
+    AnimatedNumber,
+    Sparkline,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -138,13 +145,23 @@ const METHOD_LABELS: Record<string, string> = {
       }
 
       @if (data(); as d) {
-        <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicateurs">
+        <section class="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicateurs">
           <div class="card kpi">
-            <div class="kpi-label">
+            <div class="kpi-label whitespace-nowrap">
               <span class="kpi-icon"><app-icon name="banknote" [size]="16" /></span>
               Chiffre d'affaires
+              @if (dailyNet().length > 1) {
+                <app-sparkline class="ml-auto" [values]="dailyNet()" />
+              }
             </div>
-            <div class="kpi-value">{{ d.sales.netCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.sales.netCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot flex items-center gap-1.5">
               <span
                 class="badge"
@@ -162,15 +179,33 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="trendUp" [size]="16" /></span>
               Marge brute
             </div>
-            <div class="kpi-value">{{ d.sales.marginCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.sales.marginCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">{{ marginRate() | number: '1.0-1' }} % du CA</div>
           </div>
           <div class="card kpi">
-            <div class="kpi-label">
+            <div class="kpi-label whitespace-nowrap">
               <span class="kpi-icon"><app-icon name="receipt" [size]="16" /></span>
               Ventes
+              @if (dailyCount().length > 1) {
+                <app-sparkline class="ml-auto" [values]="dailyCount()" />
+              }
             </div>
-            <div class="kpi-value">{{ d.sales.count }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.sales.count"
+                format="integer"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="900"
+              />
+            </div>
             <div class="kpi-foot">
               panier moyen {{ d.sales.averageBasketCents | money }} · {{ d.sales.cancelledCount }}
               annulée(s)
@@ -181,7 +216,14 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="credit" [size]="16" /></span>
               Créances clients
             </div>
-            <div class="kpi-value">{{ d.receivables.customerCreditCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.receivables.customerCreditCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">{{ d.receivables.debtors }} débiteur(s)</div>
           </div>
           <div class="card kpi">
@@ -189,7 +231,14 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="stock" [size]="16" /></span>
               Valeur du stock (coût)
             </div>
-            <div class="kpi-value">{{ d.stock.valueAtCostCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.stock.valueAtCostCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">{{ d.stock.belowThreshold }} produit(s) sous le seuil</div>
           </div>
           <div class="card kpi" [class.watch]="d.stock.expiringLots > 0">
@@ -197,7 +246,14 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="calendar" [size]="16" /></span>
               Périme sous 90 jours
             </div>
-            <div class="kpi-value">{{ d.stock.expiringWithin90DaysCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.stock.expiringWithin90DaysCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">
               {{ d.stock.expiringLots }} lot(s) · {{ d.stock.shortfallProducts }} rupture(s)
             </div>
@@ -207,7 +263,14 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="cash" [size]="16" /></span>
               Écarts de caisse
             </div>
-            <div class="kpi-value">{{ d.cash.differenceCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.cash.differenceCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">{{ d.cash.sessionsClosed }} session(s) clôturée(s)</div>
           </div>
           <div class="card kpi">
@@ -215,7 +278,14 @@ const METHOD_LABELS: Record<string, string> = {
               <span class="kpi-icon"><app-icon name="trendDown" [size]="16" /></span>
               Dépenses de caisse
             </div>
-            <div class="kpi-value">{{ d.cash.expensesCents | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number
+                [value]="d.cash.expensesCents"
+                [from]="0"
+                [minDuration]="600"
+                [maxDuration]="1100"
+              />
+            </div>
             <div class="kpi-foot">sur la période</div>
           </div>
         </section>
@@ -260,6 +330,7 @@ const METHOD_LABELS: Record<string, string> = {
                 <svg
                   [attr.width]="chartWidth()"
                   [attr.height]="CHART_HEIGHT"
+                  [class.chart-intro]="chartIntro()"
                   class="block w-full overflow-visible"
                   role="img"
                   aria-label="Chiffre d'affaires par jour"
@@ -285,6 +356,7 @@ const METHOD_LABELS: Record<string, string> = {
                   @for (bar of bars(); track bar.date; let i = $index) {
                     <g
                       class="bar"
+                      [style.--i]="i"
                       [class.is-hovered]="hovered()?.date === bar.date"
                       tabindex="0"
                       [attr.aria-label]="
@@ -407,7 +479,7 @@ const METHOD_LABELS: Record<string, string> = {
                   </thead>
                   <tbody>
                     @for (t of d.topProducts; track t.productId; let i = $index) {
-                      <tr>
+                      <tr class="rise" [style.animation-delay.ms]="stagger(i)">
                         <td>
                           <span class="rank" [class.first]="i < 3">{{ i + 1 }}</span>
                         </td>
@@ -471,7 +543,29 @@ const METHOD_LABELS: Record<string, string> = {
     }
     .bar .mark {
       fill: var(--brand-primary);
-      transition: fill 120ms ease;
+      transition: fill var(--motion-short) var(--ease-standard);
+    }
+    .chart-intro .bar .mark {
+      transform-box: fill-box;
+      transform-origin: 50% 100%;
+      animation: bar-grow 700ms var(--ease-decelerate) backwards;
+      animation-delay: calc(min(var(--i), 30) * 14ms + 120ms);
+    }
+    .chart-intro .grid-line {
+      animation: fade-in 500ms var(--ease-standard) backwards;
+    }
+    .rise {
+      animation: rise-in var(--motion-long) var(--ease-decelerate) backwards;
+    }
+    @keyframes bar-grow {
+      from {
+        transform: scaleY(0);
+      }
+    }
+    @keyframes meter-grow {
+      from {
+        transform: scaleX(0);
+      }
     }
     .bar.is-hovered .mark {
       fill: color-mix(in oklab, var(--brand-primary) 75%, white);
@@ -505,6 +599,8 @@ const METHOD_LABELS: Record<string, string> = {
       height: 100%;
       border-radius: inherit;
       background: var(--brand-primary);
+      transform-origin: left;
+      animation: meter-grow 800ms var(--ease-decelerate) 250ms backwards;
     }
     .rank {
       display: inline-flex;
@@ -536,6 +632,11 @@ export class DashboardPage {
   protected readonly hovered = signal<Bar | null>(null);
   protected readonly activePreset = signal<number | null>(29);
   protected readonly chartWidth = signal(760);
+  /** Columns grow from the axis on the first display only, not on each period change. */
+  protected readonly chartIntro = signal(true);
+  protected readonly stagger = staggerDelay;
+  protected readonly dailyNet = computed(() => this.data()?.daily.map((p) => p.netCents) ?? []);
+  protected readonly dailyCount = computed(() => this.data()?.daily.map((p) => p.count) ?? []);
   protected readonly presets = PRESETS;
   protected readonly CHART_HEIGHT = CHART_HEIGHT;
   protected readonly PLOT_BOTTOM = PLOT_BOTTOM;
@@ -669,6 +770,9 @@ export class DashboardPage {
           }),
         ),
       );
+      if (this.chartIntro()) {
+        setTimeout(() => this.chartIntro.set(false), CHART_INTRO_MS);
+      }
     } catch (error) {
       this.data.set(null);
       this.error.set(

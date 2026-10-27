@@ -22,7 +22,9 @@ import {
 import { APP_ENVIRONMENT } from '../../core/config';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Icon } from '../../shared/ui/icon';
+import { SkeletonRows } from '../../shared/ui/skeleton-rows';
 import { daysLate, errorDetail, isoToday, orderStatus, SCOPES } from './purchase-orders';
 
 /**
@@ -31,7 +33,7 @@ import { daysLate, errorDetail, isoToday, orderStatus, SCOPES } from './purchase
  */
 @Component({
   selector: 'app-order-tracking',
-  imports: [FormsModule, DatePipe, MoneyPipe, Icon],
+  imports: [FormsModule, DatePipe, MoneyPipe, Icon, EmptyState, SkeletonRows],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-5">
@@ -121,114 +123,118 @@ import { daysLate, errorDetail, isoToday, orderStatus, SCOPES } from './purchase
             }
           </select>
         </div>
-        <ul class="divide-y divide-line sm:hidden" aria-label="Commandes">
-          @for (o of orders(); track o.id) {
-            <li>
-              <button
-                type="button"
-                class="w-full px-4 py-3 text-left"
-                (click)="selected.emit(o.id)"
-                [attr.data-testid]="'order-' + o.number"
-              >
-                <span class="flex items-start justify-between gap-2">
-                  <span class="min-w-0">
-                    <span class="block truncate font-medium">{{ o.supplierName }}</span>
-                    <span class="block font-mono text-xs text-subtle">{{ o.number }}</span>
-                  </span>
-                  <span class="num font-medium">{{ o.totalCents | money }}</span>
-                </span>
-                <span class="mt-1.5 flex flex-wrap items-center gap-1">
-                  <span class="badge" [class]="badge(o)"
-                    ><span class="dot"></span>{{ label(o) }}</span
-                  >
-                  @if (o.overdue) {
-                    <span class="badge badge-danger">En retard de {{ late(o) }} j</span>
-                  }
-                  <span class="ml-auto text-xs text-muted">
-                    @if (o.expectedAt) {
-                      prévue {{ o.expectedAt | date: 'EEE d MMM' }}
-                    }
-                    @if (o.status !== 'DRAFT') {
-                      · {{ o.receivedUnits }}/{{ o.orderedUnits }}
-                    }
-                  </span>
-                </span>
-              </button>
-            </li>
-          } @empty {
-            <li class="empty-state">
-              <app-icon name="procurement" [size]="22" />
-              <p>{{ emptyText() }}</p>
-            </li>
-          }
-        </ul>
-        <div class="hidden overflow-x-auto sm:block">
-          <table class="data-table">
-            <thead class="whitespace-nowrap">
-              <tr>
-                <th>N°</th>
-                <th>Fournisseur</th>
-                <th>Statut</th>
-                <th>Livraison prévue</th>
-                <th class="num text-right">Reçu</th>
-                <th class="num text-right">Montant</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (o of orders(); track o.id) {
-                <tr
-                  class="cursor-pointer"
+        @if (!loaded()) {
+          <app-skeleton-rows [rows]="5" [figures]="2" />
+        } @else {
+          <ul class="content-in divide-y divide-line sm:hidden" aria-label="Commandes">
+            @for (o of orders(); track o.id) {
+              <li>
+                <button
+                  type="button"
+                  class="w-full px-4 py-3 text-left"
                   (click)="selected.emit(o.id)"
                   [attr.data-testid]="'order-' + o.number"
                 >
-                  <td class="whitespace-nowrap">
-                    <button
-                      type="button"
-                      class="font-mono text-xs font-medium text-brand hover:underline"
-                      (click)="$event.stopPropagation(); selected.emit(o.id)"
+                  <span class="flex items-start justify-between gap-2">
+                    <span class="min-w-0">
+                      <span class="block truncate font-medium">{{ o.supplierName }}</span>
+                      <span class="block font-mono text-xs text-subtle">{{ o.number }}</span>
+                    </span>
+                    <span class="num font-medium">{{ o.totalCents | money }}</span>
+                  </span>
+                  <span class="mt-1.5 flex flex-wrap items-center gap-1">
+                    <span class="badge" [class]="badge(o)"
+                      ><span class="dot"></span>{{ label(o) }}</span
                     >
-                      {{ o.number }}
-                    </button>
-                    <p class="text-xs text-subtle">{{ o.createdAt | date: 'dd/MM HH:mm' }}</p>
-                  </td>
-                  <td class="min-w-36">{{ o.supplierName }}</td>
-                  <td>
-                    <div class="flex flex-wrap items-center gap-1">
-                      <span class="badge whitespace-nowrap" [class]="badge(o)">
-                        <span class="dot"></span>{{ label(o) }}
-                      </span>
-                      @if (o.overdue) {
-                        <span class="badge badge-danger whitespace-nowrap"
-                          >En retard de {{ late(o) }} j</span
-                        >
-                      }
-                    </div>
-                  </td>
-                  <td class="whitespace-nowrap text-muted">
-                    {{ o.expectedAt ? (o.expectedAt | date: 'EEE d MMM') : '—' }}
-                  </td>
-                  <td class="num whitespace-nowrap">
-                    @if (o.status === 'DRAFT') {
-                      <span class="text-subtle">—</span>
-                    } @else {
-                      {{ o.receivedUnits }} / {{ o.orderedUnits }}
+                    @if (o.overdue) {
+                      <span class="badge badge-danger">En retard de {{ late(o) }} j</span>
                     }
-                  </td>
-                  <td class="num whitespace-nowrap font-medium">{{ o.totalCents | money }}</td>
-                </tr>
-              } @empty {
+                    <span class="ml-auto text-xs text-muted">
+                      @if (o.expectedAt) {
+                        prévue {{ o.expectedAt | date: 'EEE d MMM' }}
+                      }
+                      @if (o.status !== 'DRAFT') {
+                        · {{ o.receivedUnits }}/{{ o.orderedUnits }}
+                      }
+                    </span>
+                  </span>
+                </button>
+              </li>
+            } @empty {
+              <li>
+                <app-empty-state illustration="delivery"
+                  ><p>{{ emptyText() }}</p></app-empty-state
+                >
+              </li>
+            }
+          </ul>
+          <div class="content-in hidden overflow-x-auto sm:block">
+            <table class="data-table">
+              <thead class="whitespace-nowrap">
                 <tr>
-                  <td colspan="6">
-                    <div class="empty-state">
-                      <app-icon name="procurement" [size]="22" />
-                      <p>{{ emptyText() }}</p>
-                    </div>
-                  </td>
+                  <th>N°</th>
+                  <th>Fournisseur</th>
+                  <th>Statut</th>
+                  <th>Livraison prévue</th>
+                  <th class="num text-right">Reçu</th>
+                  <th class="num text-right">Montant</th>
                 </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                @for (o of orders(); track o.id) {
+                  <tr
+                    class="cursor-pointer"
+                    (click)="selected.emit(o.id)"
+                    [attr.data-testid]="'order-' + o.number"
+                  >
+                    <td class="whitespace-nowrap">
+                      <button
+                        type="button"
+                        class="font-mono text-xs font-medium text-brand hover:underline"
+                        (click)="$event.stopPropagation(); selected.emit(o.id)"
+                      >
+                        {{ o.number }}
+                      </button>
+                      <p class="text-xs text-subtle">{{ o.createdAt | date: 'dd/MM HH:mm' }}</p>
+                    </td>
+                    <td class="min-w-36">{{ o.supplierName }}</td>
+                    <td>
+                      <div class="flex flex-wrap items-center gap-1">
+                        <span class="badge whitespace-nowrap" [class]="badge(o)">
+                          <span class="dot"></span>{{ label(o) }}
+                        </span>
+                        @if (o.overdue) {
+                          <span class="badge badge-danger whitespace-nowrap"
+                            >En retard de {{ late(o) }} j</span
+                          >
+                        }
+                      </div>
+                    </td>
+                    <td class="whitespace-nowrap text-muted">
+                      {{ o.expectedAt ? (o.expectedAt | date: 'EEE d MMM') : '—' }}
+                    </td>
+                    <td class="num whitespace-nowrap">
+                      @if (o.status === 'DRAFT') {
+                        <span class="text-subtle">—</span>
+                      } @else {
+                        {{ o.receivedUnits }} / {{ o.orderedUnits }}
+                      }
+                    </td>
+                    <td class="num whitespace-nowrap font-medium">{{ o.totalCents | money }}</td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="6">
+                      <app-empty-state illustration="delivery"
+                        ><p>{{ emptyText() }}</p></app-empty-state
+                      >
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
       </section>
     </div>
   `,
@@ -264,6 +270,8 @@ export class OrderTracking {
   protected readonly scopes = SCOPES;
   protected readonly supplierId = signal<string | null>(null);
   protected readonly orders = signal<PurchaseOrder[]>([]);
+  /** False until the first list arrives: placeholder rows instead of "no order". */
+  protected readonly loaded = signal(false);
   protected readonly summary = signal<PurchaseOrderSummary | null>(null);
 
   constructor() {
@@ -314,9 +322,11 @@ export class OrderTracking {
         return;
       }
       this.orders.set(orders);
+      this.loaded.set(true);
       this.summary.set(summary);
       this.summaryLoaded.emit(summary);
     } catch (error) {
+      this.loaded.set(true);
       this.toast.error(errorDetail(error, 'Commandes indisponibles'));
     }
   }

@@ -10,6 +10,7 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { ControlAlertsService } from '../../core/control/control-alerts.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Icon } from '../../shared/ui/icon';
 import { ALERT_ICONS, ALERT_LABELS, severityBadge } from './control-format';
 
@@ -18,7 +19,7 @@ type Filter = 'unread' | 'all';
 /** The owner's alert feed: what happened, who, how much, and acknowledgement. */
 @Component({
   selector: 'app-alerts-page',
-  imports: [DatePipe, RouterLink, MoneyPipe, HasPermissionDirective, Icon],
+  imports: [DatePipe, RouterLink, MoneyPipe, HasPermissionDirective, Icon, EmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -81,7 +82,7 @@ type Filter = 'unread' | 'all';
       <section class="space-y-3" aria-live="polite">
         @for (alert of visible(); track alert.id) {
           <article
-            class="card alert-card"
+            class="row-enter card alert-card"
             [class.is-unread]="!alert.acknowledgedAt"
             [attr.data-kind]="alert.kind"
           >
@@ -137,13 +138,12 @@ type Filter = 'unread' | 'all';
             </div>
           </article>
         } @empty {
-          <div class="card empty-state py-16">
-            <app-icon name="checkCircle" [size]="22" />
+          <app-empty-state illustration="check" class="card py-16">
             <p class="font-medium text-ink">
               {{ filter() === 'unread' ? 'Aucune alerte à traiter' : 'Aucune alerte' }}
             </p>
             <p>Les alertes arrivent ici en temps réel.</p>
-          </div>
+          </app-empty-state>
         }
       </section>
     </div>

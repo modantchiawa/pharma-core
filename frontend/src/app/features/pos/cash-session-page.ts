@@ -18,7 +18,9 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { PaperFormat } from '../../core/api/models';
 import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Icon } from '../../shared/ui/icon';
+import { SkeletonRows } from '../../shared/ui/skeleton-rows';
 import { FourEyesThresholdsService } from '../../core/control/four-eyes.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { isFourEyesRefusal, secondPersonNeeded } from '../../shared/four-eyes';
@@ -101,6 +103,8 @@ interface SessionSale {
     Receipt,
     Icon,
     SaleReturnDialog,
+    EmptyState,
+    SkeletonRows,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -194,7 +198,11 @@ interface SessionSale {
 
       <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section class="min-w-0 space-y-5">
-          @if (session(); as s) {
+          @if (!loaded()) {
+            <div class="card">
+              <app-skeleton-rows [rows]="4" [figures]="2" />
+            </div>
+          } @else if (session(); as s) {
             <div class="card">
               <div class="card-header flex-wrap">
                 <div class="min-w-0">
@@ -404,8 +412,10 @@ interface SessionSale {
                 <h2 class="card-title">Ventes de la session</h2>
                 <span class="badge">{{ sales().length }}</span>
               </div>
-              @if (sales().length > 0) {
-                <div class="overflow-x-auto">
+              @if (salesLoading() && sales().length === 0) {
+                <app-skeleton-rows [rows]="5" [figures]="2" />
+              } @else if (sales().length > 0) {
+                <div class="content-in overflow-x-auto">
                   <table class="data-table whitespace-nowrap">
                     <thead>
                       <tr>
@@ -476,10 +486,9 @@ interface SessionSale {
                   </table>
                 </div>
               } @else {
-                <div class="empty-state">
-                  <app-icon name="receipt" [size]="22" />
+                <app-empty-state illustration="receipt">
                   <p>Aucune vente</p>
-                </div>
+                </app-empty-state>
               }
             </div>
           } @else {
@@ -845,6 +854,9 @@ export class CashSessionPage {
   protected readonly session = signal<CashSessionReport | null>(null);
   protected readonly recent = signal<CashSessionReport[]>([]);
   protected readonly sales = signal<SessionSale[]>([]);
+  /** Placeholders until the open session (or its absence) is known, then while its sales load. */
+  protected readonly loaded = signal(false);
+  protected readonly salesLoading = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly policy = signal<CashPolicy>({
     cashDifferenceThresholdCents: 0,
@@ -1183,10 +1195,12 @@ export class CashSessionPage {
     } catch {
       this.session.set(null);
     }
+    this.loaded.set(true);
     await this.loadRecent();
   }
 
   private async loadSales(report: CashSessionReport): Promise<void> {
+    this.salesLoading.set(true);
     try {
       const to = report.closedAt ?? new Date().toISOString();
       const list = await firstValueFrom(
@@ -1197,6 +1211,8 @@ export class CashSessionPage {
       this.sales.set(list.filter((sale) => sale.terminalId === report.terminalId));
     } catch {
       this.sales.set([]);
+    } finally {
+      this.salesLoading.set(false);
     }
   }
 
