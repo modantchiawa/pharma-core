@@ -53,7 +53,11 @@ class DemoIT extends IntegrationTest {
                 .containsExactlyInAnyOrder("SYNCED", "PENDING", "STALE", "NEVER");
         assertThat(JsonPath.<List<Integer>>read(registers, "$.terminals.terminals[?(@.state == 'PENDING')].pendingSales"))
                 .containsExactly(3);
-        assertThat(JsonPath.<List<Object>>read(registers, "$.accounts[*].lastLoginAt")).hasSize(2).doesNotContainNull();
+        // the owner and the cashier have logged in; the internal control staff have not yet
+        assertThat(JsonPath.<List<Object>>read(registers, "$.accounts[*]")).hasSize(4);
+        assertThat(JsonPath.<List<Object>>read(registers,
+                "$.accounts[?(@.email in ['titulaire@sahel.demo', 'caisse@sahel.demo'])].lastLoginAt"))
+                .hasSize(2).doesNotContainNull();
 
         // staff accounts
         String owner = login("sahel", "titulaire@sahel.demo", "Demo2026!");
