@@ -8,8 +8,11 @@ import { StockCount, StockCountLine, StorageLocation } from '../../core/api/mode
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
+import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { approverFields, isFourEyesRefusal } from '../../shared/four-eyes';
 import { parseGs1 } from '../../shared/gs1';
+import { ApprovalConfirmation, ApprovalDialog } from '../../shared/ui/approval-dialog';
 import { Icon } from '../../shared/ui/icon';
 
 const STATUS_LABEL: Record<StockCount['status'], string> = {
@@ -26,11 +29,12 @@ const STATUS_BADGE: Record<StockCount['status'], string> = {
 
 /**
  * Blind physical inventory: the counter scans or picks a lot and types what is on the shelf;
- * expected quantities and variances appear only to the pharmacist who validates.
+ * expected quantities and variances appear only to the pharmacist who validates. A count that
+ * covers a narcotic, or whose variances are large, is validated with a second person's PIN.
  */
 @Component({
   selector: 'app-stock-count-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Icon],
+  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Icon, ApprovalDialog],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -334,6 +338,21 @@ const STATUS_BADGE: Record<StockCount['status'], string> = {
         </aside>
       </div>
     </div>
+
+    @if (approving(); as c) {
+      <app-approval-dialog
+        title="Valider l'inventaire"
+        [detail]="c.label"
+        why="Inventaire d'un stupéfiant ou écart important"
+        [amountCents]="c.varianceValueCents ?? null"
+        [initialReason]="approvalNotes()"
+        confirmLabel="Valider et régulariser"
+        [busy]="busy()"
+        [error]="approvalError()"
+        (confirmed)="validateWithApproval(c, $event)"
+        (cancelled)="approving.set(null)"
+      />
+    }
   `,
   styles: `
     .variance-row td {
@@ -367,6 +386,12 @@ export class StockCountPage {
       : lines;
   });
   protected readonly draft: Record<string, number | null> = {};
+  /** Count waiting for the second signature, with the notes typed so far. */
+  protected readonly approving = signal<StockCount | null>(null);
+  protected readonly approvalNotes = signal('');
+  protected readonly approvalError = signal<string | null>(null);
+  protected readonly busy = signal(false);
+  private readonly toast = inject(ToastService);
   protected readonly locations = signal<StorageLocation[]>([]);
   protected label = '';
   /** Preselected from the Emplacements screen ("Inventorier"). */
@@ -378,6 +403,11 @@ export class StockCountPage {
   constructor() {
     void this.loadRecent();
     void this.loadLocations();
+    // Opened from the "Contrôle du jour" card
+    const count = inject(ActivatedRoute).snapshot.queryParamMap.get('count');
+    if (count) {
+      void this.open(count);
+    }
   }
 
   protected statusLabel(status: StockCount['status']): string {
@@ -471,12 +501,53 @@ export class StockCountPage {
 
   protected async validate(c: StockCount): Promise<void> {
     const notes = prompt('Observations (optionnel)') ?? '';
-    await this.run(() =>
-      firstValueFrom(
-        this.http.post<StockCount>(`${this.api}/${c.id}/validation`, { notes: notes || null }),
-      ),
-    );
-    await this.loadRecent();
+    this.status.set(null);
+    try {
+      this.apply(
+        await firstValueFrom(
+          this.http.post<StockCount>(`${this.api}/${c.id}/validation`, { notes: notes || null }),
+        ),
+      );
+      this.toast.success('Inventaire validé, écarts régularisés');
+      await this.loadRecent();
+    } catch (error) {
+      if (isFourEyesRefusal(error)) {
+        this.approvalNotes.set(notes);
+        this.approvalError.set(null);
+        this.approving.set(c);
+      } else {
+        this.status.set(
+          (error as { error?: { detail?: string } }).error?.detail ?? 'Opération refusée',
+        );
+      }
+    }
+  }
+
+  protected async validateWithApproval(
+    c: StockCount,
+    confirmation: ApprovalConfirmation,
+  ): Promise<void> {
+    this.busy.set(true);
+    this.approvalError.set(null);
+    try {
+      this.apply(
+        await firstValueFrom(
+          this.http.post<StockCount>(`${this.api}/${c.id}/validation`, {
+            notes: confirmation.reason || null,
+            ...approverFields(confirmation.approval),
+          }),
+        ),
+      );
+      this.approving.set(null);
+      this.toast.success('Inventaire validé avec la seconde signature');
+      await this.loadRecent();
+    } catch (error) {
+      this.approvalError.set(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Validation refusée',
+      );
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   protected async cancel(c: StockCount): Promise<void> {
@@ -490,14 +561,17 @@ export class StockCountPage {
     await this.loadRecent();
   }
 
+  private apply(result: StockCount): void {
+    this.count.set(result);
+    for (const line of result.lines) {
+      this.draft[line.id] = line.countedQuantity ?? null;
+    }
+  }
+
   private async run(action: () => Promise<StockCount>): Promise<void> {
     this.status.set(null);
     try {
-      const result = await action();
-      this.count.set(result);
-      for (const line of result.lines) {
-        this.draft[line.id] = line.countedQuantity ?? null;
-      }
+      this.apply(await action());
     } catch (error) {
       this.status.set(
         (error as { error?: { detail?: string } }).error?.detail ?? 'Opération refusée',

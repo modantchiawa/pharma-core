@@ -1,9 +1,11 @@
 import {
+  GoodsReceiptResult,
   ProposalLine,
   PurchaseOrder,
   PurchaseOrderReceipt,
   PurchaseOrderScope,
   PurchaseOrderStatus,
+  ReceivingView,
   Supplier,
 } from '../../core/api/models';
 import { Gs1Code } from '../../shared/gs1';
@@ -152,7 +154,8 @@ export interface ReceiptLineDraft {
   productId: string;
   designation: string;
   cip13: string;
-  remaining: number;
+  /** Units still awaited; null when the pharmacy receives blind (never shown to the receiver). */
+  remaining: number | null;
   quantity: number;
   lotNumber: string;
   expiryDate: string;
@@ -162,24 +165,44 @@ export interface ReceiptLineDraft {
   sellingPrice: string;
 }
 
+/**
+ * Lines of the delivery form: pre-filled with what remains, or empty in blind receiving (the
+ * receiver counts what came; the difference with the order is computed after the receipt).
+ */
 export function receiptDraft(
-  order: PurchaseOrder,
+  view: ReceivingView,
   toUnits: (minor: number) => number,
 ): ReceiptLineDraft[] {
-  return order.lines
-    .filter((line) => line.quantityReceived < line.quantityOrdered)
+  return view.lines
+    .filter((line) => view.blind || (line.quantityRemaining ?? 0) > 0)
     .map((line) => ({
       productId: line.productId,
       designation: line.designation,
       cip13: line.cip13,
-      remaining: line.quantityOrdered - line.quantityReceived,
-      quantity: line.quantityOrdered - line.quantityReceived,
+      remaining: view.blind ? null : line.quantityRemaining,
+      quantity: view.blind ? 0 : (line.quantityRemaining ?? 0),
       lotNumber: '',
       expiryDate: '',
       unitCost: String(toUnits(line.unitCostCents)),
       vatRate: '',
       sellingPrice: '',
     }));
+}
+
+/** What the receiver is told once a delivery is booked against an order. */
+export function receiptOutcome(
+  result: GoodsReceiptResult,
+  units: number,
+  orderNumber: string,
+): string {
+  const check = result.check;
+  if (check?.blind && check.discrepancyLines > 0) {
+    return `Réception enregistrée : ${units} unité(s). ${check.discrepancyLines} ligne(s) diffèrent de la commande, le titulaire en est informé.`;
+  }
+  if (result.orderStatus === 'RECEIVED') {
+    return `Commande ${orderNumber} reçue en totalité`;
+  }
+  return `Réception enregistrée : ${units} unité(s) en stock`;
 }
 
 /** A line is sent when something was received; it then needs a lot and an expiry date. */

@@ -263,6 +263,8 @@ export interface PurchaseOrder {
   /** Value of the units still awaited (0 once closed). */
   remainingCents: number;
   supplier: SupplierContact;
+  /** Blind receiving: quantities and amounts are withheld (zeros) from this user. */
+  quantitiesHidden?: boolean;
 }
 
 export interface PurchaseOrderLine {
@@ -349,6 +351,45 @@ export interface GoodsReceiptResult {
   vatCents: number;
   lines: number;
   orderStatus: PurchaseOrderStatus | null;
+  /** Comparison with the order, computed once the receipt is booked (null without order). */
+  check?: GoodsReceiptCheck | null;
+}
+
+export interface GoodsReceiptCheck {
+  blind: boolean;
+  separationWarning: boolean;
+  discrepancyLines: number;
+  discrepancyUnits: number;
+  lines: {
+    productId: string;
+    designation: string;
+    expected: number;
+    received: number;
+    difference: number;
+  }[];
+}
+
+/** The receiving form of an order; quantities are null when the pharmacy receives blind. */
+export interface ReceivingView {
+  orderId: string;
+  number: string;
+  supplierId: string;
+  supplierName: string;
+  status: PurchaseOrderStatus;
+  blind: boolean;
+  lines: {
+    lineNo: number;
+    productId: string;
+    designation: string;
+    cip13: string;
+    unitCostCents: number;
+    quantityOrdered: number | null;
+    quantityRemaining: number | null;
+    locationCode: string | null;
+    locationName: string | null;
+    locationKind: StorageLocationKind | null;
+    locationDetail: string | null;
+  }[];
 }
 
 export interface IncomeStatement {
@@ -883,4 +924,325 @@ export interface TerminalTicketRequest {
   changeDueCents: number;
   vat: { rate: number; totalTtcCents: number; vatCents: number }[];
   offline: boolean;
+}
+
+// ---------------------------------------------------------------- contrôle interne
+
+/** Thresholds above which a second person signs (minor units; 0 = off, narcotics always). */
+export interface FourEyesThresholds {
+  adjustmentApprovalCents: number;
+  refundApprovalCents: number;
+  cancellationApprovalCents: number;
+}
+
+/** E-mail and PIN typed by the second person on the requester's terminal. */
+export interface SecondApproval {
+  email: string;
+  pin: string;
+}
+
+export type WriteOffKind = 'CASSE' | 'PERIME' | 'PERTE' | 'VOL';
+
+export interface ProductLots {
+  productId: string;
+  designation: string;
+  cip13: string;
+  narcotic: boolean;
+  inSafe: boolean;
+  lots: {
+    lotId: string;
+    lotNumber: string;
+    expiryDate: string;
+    quantity: number;
+    unitCostCents: number;
+  }[];
+}
+
+export interface StockWriteOffResult {
+  id: string;
+  lotId: string;
+  productId: string;
+  kind: WriteOffKind;
+  quantity: number;
+  valueCents: number;
+  approvedBy: string | null;
+}
+
+export interface SaleReturnResult {
+  returnId: string;
+  saleId: string;
+  refundCents: number;
+  units: number;
+  approvedBy: string | null;
+}
+
+export interface StaffMember {
+  userId: string;
+  displayName: string;
+}
+
+export interface DailyCountItem {
+  rank: number;
+  productId: string;
+  designation: string;
+  cip13: string;
+  score: number;
+  reasons: string[];
+  locationCode: string | null;
+  locationName: string | null;
+  locationKind: StorageLocationKind | null;
+  narcotic: boolean;
+}
+
+export interface DailyCountVariance {
+  productId: string;
+  designation: string;
+  expected: number;
+  counted: number;
+  variance: number;
+  valueCents: number;
+  sensitive: boolean;
+  windowFrom: string;
+  windowTo: string;
+  /** False when the product was never counted before: the window then covers the last 30 days. */
+  sincePreviousCount: boolean;
+  staffOnDuty: StaffMember[];
+}
+
+export type DailyCountStatus = 'PENDING' | 'OPEN' | 'VALIDATED' | 'CANCELLED';
+
+export interface DailyCount {
+  id: string;
+  date: string;
+  status: DailyCountStatus;
+  stockCountId: string | null;
+  startedAt: string | null;
+  validatedAt: string | null;
+  validatedBy: string | null;
+  lineCount: number;
+  countedLines: number;
+  items: DailyCountItem[];
+  variances: DailyCountVariance[];
+}
+
+export interface DailyCountSummary {
+  id: string;
+  date: string;
+  status: DailyCountStatus;
+  stockCountId: string | null;
+  products: number;
+  lineCount: number;
+  countedLines: number;
+  varianceUnits: number;
+  varianceValueCents: number;
+  sensitiveVariance: boolean;
+  validatedBy: string | null;
+  validatedAt: string | null;
+}
+
+export type ControlMetric =
+  | 'CANCELLATIONS_AFTER_PAYMENT'
+  | 'CANCELLATION_RATE'
+  | 'DISCOUNTS'
+  | 'SUPERVISOR_OVERRIDES'
+  | 'STOCK_LOSSES'
+  | 'RETURNS'
+  | 'CASH_VARIANCE'
+  | 'COUNT_DISCREPANCIES'
+  | 'OUTSIDE_HOURS'
+  | 'SHORTFALL_SALES';
+
+export interface ControlFlag {
+  metric: ControlMetric;
+  flagged: boolean;
+  value: number;
+  teamMedian: number;
+  /** "Pourquoi ce signalement", with the figures. */
+  explanation: string;
+}
+
+export interface EmployeeControl {
+  userId: string;
+  displayName: string;
+  active: boolean;
+  sales: number;
+  salesNetCents: number;
+  cancellations: number;
+  cancellationsCents: number;
+  cancellationsAfterPayment: number;
+  cancellationRate: number;
+  discountsCents: number;
+  supervisorOverrides: number;
+  adjustments: number;
+  adjustmentsValueCents: number;
+  writeOffs: number;
+  writeOffsValueCents: number;
+  returns: number;
+  returnsCents: number;
+  cashSessions: number;
+  cashVarianceCents: number;
+  worstCashVarianceCents: number;
+  countDiscrepancies: number;
+  outsideHours: number;
+  shortfallSales: number;
+  flags: ControlFlag[];
+}
+
+export interface ControlOverview {
+  from: string;
+  to: string;
+  currency: string;
+  employees: EmployeeControl[];
+  flaggedEmployees: number;
+  openAlerts: number;
+}
+
+export interface ControlEvent {
+  at: string;
+  type: string;
+  label: string;
+  detail: string;
+  amountCents: number | null;
+  reference: string;
+}
+
+export interface NarcoticEntry {
+  at: string;
+  /** Movement type, or COUNT for a physical count. */
+  type: string;
+  quantity: number;
+  balance: number;
+  reference: string | null;
+  recordedBy: string | null;
+  expected: number | null;
+  counted: number | null;
+  gap: number | null;
+  countedBy: string | null;
+  validatedBy: string | null;
+  approvedBy: string | null;
+}
+
+export interface NarcoticProduct {
+  productId: string;
+  designation: string;
+  cip13: string;
+  locationCode: string | null;
+  locationKind: StorageLocationKind | null;
+  openingBalance: number;
+  theoreticalBalance: number;
+  onHand: number;
+  lastCount: {
+    validatedAt: string;
+    expected: number;
+    counted: number;
+    gap: number;
+    countedBy: string | null;
+    validatedBy: string | null;
+    approvedBy: string | null;
+  } | null;
+  unitsSinceLastCount: number;
+  gapAtLastCount: boolean;
+  entries: NarcoticEntry[];
+}
+
+export interface NarcoticsRegister {
+  from: string;
+  to: string;
+  products: NarcoticProduct[];
+}
+
+export interface ReceiptCheckView {
+  receiptId: string;
+  orderNumber: string;
+  supplier: string;
+  receivedAt: string;
+  receivedBy: string | null;
+  blind: boolean;
+  separationWarning: boolean;
+  discrepancyLines: number;
+  discrepancyUnits: number;
+  /** JSON array of { designation, expected, received, difference }. */
+  lines: string;
+}
+
+export interface ApprovalView {
+  id: string;
+  action:
+    'STOCK_ADJUSTMENT' | 'STOCK_WRITE_OFF' | 'STOCK_COUNT' | 'SALE_RETURN' | 'SALE_CANCELLATION';
+  resourceType: string;
+  resourceId: string;
+  amountCents: number;
+  narcotic: boolean;
+  requestedBy: string;
+  approvedBy: string;
+  reason: string;
+  approvedAt: string;
+}
+
+export type ControlAlertKind =
+  | 'LARGE_ADJUSTMENT'
+  | 'CANCELLATION_AFTER_PAYMENT'
+  | 'CASH_VARIANCE'
+  | 'COUNT_DISCREPANCY'
+  | 'OUTSIDE_HOURS'
+  | 'PIN_FAILURES'
+  | 'RECEIPT_DISCREPANCY'
+  | 'TEST';
+
+export interface ControlAlert {
+  id: string;
+  kind: ControlAlertKind;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  title: string;
+  detail: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  staffUserId: string | null;
+  staffName: string | null;
+  amountCents: number | null;
+  occurredAt: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+}
+
+export interface ControlAlertFeed {
+  unread: number;
+  alerts: ControlAlert[];
+}
+
+export interface ActivityDay {
+  day: 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+  open: string;
+  close: string;
+}
+
+export interface ControlSettings {
+  microCountSize: number;
+  adjustmentApprovalCents: number;
+  refundApprovalCents: number;
+  cancellationApprovalCents: number;
+  alertAdjustmentCents: number;
+  alertCancellationCents: number;
+  alertCashVarianceCents: number;
+  pinFailureAlertCount: number;
+  blindReceiving: boolean;
+  receivingSeparation: 'OFF' | 'WARN' | 'BLOCK';
+  activityHours: ActivityDay[];
+  webhookEnabled: boolean;
+  webhookUrl: string | null;
+  webhookSecretSet: boolean;
+  updatedAt: string | null;
+  version: number;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  alertId: string;
+  status: 'PENDING' | 'DELIVERED' | 'FAILED';
+  attempts: number;
+  nextAttemptAt: string;
+  lastError: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
 }

@@ -78,9 +78,10 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 
 | Fonction | Attendu | PharmaCore |
 |---|---|---|
-| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 43 permissions, 5 rôles prédéfinis modifiables |
+| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 46 permissions, 5 rôles prédéfinis modifiables |
 | Connexion mot de passe + **bascule caissier par PIN**, sans Internet | Oui | ✅ |
 | Journal d'audit inaltérable | Rare | ✅ chaîne SHA-256 |
+| **Contrôle interne anti-fraude** : recomptage tournant à l'aveugle tiré selon le risque, double validation (seconde personne et PIN) des sorties, retours et annulations encaissées, réception à l'aveugle et séparation des tâches, indicateurs par employé avec signalement expliqué, registre des stupéfiants, alertes en direct et webhook signé | Rare | ✅ Gestion › Contrôle interne |
 | **Sauvegardes** automatiques locales, USB et cloud | Oui | ✅ tâche planifiée + réplique cloud continue |
 | Supervision éditeur multi-pharmacies | — | ✅ |
 | Personnalisation : logo, couleurs, mentions, ticket ; densité, contraste, taille de texte, mode sombre par poste | Partiel | ✅ |

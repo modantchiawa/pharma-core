@@ -104,6 +104,11 @@ export const routes: Routes = [
           import('./features/dashboard/dashboard-page').then((m) => m.DashboardPage),
       },
       {
+        path: 'control',
+        loadChildren: () =>
+          import('./features/control/control.routes').then((m) => m.CONTROL_ROUTES),
+      },
+      {
         path: 'accounting',
         title: 'Comptabilité',
         canActivate: [permissionGuard('ACCOUNTING_VIEW')],

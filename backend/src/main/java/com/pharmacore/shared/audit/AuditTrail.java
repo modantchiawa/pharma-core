@@ -7,6 +7,7 @@ import com.pharmacore.shared.runtime.NodeProperties;
 import java.time.Clock;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -15,7 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Appends tamper-evident audit events in the same transaction as the business change they
- * describe: either both are committed or neither is.
+ * describe: either both are committed or neither is. Each event is then published as
+ * {@link AuditRecorded} to the listeners of the same transaction.
  */
 @Service
 public class AuditTrail {
@@ -23,11 +25,13 @@ public class AuditTrail {
     private final JdbcClient jdbc;
     private final Clock clock;
     private final NodeProperties node;
+    private final ApplicationEventPublisher events;
 
-    public AuditTrail(JdbcClient jdbc, Clock clock, NodeProperties node) {
+    public AuditTrail(JdbcClient jdbc, Clock clock, NodeProperties node, ApplicationEventPublisher events) {
         this.jdbc = jdbc;
         this.clock = clock;
         this.node = node;
+        this.events = events;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -83,6 +87,7 @@ public class AuditTrail {
                 .param("previousHash", record.previousHash())
                 .param("hash", hash)
                 .update();
+        events.publishEvent(new AuditRecorded(record, details));
         return record;
     }
 

@@ -1,11 +1,15 @@
 package com.pharmacore.inventory.web;
 
+import com.pharmacore.control.application.FourEyesService;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.StockService.ExpiryAlert;
 import com.pharmacore.inventory.application.StockService.LocationFilter;
+import com.pharmacore.inventory.application.StockService.ProductLots;
 import com.pharmacore.inventory.application.StockService.ReorderSuggestion;
 import com.pharmacore.inventory.application.StockService.StockOverview;
+import com.pharmacore.inventory.application.StockService.WriteOff;
 import com.pharmacore.inventory.domain.InsufficientStockException;
+import com.pharmacore.inventory.domain.WriteOffKind;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -68,7 +72,23 @@ class InventoryController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAuthority('STOCK_ADJUST')")
     void adjust(@PathVariable UUID lotId, @Valid @RequestBody AdjustmentRequest request) {
-        stock.adjustLot(lotId, request.countedQuantity(), request.reason());
+        stock.adjustLot(lotId, request.countedQuantity(), request.reason(),
+                new FourEyesService.Credentials(request.approverEmail(), request.approverPin()));
+    }
+
+    /** Breakage, expiry, loss or theft declared by hand; a second person signs when required. */
+    @PostMapping("/lots/{lotId}/write-offs")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAuthority('STOCK_ADJUST')")
+    WriteOff writeOff(@PathVariable UUID lotId, @Valid @RequestBody WriteOffRequest request) {
+        return stock.writeOff(lotId, request.kind(), request.quantity(), request.reason(),
+                new FourEyesService.Credentials(request.approverEmail(), request.approverPin()));
+    }
+
+    @GetMapping("/stocks/{productId}/lots")
+    @PreAuthorize("hasAuthority('STOCK_VIEW')")
+    ProductLots lots(@PathVariable UUID productId) {
+        return stock.lotsOf(productId);
     }
 
     @PostMapping("/stocks/{productId}/shortfall-resolution")
@@ -104,7 +124,13 @@ class InventoryController {
                           @PositiveOrZero long unitCostCents) {
     }
 
-    record AdjustmentRequest(@Min(0) int countedQuantity, @NotBlank @Size(max = 255) String reason) {
+    /** The approver's e-mail and PIN are only needed above the four-eyes threshold or for a narcotic. */
+    record AdjustmentRequest(@Min(0) int countedQuantity, @NotBlank @Size(max = 255) String reason,
+                             @Size(max = 200) String approverEmail, @Size(max = 12) String approverPin) {
+    }
+
+    record WriteOffRequest(@NotNull WriteOffKind kind, @Positive int quantity, @NotBlank @Size(max = 255) String reason,
+                           @Size(max = 200) String approverEmail, @Size(max = 12) String approverPin) {
     }
 
     record ReasonRequest(@NotBlank @Size(max = 255) String reason) {

@@ -22,6 +22,7 @@ const PERMISSION_GROUPS: { label: string; prefixes: string[] }[] = [
   { label: 'Stock et achats', prefixes: ['STOCK', 'PROCUREMENT', 'DATA'] },
   { label: 'Réseau et gardes', prefixes: ['NETWORK', 'GUARD', 'DIRECTORY'] },
   { label: 'Pilotage et comptabilité', prefixes: ['DASHBOARD', 'REPORT', 'ACCOUNTING'] },
+  { label: 'Contrôle interne', prefixes: ['CONTROL'] },
   { label: 'Administration', prefixes: ['CONFIG', 'USER', 'ROLE', 'AUDIT', 'HUB', 'PRINTER'] },
 ];
 

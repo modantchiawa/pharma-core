@@ -103,6 +103,30 @@ class DemoIT extends IntegrationTest {
         call(get("/api/v1/inventory/stocks?locationId=" + safe), owner, null)
                 .andExpect(jsonPath("$[0].designation").value("TRAMADOL 50MG GEL B/20"));
 
+        // internal control: the adjoint cancels paid sales far more than the team, the bell rings
+        String control = call(get("/api/v1/control/overview?from=" + today.minusDays(14) + "&to=" + today), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<Boolean>>read(control, "$.employees[?(@.displayName == 'Dr Ibrahim Souley')].flags"
+                + "[?(@.metric == 'CANCELLATIONS_AFTER_PAYMENT')].flagged")).containsExactly(true);
+        assertThat(JsonPath.<List<Integer>>read(control,
+                "$.employees[?(@.displayName == 'Dr Ibrahim Souley')].outsideHours"))
+                .hasSize(1).allMatch(n -> n >= 1);
+        String feed = call(get("/api/v1/control/alerts"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(feed, "$.alerts[*].kind")).contains("LARGE_ADJUSTMENT",
+                "COUNT_DISCREPANCY", "OUTSIDE_HOURS", "CASH_VARIANCE");
+        String register = call(get("/api/v1/control/narcotics?from=" + today.minusDays(14) + "&to=" + today), owner,
+                null).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<Integer>>read(register,
+                "$.products[?(@.designation == 'TRAMADOL 50MG GEL B/20')].lastCount.gap")).containsExactly(-2);
+        // today's control is drawn at the first request and can be started from the counter
+        call(post("/api/v1/control/daily-count"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.items.length()").value(6));
+
         // public directory: availability of paracetamol in Niamey and tonight's guard
         String availability = mvc.perform(get("/api/public/directory/availability?q=paracetamol&city=Niamey"))
                 .andExpect(status().isOk())

@@ -142,6 +142,7 @@ class DemoDataSeeder {
     private final GuardScheduleService guards;
     private final SaleRecordingService sales;
     private final CashSessionService cashSessions;
+    private final DemoInternalControl internalControl;
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
     private final Clock clock;
@@ -152,7 +153,9 @@ class DemoDataSeeder {
                    CustomerService customers, ProcurementService procurement, InsurerService insurers,
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
-                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations) {
+                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations,
+                   DemoInternalControl internalControl) {
+        this.internalControl = internalControl;
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -387,6 +390,9 @@ class DemoDataSeeder {
                     List.of(new SaleDraft.Payment(PaymentMethod.CREDIT, first.publicPriceCents(), null, null, null, null)),
                     null));
             seedOrders(tenant, laborex, copharni, products, today);
+            if (index == 0) {
+                internalControl.seed(tenant, pharmacy.ownerEmail(), pharmacy.cashierEmail(), products, today);
+            }
             cashSessions.openSession(TERMINAL, 50_000);
             if (rejected > 0) {
                 log.warn("Démonstration : {} vente(s) de {} refusée(s) par les règles métier", rejected, pharmacy.slug());

@@ -131,6 +131,8 @@ Le script `frontend/scripts/write-demo-env.mjs` génère `environment.demo.ts` a
 |---|---|---|---|---|
 | Titulaire | `sahel` | `titulaire@sahel.demo` | `Demo2026!` | `1234` |
 | Caissier | `sahel` | `caisse@sahel.demo` | `Demo2026!` | `1234` |
+| Adjoint | `sahel` | `adjoint@sahel.demo` | `Demo2026!` | `1234` |
+| Préparatrice | `sahel` | `preparatrice@sahel.demo` | `Demo2026!` | `1234` |
 | Titulaire | `lacouroussou` | `titulaire@lacouroussou.demo` | `Demo2026!` | `1234` |
 | Caissier | `lacouroussou` | `caisse@lacouroussou.demo` | `Demo2026!` | `1234` |
 | Console éditeur | — | bouton « Console éditeur » | `DEMO_PLATFORM_PASSWORD` | — |
@@ -150,6 +152,11 @@ le PIN avec `DEMO_PIN`.
   crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`, dix emplacements
   (rayons A à C, tiroir des injectables, réfrigérateur pour l'insuline, coffre pour le tramadol,
   comptoir, réserve) où chaque produit est rangé.
+* Contrôle interne (`sahel`) : l'adjoint a annulé 6 de ses 27 ventes du soir 25 minutes après
+  encaissement (chacune sous le seuil, le taux le signale), déclaré trois sorties de stock (périmé,
+  perte, vol contre-signé par la titulaire), vendu à 23 h 20 hors garde ; la caisse `DEMO-2` d'hier a
+  été clôturée 2 500 F court ; le contrôle du jour d'hier a trouvé 2 gélules de tramadol manquantes
+  au coffre. Les alertes correspondantes sont dans la cloche.
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -174,6 +181,9 @@ le PIN avec `DEMO_PIN`.
 | 14 | Réseau › « Qui l'a ? » depuis `lacouroussou` | Stock de `sahel` plafonné à 20 |
 | 15 | Console éditeur : liste des pharmacies, import du référentiel (essai à blanc) | Deux pharmacies actives, aperçu du fichier |
 | 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
+| 17 | Gestion › Contrôle interne en titulaire `sahel` | Dr Ibrahim Souley signalé (annulations après paiement, taux, hors horaires) avec « pourquoi ce signalement » et les tickets en cause ; onglet Stupéfiants : solde théorique du tramadol, inventaire −2 avec les deux signatures |
+| 18 | Pilotage › Contrôle du jour › Démarrer, compter, valider | Comptage à l'aveugle des produits tirés ; sur un stupéfiant, la validation demande l'e-mail et le PIN d'une seconde personne (`adjoint@sahel.demo`) |
+| 19 | Stocks › Sortie sur Augmentin (vol, 2 boîtes) en titulaire | Seconde personne exigée au-delà de 10 000 F au coût ; la titulaire elle-même est refusée, l'adjoint est accepté ; alerte poussée dans la cloche |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

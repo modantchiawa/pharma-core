@@ -1,6 +1,7 @@
 package com.pharmacore.sales.web;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.pharmacore.control.application.FourEyesService;
 import com.pharmacore.sales.application.SaleManagementService;
 import com.pharmacore.sales.application.SaleRecordingService;
 import com.pharmacore.sales.application.SaleSyncService;
@@ -19,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -92,7 +94,19 @@ class SaleController {
     @GetMapping("/api/v1/sales/{saleId}")
     @PreAuthorize("hasAuthority('SALE_VIEW')")
     SaleDetail get(@PathVariable UUID saleId) {
-        return SaleDetail.of(management.get(saleId));
+        return SaleDetail.of(management.get(saleId), management.returnedQuantities(saleId));
+    }
+
+    /** Partial return refunded in cash; a second person signs above the threshold or for a narcotic. */
+    @PostMapping("/api/v1/sales/{saleId}/returns")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAuthority('SALE_CANCEL')")
+    SaleManagementService.ReturnResult returnLines(@PathVariable UUID saleId,
+                                                   @Valid @RequestBody SaleRequests.ReturnRequest request) {
+        return management.returnLines(saleId, request.lines().stream()
+                        .map(l -> new SaleManagementService.ReturnLine(l.lineNo(), l.quantity())).toList(),
+                request.reason(), request.terminalId(),
+                new FourEyesService.Credentials(request.approverEmail(), request.approverPin()));
     }
 
     @PostMapping("/api/v1/sales/{saleId}/cancellation")
@@ -152,10 +166,11 @@ class SaleController {
     record SaleDetail(SaleSummary summary, long totalGrossCents, long totalDiscountCents, List<Line> lines,
                       List<Payment> payments, String cancelReason) {
 
-        static SaleDetail of(SaleEntity sale) {
+        static SaleDetail of(SaleEntity sale, Map<UUID, Integer> returned) {
             return new SaleDetail(SaleSummary.of(sale), sale.totalGrossCents(), sale.totalDiscountCents(),
                     sale.lines().stream().map(line -> new Line(line.lineNo(), line.productId(), line.quantity(),
-                            line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate())).toList(),
+                            line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate(),
+                            returned.getOrDefault(line.id(), 0))).toList(),
                     sale.payments().stream().map(payment -> new Payment(payment.method().name(),
                             payment.amountCents(), payment.thirdPartyCode(), payment.provider(),
                             payment.confirmationStatus().name())).toList(),
@@ -163,8 +178,9 @@ class SaleController {
         }
     }
 
+    /** @param returnedQuantity units already brought back by partial returns */
     record Line(short lineNo, UUID productId, int quantity, long unitPriceCents, long discountCents, long netCents,
-                BigDecimal vatRate) {
+                BigDecimal vatRate, int returnedQuantity) {
     }
 
     record Payment(String method, long amountCents, String thirdPartyCode, String provider, String confirmationStatus) {

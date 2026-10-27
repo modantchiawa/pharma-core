@@ -15,7 +15,7 @@ public enum PredefinedRole {
     TITULAIRE("Pharmacien titulaire", new BigDecimal("100"), EnumSet.allOf(Permission.class)),
 
     ADJOINT("Pharmacien adjoint", new BigDecimal("30"), EnumSet.complementOf(EnumSet.of(
-            ROLE_MANAGE, USER_MANAGE, CONFIG_BRANDING_MANAGE, ACCOUNTING_MANAGE, HUB_ADMIN))),
+            ROLE_MANAGE, USER_MANAGE, CONFIG_BRANDING_MANAGE, ACCOUNTING_MANAGE, HUB_ADMIN, CONTROL_SETTINGS))),
 
     PREPARATEUR("Préparateur", new BigDecimal("5"), EnumSet.of(
             SALE_CREATE, SALE_VIEW, PRESCRIPTION_DISPENSE, STOCK_VIEW, STOCK_RECEIVE,

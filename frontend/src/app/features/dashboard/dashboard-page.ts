@@ -21,6 +21,7 @@ import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { columnPath, niceCeiling } from '../../shared/ui/chart';
 import { Icon } from '../../shared/ui/icon';
+import { DailyCountCard } from '../control/daily-count-card';
 import { SetupChecklist } from './setup-checklist';
 
 interface Bar {
@@ -58,7 +59,16 @@ const METHOD_LABELS: Record<string, string> = {
 /** Steering dashboard: sales, margin, payment mix, best sellers, stock exposure, receivables. */
 @Component({
   selector: 'app-dashboard-page',
-  imports: [FormsModule, RouterLink, MoneyPipe, DatePipe, DecimalPipe, Icon, SetupChecklist],
+  imports: [
+    FormsModule,
+    RouterLink,
+    MoneyPipe,
+    DatePipe,
+    DecimalPipe,
+    Icon,
+    SetupChecklist,
+    DailyCountCard,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in space-y-5">
@@ -106,6 +116,8 @@ const METHOD_LABELS: Record<string, string> = {
       </header>
 
       <app-setup-checklist />
+
+      <app-daily-count-card [compact]="true" />
 
       @if ((purchaseOrders()?.overdue ?? 0) > 0) {
         <a

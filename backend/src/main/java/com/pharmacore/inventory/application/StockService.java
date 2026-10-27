@@ -1,6 +1,9 @@
 package com.pharmacore.inventory.application;
 
+import com.pharmacore.control.application.FourEyesService;
+import com.pharmacore.control.domain.FourEyesPolicy;
 import com.pharmacore.inventory.domain.StorageLocationKind;
+import com.pharmacore.inventory.domain.WriteOffKind;
 import com.pharmacore.inventory.persistence.StockLotEntity;
 import com.pharmacore.inventory.persistence.StockLotRepository;
 import com.pharmacore.inventory.persistence.StockMovementEntity;
@@ -32,11 +35,12 @@ public class StockService {
     private final TenantCalendar calendar;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
+    private final FourEyesService fourEyes;
     private final Clock clock;
 
     public StockService(StockLedger ledger, StockRepository stocks, StockLotRepository lots,
                         StockMovementRepository movements, TenantCalendar calendar, AuditTrail audit, JdbcClient jdbc,
-                        Clock clock) {
+                        FourEyesService fourEyes, Clock clock) {
         this.ledger = ledger;
         this.stocks = stocks;
         this.lots = lots;
@@ -44,7 +48,21 @@ public class StockService {
         this.calendar = calendar;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.fourEyes = fourEyes;
         this.clock = clock;
+    }
+
+    /** A declared exit; {@code approvedBy} is the second person when one signed. */
+    public record WriteOff(UUID id, UUID lotId, UUID productId, WriteOffKind kind, int quantity, long valueCents,
+                           UUID approvedBy) {
+    }
+
+    public record LotView(UUID lotId, String lotNumber, LocalDate expiryDate, int quantity, long unitCostCents) {
+    }
+
+    /** Lots of a product; {@code narcotic} and {@code inSafe} tell the dialog that four eyes apply. */
+    public record ProductLots(UUID productId, String designation, String cip13, boolean narcotic, boolean inSafe,
+                              List<LotView> lots) {
     }
 
     @Transactional
@@ -71,21 +89,116 @@ public class StockService {
         return lot.id();
     }
 
+    /**
+     * Corrects a lot to the quantity found on the shelf. Above the pharmacy's threshold (value at
+     * cost of the difference), or for a narcotic, a second person signs with their PIN.
+     */
     @Transactional
-    public void adjustLot(UUID lotId, int countedQuantity, String reason) {
+    public void adjustLot(UUID lotId, int countedQuantity, String reason, FourEyesService.Credentials approver) {
         var lot = lots.findById(lotId).orElseThrow(() -> new NotFoundException("Lot", lotId));
         var stock = stocks.lockById(lot.stockId()).orElseThrow(() -> new NotFoundException("Stock", lot.stockId()));
         int delta = countedQuantity - lot.quantity();
         if (delta == 0) {
             return;
         }
+        long value = (long) delta * lot.unitCostCents();
+        var approval = fourEyes.check(new FourEyesService.Request(FourEyesPolicy.Action.STOCK_ADJUSTMENT, "STOCK_LOT",
+                lotId, value, isNarcotic(stock.productId()), reason, approver));
         Instant now = clock.instant();
         lot.setQuantity(countedQuantity);
         stock.touch(now);
         movements.save(new StockMovementEntity(stock.id(), lotId, StockMovementEntity.Type.ADJUSTMENT, delta,
                 "ADJUSTMENT", lotId, now, TenantContext.requireTenantUser().userId()));
         audit.record("STOCK_ADJUSTED", "STOCK_LOT", lotId, Map.of(
-                "delta", Integer.toString(delta), "counted", Integer.toString(countedQuantity), "reason", reason));
+                "delta", Integer.toString(delta), "counted", Integer.toString(countedQuantity), "reason", reason,
+                "productId", stock.productId().toString(), "valueCents", Long.toString(value),
+                "approvedBy", approval.map(a -> a.approverId().toString()).orElse("")));
+    }
+
+    /**
+     * Declared exit of units that will never be sold: breakage, expiry noticed on the shelf, loss
+     * or theft. Valued at the lot's cost; four eyes above the threshold and for narcotics.
+     */
+    @Transactional
+    public WriteOff writeOff(UUID lotId, WriteOffKind kind, int quantity, String reason,
+                             FourEyesService.Credentials approver) {
+        var lot = lots.findById(lotId).orElseThrow(() -> new NotFoundException("Lot", lotId));
+        var stock = stocks.lockById(lot.stockId()).orElseThrow(() -> new NotFoundException("Stock", lot.stockId()));
+        if (quantity <= 0 || quantity > lot.quantity()) {
+            throw new BusinessRuleException("write-off-quantity",
+                    "Le lot " + lot.lotNumber() + " contient " + lot.quantity() + " unité(s)");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessRuleException("reason-required", "Le motif est obligatoire");
+        }
+        long value = (long) quantity * lot.unitCostCents();
+        UUID id = UUID.randomUUID();
+        var approval = fourEyes.check(new FourEyesService.Request(FourEyesPolicy.Action.STOCK_WRITE_OFF,
+                "STOCK_WRITE_OFF", id, value, isNarcotic(stock.productId()), reason, approver));
+        var user = TenantContext.requireTenantUser();
+        Instant now = clock.instant();
+        lot.setQuantity(lot.quantity() - quantity);
+        stock.touch(now);
+        jdbc.sql("""
+                        INSERT INTO stock_write_off (id, tenant_id, lot_id, product_id, kind, quantity, unit_cost_cents,
+                                                     value_cents, reason, recorded_by, approval_id, occurred_at)
+                        VALUES (:id, :tenant, :lot, :product, :kind, :quantity, :cost, :value, :reason, :by,
+                                :approval, :at)""")
+                .param("id", id)
+                .param("tenant", user.tenant().value())
+                .param("lot", lotId)
+                .param("product", stock.productId())
+                .param("kind", kind.name())
+                .param("quantity", quantity)
+                .param("cost", lot.unitCostCents())
+                .param("value", value)
+                .param("reason", reason.trim())
+                .param("by", user.userId())
+                .param("approval", approval.map(FourEyesService.Approval::id).orElse(null))
+                .param("at", java.sql.Timestamp.from(now))
+                .update();
+        movements.save(new StockMovementEntity(stock.id(), lotId, StockMovementEntity.Type.WRITE_OFF, -quantity,
+                "WRITE_OFF", id, now, user.userId()));
+        audit.record("STOCK_WRITTEN_OFF", "STOCK_LOT", lotId, Map.of(
+                "writeOffId", id.toString(), "kind", kind.name(), "quantity", Integer.toString(quantity),
+                "valueCents", Long.toString(value), "reason", reason.trim(), "productId", stock.productId().toString(),
+                "lotNumber", lot.lotNumber(),
+                "approvedBy", approval.map(a -> a.approverId().toString()).orElse("")));
+        return new WriteOff(id, lotId, stock.productId(), kind, quantity, value,
+                approval.map(FourEyesService.Approval::approverId).orElse(null));
+    }
+
+    /** Lots on the shelf of one product, for the exit and adjustment dialog. */
+    @Transactional(readOnly = true)
+    public ProductLots lotsOf(UUID productId) {
+        var product = jdbc.sql("""
+                        SELECT p.designation, p.cip13, p.listing, loc.kind AS location_kind
+                        FROM product p
+                        LEFT JOIN stock s ON s.product_id = p.id
+                        LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        WHERE p.id = :product""")
+                .param("product", productId)
+                .query((rs, rowNum) -> new ProductLots(productId, rs.getString("designation"), rs.getString("cip13"),
+                        "STUPEFIANT".equals(rs.getString("listing")), "SAFE".equals(rs.getString("location_kind")),
+                        List.of()))
+                .optional()
+                .orElseThrow(() -> new NotFoundException("Product", productId));
+        List<LotView> lotViews = jdbc.sql("""
+                        SELECT l.id, l.lot_number, l.expiry_date, l.quantity, l.unit_cost_cents
+                        FROM stock_lot l JOIN stock s ON s.id = l.stock_id
+                        WHERE s.product_id = :product AND l.quantity > 0
+                        ORDER BY l.expiry_date, l.lot_number""")
+                .param("product", productId)
+                .query((rs, rowNum) -> new LotView(rs.getObject("id", UUID.class), rs.getString("lot_number"),
+                        rs.getDate("expiry_date").toLocalDate(), rs.getInt("quantity"), rs.getLong("unit_cost_cents")))
+                .list();
+        return new ProductLots(productId, product.designation(), product.cip13(), product.narcotic(),
+                product.inSafe(), lotViews);
+    }
+
+    private boolean isNarcotic(UUID productId) {
+        return jdbc.sql("SELECT listing = 'STUPEFIANT' FROM product WHERE id = :id")
+                .param("id", productId).query(Boolean.class).optional().orElse(false);
     }
 
     /** Price update at goods receipt (the wholesaler's invoice carries the new public price). */
