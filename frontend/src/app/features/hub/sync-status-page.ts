@@ -1,11 +1,25 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { Observable, firstValueFrom } from 'rxjs';
+import { TerminalBoard, TerminalView } from '../../core/api/models';
 import { NodeInfoService } from '../../core/api/node-info.service';
+import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { SaleOutboxService } from '../../core/offline/sale-outbox.service';
+import { TerminalService } from '../../core/offline/terminal.service';
+import { ToastService } from '../../core/ui/toast.service';
+import { plural } from '../../shared/terminal-sync';
 import { Icon } from '../../shared/ui/icon';
+import { TerminalBoardView } from '../../shared/ui/terminal-board';
+import { whileVisible } from '../../shared/visible-interval';
 
 interface SyncStatus {
   paired: boolean;
@@ -21,7 +35,7 @@ interface SyncStatus {
 /** Health of the local server: cloud link, pending changes, terminals' offline journals. */
 @Component({
   selector: 'app-sync-status-page',
-  imports: [DatePipe, Icon],
+  imports: [DatePipe, Icon, TerminalBoardView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -29,7 +43,8 @@ interface SyncStatus {
         <div>
           <h1 class="page-title">Serveur local</h1>
           <p class="page-subtitle">
-            Liaison avec le cloud, changements en attente et ventes hors ligne de ce poste.
+            Liaison avec le cloud, changements en attente, postes de caisse de l'officine et ventes
+            hors ligne de ce poste.
           </p>
         </div>
         @if (status(); as s) {
@@ -187,6 +202,18 @@ interface SyncStatus {
             </dl>
           </section>
         </div>
+
+        @if (terminals(); as board) {
+          <app-terminal-board
+            [board]="board"
+            [now]="now()"
+            [current]="terminal.terminalId"
+            [canForget]="canForget()"
+            [busy]="busy()"
+            (forget)="forget($event)"
+            (forgetStale)="forgetStale()"
+          />
+        }
       </div>
     </div>
   `,
@@ -218,18 +245,96 @@ export class SyncStatusPage {
   protected readonly outbox = inject(SaleOutboxService);
   private readonly http = inject(HttpClient);
   private readonly env = inject(APP_ENVIRONMENT);
+  protected readonly terminal = inject(TerminalService);
+  private readonly permissions = inject(PermissionService);
+  private readonly toast = inject(ToastService);
   protected readonly status = signal<SyncStatus | null>(null);
+  protected readonly terminals = signal<TerminalBoard | null>(null);
+  protected readonly now = signal(Date.now());
+  protected readonly busy = signal(false);
+  /** Forgetting writes to the hub: refused through the cloud for a pharmacy served by a hub. */
+  protected readonly canForget = computed(
+    () => this.permissions.has('HUB_ADMIN') && this.terminals()?.relayedByHub === false,
+  );
 
   constructor() {
     void this.refresh();
+    void this.refreshTerminals();
     const timer = setInterval(() => void this.refresh(), 10_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(() => clearInterval(timer));
+    whileVisible(() => void this.refreshTerminals(), 30_000, destroyRef);
+    whileVisible(() => this.now.set(Date.now()), 15_000, destroyRef);
+  }
+
+  protected async forget(terminal: TerminalView): Promise<void> {
+    const pending =
+      terminal.pendingSales > 0
+        ? ` Ses ${plural(terminal.pendingSales, 'vente', 'ventes')} en attente restent sur le poste et seront envoyées s'il revient.`
+        : '';
+    if (!confirm(`Oublier le poste ${terminal.terminalId} ?${pending}`)) {
+      return;
+    }
+    await this.act(
+      () =>
+        this.http.delete<void>(
+          `${this.env.apiUrl}/v1/pos/terminals/${encodeURIComponent(terminal.terminalId)}`,
+        ),
+      () => `Poste ${terminal.terminalId} oublié`,
+    );
+  }
+
+  protected async forgetStale(): Promise<void> {
+    if (
+      !confirm(
+        'Oublier tous les postes hors ligne sans vente en attente ? Un poste qui revient réapparaît à son prochain signal.',
+      )
+    ) {
+      return;
+    }
+    await this.act(
+      () =>
+        this.http.post<{ forgotten: number }>(
+          `${this.env.apiUrl}/v1/pos/terminals/forget-stale`,
+          {},
+        ),
+      (result) => plural(result?.forgotten ?? 0, 'poste oublié', 'postes oubliés'),
+    );
   }
 
   protected async syncNow(): Promise<void> {
     this.status.set(
       await firstValueFrom(this.http.post<SyncStatus>(`${this.env.apiUrl}/v1/hub/sync/run`, {})),
     );
+  }
+
+  private async refreshTerminals(): Promise<void> {
+    try {
+      this.terminals.set(
+        await firstValueFrom(this.http.get<TerminalBoard>(`${this.env.apiUrl}/v1/pos/terminals`)),
+      );
+      this.now.set(Date.now());
+    } catch {
+      // no permission or server unreachable: the section stays hidden or shows the last state
+    }
+  }
+
+  private async act<T>(
+    request: () => Observable<T>,
+    success: (result: T) => string,
+  ): Promise<void> {
+    this.busy.set(true);
+    try {
+      this.toast.success(success(await firstValueFrom(request())));
+      await this.refreshTerminals();
+    } catch (error) {
+      this.toast.error(
+        (error as { error?: { detail?: string } })?.error?.detail ??
+          'Action refusée par le serveur',
+      );
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   private async refresh(): Promise<void> {

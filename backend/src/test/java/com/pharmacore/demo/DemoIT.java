@@ -40,6 +40,19 @@ class DemoIT extends IntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         List<String> slugs = JsonPath.read(tenants, "$[*].slug");
         assertThat(slugs).contains("sahel", "lacouroussou");
+        // registers in every synchronization state; DEMO-1 (seeded sales, open session) is synchronized
+        String sahelId = JsonPath.<List<String>>read(tenants, "$[?(@.slug == 'sahel')].id").getFirst();
+        String registers = call(get("/api/platform/tenants/" + sahelId + "/supervision"), platform, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.terminals.counts.total").value(4))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(registers, "$.terminals.terminals[?(@.terminalId == 'DEMO-1')].state"))
+                .containsExactly("SYNCED");
+        assertThat(JsonPath.<List<String>>read(registers, "$.terminals.terminals[*].state"))
+                .containsExactlyInAnyOrder("SYNCED", "PENDING", "STALE", "NEVER");
+        assertThat(JsonPath.<List<Integer>>read(registers, "$.terminals.terminals[?(@.state == 'PENDING')].pendingSales"))
+                .containsExactly(3);
+        assertThat(JsonPath.<List<Object>>read(registers, "$.accounts[*].lastLoginAt")).hasSize(2).doesNotContainNull();
 
         // staff accounts
         String owner = login("sahel", "titulaire@sahel.demo", "Demo2026!");

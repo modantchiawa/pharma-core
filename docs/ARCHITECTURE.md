@@ -217,6 +217,14 @@ Migrations `V12` et `V13`.
 
 Migration `V14`.
 
+### 4.4 Supervision des postes de caisse et des comptes
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Postes et comptes** | `SyncSupervision`, `TerminalSyncState` (domaine pur), `TerminalSupervisionService`, `PlatformSupervisionController` (`/api/platform/tenants/sync-health`, `/{id}/supervision`), `TerminalSupervisionController` (`/api/v1/pos/terminals`, `HUB_ADMIN` ou `AUDIT_VIEW`), composant `app-terminal-board` partagé par la console et la page « Serveur local » | Chaque poste envoie un signal toutes les 60 s (ventes en attente, rejets, dernier rejeu) dans `terminal_heartbeat`. État calculé : **hors ligne** (`STALE`) sans signal depuis plus de `TERMINAL_STALE_AFTER` = 5 min, sinon **en attente** (`PENDING`) s'il reste des ventes dans son journal, sinon **jamais synchronisé** (`NEVER`) s'il n'a jamais rejoué de vente, sinon **synchronisé**. L'ancienneté du dernier rejeu n'entre pas en compte : un poste qui ne vend pas n'a rien à envoyer. Hub **injoignable** sans contact depuis plus de `HUB_UNREACHABLE_AFTER` = 5 min (un tour toutes les 30 s, avec au moins un `pull`). En mode hub, les postes parlent au hub qui réplique `terminal_heartbeat` vers le cloud : la console calcule les états **à l'instant du dernier contact du hub** (`observedAt`, « vu par le cloud il y a … ») et non à l'heure du cloud. Comptes : rôles, actif, verrouillé, mot de passe provisoire, PIN défini ou non, dernière connexion lue dans l'audit (`LOGIN`, `PIN_LOGIN`) ; aucun secret exposé. « Oublier » un poste supprime sa ligne de signal, refusé s'il est en contact (`terminal-active`) ; l'oubli groupé épargne les postes qui détiennent des ventes ; refusé depuis le cloud pour une pharmacie en mode hub (`hub-managed`), où il se fait sur le hub et se réplique. Audit `TERMINAL_FORGOTTEN`, `TERMINALS_FORGOTTEN` |
+
+Migration `V16` : colonne facultative `terminal_heartbeat.rejected_sales` (NULL pour les postes d'une version antérieure) et index partiel des connexions dans `audit_event`.
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste

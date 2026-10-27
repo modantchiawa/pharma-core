@@ -76,7 +76,8 @@ class SaleController {
     @PostMapping("/api/v1/pos/heartbeat")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void heartbeat(@Valid @RequestBody HeartbeatRequest request) {
-        heartbeats.beat(request.terminalId(), request.appVersion(), request.pendingSales(), request.lastSyncAt());
+        heartbeats.beat(request.terminalId(), request.appVersion(), request.pendingSales(), request.lastSyncAt(),
+                request.rejectedSales());
     }
 
     @GetMapping("/api/v1/sales")

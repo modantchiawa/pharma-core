@@ -1,5 +1,6 @@
 package com.pharmacore.tenant.application;
 
+import com.pharmacore.supervision.domain.SyncSupervision;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,7 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PlatformSupervisionService {
 
-    static final int ONLINE_THRESHOLD_SECONDS = 120;
+    /** Same threshold as the register states of {@link SyncSupervision}: online = not stale. */
+    static final long ONLINE_THRESHOLD_SECONDS = SyncSupervision.TERMINAL_STALE_AFTER.toSeconds();
 
     private final JdbcClient jdbc;
 
