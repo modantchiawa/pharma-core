@@ -36,6 +36,7 @@ describe('CartStore', () => {
         {
           provide: PermissionService,
           useValue: {
+            profile: signal(null),
             maxDiscountPercent: maxDiscount,
             has: (permission: string) => permissions.has(permission),
           },

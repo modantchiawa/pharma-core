@@ -5,7 +5,14 @@ import { firstValueFrom } from 'rxjs';
 import { Me, SessionPolicy } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
 import { SessionPolicyService } from '../session/session-policy.service';
-import { readCurrentUser, sessionEnded, sessionStarted } from '../session/session-store';
+import { SessionSignals } from '../session/session-signals';
+import {
+  readCurrentUser,
+  readLock,
+  sessionEnded,
+  sessionStarted,
+  writeLock,
+} from '../session/session-store';
 import type { SecretKind } from '../session/unlock-verifier';
 import { PermissionService } from './permission.service';
 
@@ -27,6 +34,8 @@ interface TokenResponse {
   profile: Me;
   /** The pharmacy's inactivity delays, absent from a server of an earlier version. */
   sessionPolicy?: SessionPolicy;
+  /** The session is locked on the server: this token only carries the terminal's heartbeat. */
+  sessionLocked?: boolean;
 }
 
 /**
@@ -43,6 +52,7 @@ export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly permissions = inject(PermissionService);
   private readonly sessionPolicy = inject(SessionPolicyService);
+  private readonly signals = inject(SessionSignals);
   private readonly realmState = signal<Realm>(
     (sessionStorage.getItem(REALM_KEY) as Realm) ?? 'pharmacy',
   );
@@ -53,6 +63,7 @@ export class AuthService {
   private readonly platformToken = signal<string | null>(
     sessionStorage.getItem(PLATFORM_TOKEN_KEY),
   );
+  private readonly terminalToken = signal(localStorage.getItem(TERMINAL_TOKEN_KEY));
   private platformManager: UserManager | null = null;
   private refreshing: Promise<string | null> | null = null;
 
@@ -79,8 +90,11 @@ export class AuthService {
     const exp = this.claims()?.['exp'];
     return typeof exp === 'number' && exp * 1000 > Date.now();
   });
-  /** Users who can switch in with a PIN on this terminal (last successful logins). */
-  readonly terminalBound = computed(() => !!localStorage.getItem(TERMINAL_TOKEN_KEY));
+  /**
+   * Users who can switch in with a PIN on this terminal (last successful logins); follows the
+   * first password login, so the lock screen of that session already offers the PIN.
+   */
+  readonly terminalBound = computed(() => !!this.terminalToken());
   readonly user = this.platformUser.asReadonly();
 
   async init(): Promise<void> {
@@ -115,6 +129,7 @@ export class AuthService {
     }
     if (response.terminalToken) {
       localStorage.setItem(TERMINAL_TOKEN_KEY, response.terminalToken);
+      this.terminalToken.set(response.terminalToken);
     }
     this.rememberKnownUser(email, response.profile.displayName);
     return this.started(response, email, 'password', password);
@@ -154,6 +169,36 @@ export class AuthService {
       ).catch(() => undefined);
     }
     return me;
+  }
+
+  /**
+   * Unlocks this terminal's own session: the server checks the PIN or password of the signed-in
+   * user, unlocks the session and rotates its tokens (a refresh running meanwhile is awaited, so
+   * that both do not spend the same refresh token).
+   */
+  async unlock(kind: SecretKind, secret: string): Promise<Me> {
+    await this.refreshing;
+    const response = await firstValueFrom(
+      this.http.post<TokenResponse>(`${this.env.apiUrl}/auth/unlock`, {
+        refreshToken: localStorage.getItem(REFRESH_KEY) ?? '',
+        method: kind === 'pin' ? 'PIN' : 'PASSWORD',
+        secret,
+      }),
+    );
+    return this.started(response, this.currentEmail() ?? '', kind, secret);
+  }
+
+  /**
+   * The terminal is locked: this tab forgets its access token, so that nothing left in the page
+   * or its storage can call the API. Background requests get a token marked as locked by a
+   * refresh, which the server only lets through to the heartbeat.
+   */
+  dropAccess(): void {
+    if (this.realmState() !== 'pharmacy') {
+      return;
+    }
+    sessionStorage.removeItem(ACCESS_KEY);
+    this.accessState.set(null);
   }
 
   /** Called by the HTTP layer on 401 and at startup; concurrent callers share one refresh. */
@@ -261,6 +306,13 @@ export class AuthService {
     this.mustChange.set(response.mustChangePassword);
     this.permissions.setProfile(response.profile);
     this.sessionPolicy.set(response.sessionPolicy);
+    if (response.sessionLocked) {
+      // Locked on the server (reload, another tab, deadline): the lock screen comes back
+      if (!readLock()) {
+        writeLock({ since: Date.now(), manual: false });
+      }
+      this.signals.serverLocked();
+    }
     return response.profile;
   }
 

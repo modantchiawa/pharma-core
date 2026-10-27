@@ -13,9 +13,10 @@ const VISIBLE_MARGIN = '200px';
 /**
  * Product photos for the thumbnails. The image endpoint is authenticated, so a photo is fetched
  * as a blob through the HTTP client (bearer token) and shown from an object URL. Its URL carries
- * the photo's version: the browser cache and the service worker keep it for good, which is what
- * lets the offline counter show the photos it has already seen. One shared observer starts the
- * downloads when the thumbnails come into view.
+ * the photo's version. The browser asks the server before reusing a photo (304 without the bytes),
+ * so a locked session gets nothing; the service worker serves the photos already seen only when
+ * the server cannot be reached (offline counter). One shared observer starts the downloads when
+ * the thumbnails come into view.
  */
 @Injectable({ providedIn: 'root' })
 export class ProductImageService {

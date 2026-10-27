@@ -34,7 +34,8 @@
       ],
       "version": 1,
       "cacheConfig": {
-        "strategy": "performance",
+        "strategy": "freshness",
+        "timeout": "3s",
         "maxSize": 3000,
         "maxAge": "365d"
       }

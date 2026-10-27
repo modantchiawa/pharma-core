@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Base64;
@@ -28,7 +30,8 @@ public class AuthSessionStore {
         TERMINAL
     }
 
-    public record Session(UUID id, UUID userId, Kind kind, String terminalId, Instant expiresAt) {
+    /** @param loginSessionId the sign-in a refresh token belongs to (null for a terminal binding, or before V19) */
+    public record Session(UUID id, UUID userId, Kind kind, String terminalId, Instant expiresAt, UUID loginSessionId) {
     }
 
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -41,13 +44,15 @@ public class AuthSessionStore {
 
     /** Creates a session and returns the raw token (shown once). */
     @Transactional(propagation = Propagation.MANDATORY)
-    public String create(TenantId tenant, UUID userId, Kind kind, String terminalId, Instant expiresAt) {
+    public String create(TenantId tenant, UUID userId, Kind kind, String terminalId, Instant expiresAt,
+                         UUID loginSessionId) {
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String raw = kind.name().toLowerCase() + "_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         jdbc.sql("""
-                        INSERT INTO auth_session (id, tenant_id, user_id, kind, token_hash, terminal_id, created_at, expires_at)
-                        VALUES (:id, :tenant, :user, :kind, :hash, :terminal, now(), :expires)""")
+                        INSERT INTO auth_session (id, tenant_id, user_id, kind, token_hash, terminal_id, created_at,
+                                                  expires_at, login_session_id)
+                        VALUES (:id, :tenant, :user, :kind, :hash, :terminal, now(), :expires, :login)""")
                 .param("id", UUID.randomUUID())
                 .param("tenant", tenant.value())
                 .param("user", userId)
@@ -55,6 +60,7 @@ public class AuthSessionStore {
                 .param("hash", hash(raw))
                 .param("terminal", terminalId)
                 .param("expires", Timestamp.from(expiresAt))
+                .param("login", loginSessionId)
                 .update();
         return raw;
     }
@@ -67,13 +73,32 @@ public class AuthSessionStore {
         return jdbc.sql("""
                         UPDATE auth_session SET last_used_at = now()
                         WHERE token_hash = :hash AND revoked_at IS NULL AND expires_at > :now
-                        RETURNING id, user_id, kind, terminal_id, expires_at""")
+                        RETURNING id, user_id, kind, terminal_id, expires_at, login_session_id""")
                 .param("hash", hash(rawToken))
                 .param("now", Timestamp.from(now))
-                .query((rs, rowNum) -> new Session(rs.getObject("id", UUID.class), rs.getObject("user_id", UUID.class),
-                        Kind.valueOf(rs.getString("kind")), rs.getString("terminal_id"),
-                        rs.getTimestamp("expires_at").toInstant()))
+                .query((rs, rowNum) -> session(rs))
                 .optional();
+    }
+
+    /** Like {@link #findActive} without touching the row (read before a separate transaction updates it). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Session> peek(String rawToken, Instant now) {
+        if (rawToken == null || rawToken.isBlank()) {
+            return Optional.empty();
+        }
+        return jdbc.sql("""
+                        SELECT id, user_id, kind, terminal_id, expires_at, login_session_id FROM auth_session
+                        WHERE token_hash = :hash AND revoked_at IS NULL AND expires_at > :now""")
+                .param("hash", hash(rawToken))
+                .param("now", Timestamp.from(now))
+                .query((rs, rowNum) -> session(rs))
+                .optional();
+    }
+
+    private static Session session(ResultSet rs) throws SQLException {
+        return new Session(rs.getObject("id", UUID.class), rs.getObject("user_id", UUID.class),
+                Kind.valueOf(rs.getString("kind")), rs.getString("terminal_id"),
+                rs.getTimestamp("expires_at").toInstant(), rs.getObject("login_session_id", UUID.class));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

@@ -23,6 +23,10 @@ public class ActorResolver {
     /** Platform operator token issued by the node itself (demonstration mode). */
     public static final String TYPE_PLATFORM = "platform";
     public static final String NODE_CLAIM = "node_id";
+    /** Login session of a staff token signed by this node, whose lock the server applies. */
+    public static final String SESSION_CLAIM = "sid";
+    /** Set on a token refreshed while its session is locked: it only reaches what a locked terminal may send. */
+    public static final String SESSION_LOCKED_CLAIM = "session_locked";
 
     private final TenantUserLoader loader;
 

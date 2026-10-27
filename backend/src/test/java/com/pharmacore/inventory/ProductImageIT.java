@@ -77,18 +77,15 @@ class ProductImageIT extends IntegrationTest {
                 .andExpect(status().isUnprocessableContent());
         upload(owner, UUID.randomUUID(), PNG, "ghost.png").andExpect(status().isNotFound());
 
-        // --- served with its hash as ETag; immutable under its version, revalidated otherwise
+        // --- served with its hash as ETag, revalidated before each use (a locked session gets 423)
         String etag = "\"" + sha256(PNG) + "\"";
         var served = call(get(imageUrl(product) + "?v=" + version), owner, null)
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "image/png"))
                 .andExpect(header().string("ETag", etag))
-                .andExpect(header().string("Cache-Control", "max-age=31536000, private, immutable"))
+                .andExpect(header().string("Cache-Control", "no-cache, private"))
                 .andReturn().getResponse();
         assertThat(served.getContentAsByteArray()).isEqualTo(PNG);
-        call(get(imageUrl(product) + "?v=0000000000000000"), owner, null)
-                .andExpect(status().isOk())
-                .andExpect(header().string("Cache-Control", "no-cache, private"));
         call(get(imageUrl(product)).header("If-None-Match", etag), owner, null)
                 .andExpect(status().isNotModified());
 

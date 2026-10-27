@@ -1,5 +1,6 @@
 package com.pharmacore.sync;
 
+import com.pharmacore.identity.application.LoginSessionService;
 import com.pharmacore.shared.context.Actor;
 import com.pharmacore.shared.context.RequestContext;
 import com.pharmacore.shared.context.TenantContext;
@@ -30,14 +31,16 @@ class SyncHousekeeping {
     private final NodeSettings settings;
     private final TransactionTemplate tx;
     private final Clock clock;
+    private final LoginSessionService loginSessions;
 
     SyncHousekeeping(JdbcClient jdbc, NodeProperties properties, NodeSettings settings,
-                     PlatformTransactionManager transactionManager, Clock clock) {
+                     PlatformTransactionManager transactionManager, Clock clock, LoginSessionService loginSessions) {
         this.jdbc = jdbc;
         this.properties = properties;
         this.settings = settings;
         this.tx = new TransactionTemplate(transactionManager);
         this.clock = clock;
+        this.loginSessions = loginSessions;
     }
 
     @Scheduled(cron = "${pharmacore.node.sync-purge-cron:0 17 3 * * *}")
@@ -60,7 +63,8 @@ class SyncHousekeeping {
             }
             int sessions = jdbc.sql("DELETE FROM auth_session WHERE expires_at < :now")
                     .param("now", Timestamp.from(clock.instant())).update();
-            log.info("Purge: {} changements, {} sessions expirées", deleted, sessions);
+            int logins = loginSessions.purge(clock.instant());
+            log.info("Purge: {} changements, {} sessions expirées, {} sessions de connexion", deleted, sessions, logins);
         }));
     }
 }

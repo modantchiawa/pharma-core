@@ -13,12 +13,12 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Icon } from '../../shared/ui/icon';
-import { NodeInfoService } from '../api/node-info.service';
 import { AuthService } from '../auth/auth.service';
 import { PermissionService } from '../auth/permission.service';
 import { BrandingService } from '../branding/branding.service';
 import { TerminalService } from '../offline/terminal.service';
 import { ToastService } from '../ui/toast.service';
+import { problemCode } from './background-requests';
 import { MAX_UNLOCK_FAILURES, idleDuration, minutesBeforeLogout, warningProgress } from './idle';
 import { IdleService } from './idle.service';
 import { UnlockVerifier } from './unlock-verifier';
@@ -29,9 +29,10 @@ type Mode = 'pin' | 'password' | 'switch';
 const RING = 2 * Math.PI * 18;
 
 /**
- * Warning 30 seconds before the lock (a ring that empties, "Je suis là"), then the lock screen:
- * the page stays as it was (an open basket included) under a blur that hides its data, until
- * the user types their PIN or password, or another member of the staff switches in with theirs.
+ * Warning 30 seconds before the lock (a ring that empties, "Je suis là"), then the lock screen
+ * over a neutral background: the page itself is gone (the shell removes it), its state kept in
+ * the stores (an open basket included), until the server has checked the user's PIN or password,
+ * or another member of the staff switches in with theirs.
  */
 @Component({
   selector: 'app-lock-screen',
@@ -67,7 +68,7 @@ const RING = 2 * Math.PI * 18;
           </p>
           <p id="idle-warning-text" class="text-xs text-muted">
             Aucune activité depuis {{ w.idle }}
-            {{ w.next === 'lock' ? '· la page reste en l’état' : '' }}
+            {{ w.next === 'lock' ? '· le panier en cours est conservé' : '' }}
           </p>
         </div>
         <button type="button" class="btn btn-primary btn-sm" (click)="idle.stillHere()">
@@ -86,6 +87,7 @@ const RING = 2 * Math.PI * 18;
         #backdrop
         (keydown)="$event.stopPropagation()"
       >
+        <div class="lock-pattern" aria-hidden="true"></div>
         <form class="lock-card animate-in" (ngSubmit)="submit()" autocomplete="off">
           <div class="flex items-center justify-center gap-2 text-xs font-medium text-muted">
             @if (branding.logoUrl(); as logo) {
@@ -264,11 +266,29 @@ const RING = 2 * Math.PI * 18;
       justify-content: center;
       overflow-y: auto;
       padding: 1rem;
-      background: color-mix(in oklab, var(--app-bg) 62%, transparent);
-      backdrop-filter: blur(22px) saturate(0.7);
-      -webkit-backdrop-filter: blur(22px) saturate(0.7);
+      background: var(--app-bg);
+    }
+    /* The brand's colours, blurred: nothing of the page is left behind the card */
+    .lock-pattern {
+      position: fixed;
+      inset: -10%;
+      background:
+        radial-gradient(38% 42% at 22% 28%, var(--brand-soft) 0%, transparent 70%),
+        radial-gradient(
+          34% 40% at 78% 72%,
+          color-mix(in oklab, var(--brand-primary) 22%, transparent) 0%,
+          transparent 70%
+        ),
+        repeating-linear-gradient(
+          135deg,
+          color-mix(in oklab, var(--brand-primary) 6%, transparent) 0 2px,
+          transparent 2px 28px
+        );
+      filter: blur(28px);
+      pointer-events: none;
     }
     .lock-card {
+      position: relative;
       width: min(23rem, 100%);
       padding: 1.5rem 1.5rem 1rem;
       border: 1px solid var(--border);
@@ -322,7 +342,6 @@ export class LockScreen {
   protected readonly branding = inject(BrandingService);
   private readonly auth = inject(AuthService);
   private readonly permissions = inject(PermissionService);
-  private readonly node = inject(NodeInfoService);
   private readonly terminal = inject(TerminalService);
   private readonly verifier = new UnlockVerifier();
   private readonly toasts = inject(ToastService);
@@ -407,16 +426,14 @@ export class LockScreen {
     this.secret = '';
     const previousUser = this.permissions.profile()?.displayName;
     try {
-      await this.auth.replaceSession(() =>
-        mode === 'password'
-          ? this.auth.loginWithPassword(
-              this.node.isHub() ? null : this.auth.lastPharmacy(),
-              email,
-              secret,
-              this.terminal.terminalId,
-            )
-          : this.auth.loginWithPin(email, secret, this.terminal.terminalId),
-      );
+      if (mode === 'switch') {
+        // A real sign-in of the colleague; the locked session it replaces is closed
+        await this.auth.replaceSession(() =>
+          this.auth.loginWithPin(email, secret, this.terminal.terminalId),
+        );
+      } else {
+        await this.auth.unlock(mode, secret);
+      }
       this.idle.unlocked();
       if (mode === 'switch') {
         void this.branding.load();
@@ -457,9 +474,18 @@ export class LockScreen {
         return;
       }
     }
-    await this.idle.unlockFailed();
+    const detail = (error as { error?: { detail?: string; code?: string; reason?: string } }).error;
+    if (error instanceof HttpErrorResponse && problemCode(detail) === 'session-expired') {
+      await this.idle.closedByServer(detail?.reason === 'UNLOCK_FAILURES' ? 'pin' : 'idle');
+      return;
+    }
+    const reported = (detail as { attemptsLeft?: unknown } | undefined)?.attemptsLeft;
+    if (mode !== 'switch' && typeof reported === 'number') {
+      this.idle.attemptsReported(reported);
+    } else {
+      await this.idle.unlockFailed();
+    }
     const left = this.idle.attemptsLeft();
-    const detail = (error as { error?: { detail?: string; code?: string } }).error;
     const reason =
       detail?.code === 'account-locked'
         ? detail.detail
