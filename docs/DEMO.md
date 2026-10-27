@@ -156,6 +156,9 @@ le PIN avec `DEMO_PIN`.
   postes « allumés » renvoient un signal chaque minute pour que le tableau reste le même pendant
   toute la démo. Chaque navigateur qui ouvre la caisse apparaît en plus comme un poste (identifiant
   aléatoire) : la console et la page « Serveur local » permettent de les oublier une fois hors ligne.
+* Abonnements : `sahel` en formule Pro payée sept mois d'avance (trois règlements), `lacouroussou`
+  en formule Essentiel dont la période payée se termine dans cinq jours (bandeau « Abonnement : plus
+  que … jours » dès la connexion).
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -182,6 +185,8 @@ le PIN avec `DEMO_PIN`.
 | 15 bis | Console éditeur › clic sur « Pharmacie du Sahel » | Fiche : serveur local, abonnement, 4 postes (synchronisé, 3 ventes en attente, hors ligne depuis 2 j, jamais synchronisé), comptes avec rôles et dernière connexion ; « Oublier » sur le poste hors ligne |
 | 15 ter | Titulaire `sahel` › Administration › Serveur local | Mêmes postes, « ce poste » repéré, oubli des postes hors ligne sans vente en attente |
 | 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
+| 17 | Console éditeur › Abonnements : `lacouroussou` › règlement de 3 mois en mobile money | Montant prérempli (formule × mois), période prolongée depuis la fin de la période payée, licence réémise, bandeau disparu chez la pharmacie |
+| 18 | Console éditeur : suspendre `sahel`, puis vendre au comptoir et consulter le stock et l'ordonnancier ; réactiver | Vente refusée (bandeau rouge, bouton désactivé, 423 côté serveur), consultation et exports ouverts ; tout revient à la réactivation |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

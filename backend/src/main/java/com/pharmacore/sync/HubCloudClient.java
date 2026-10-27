@@ -5,6 +5,8 @@ import com.pharmacore.shared.context.TenantId;
 import com.pharmacore.shared.runtime.NodeIdentity;
 import com.pharmacore.shared.security.ActorResolver;
 import com.pharmacore.shared.security.SigningKeyService;
+import com.pharmacore.subscription.application.LicenseIssuer.IssuedLicense;
+import com.pharmacore.subscription.application.LicenseKeyRing.PublicLicenseKey;
 import com.pharmacore.sync.SyncModels.Change;
 import com.pharmacore.sync.SyncModels.LogPosition;
 import com.pharmacore.sync.SyncModels.PullResponse;
@@ -70,6 +72,16 @@ public class HubCloudClient {
                 .retrieve().body(SnapshotPage.class);
     }
 
+    /** The pharmacy's license, freshly re-issued by the cloud when the previous one is old enough. */
+    public IssuedLicense license() {
+        return client().post().uri("/api/sync/license").retrieve().body(IssuedLicense.class);
+    }
+
+    public List<PublicLicenseKey> licenseKeys() {
+        return client().get().uri("/api/sync/license-keys").retrieve()
+                .body(new org.springframework.core.ParameterizedTypeReference<List<PublicLicenseKey>>() { });
+    }
+
     /** Pairing is the only unauthenticated call: the hub has no key registered yet. */
     public PairingReply pair(String code) {
         return builder.clone().baseUrl(node.cloudUrl()).build()
@@ -84,7 +96,8 @@ public class HubCloudClient {
                 .retrieve().body(PairingReply.class);
     }
 
-    public record PairingReply(UUID tenantId, String slug, String displayName, String cloudUrl) {
+    public record PairingReply(UUID tenantId, String slug, String displayName, String cloudUrl,
+                               List<PublicLicenseKey> licenseKeys, String license) {
     }
 
     private RestClient client() {

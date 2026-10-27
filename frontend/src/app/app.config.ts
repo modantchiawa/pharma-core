@@ -13,6 +13,7 @@ import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { provideServiceWorker } from '@angular/service-worker';
 import { routes } from './app.routes';
 import { authInterceptor } from './core/auth/auth.interceptor';
+import { licenseInterceptor } from './core/subscription/license.interceptor';
 import { AuthService } from './core/auth/auth.service';
 import { PermissionService } from './core/auth/permission.service';
 import { BrandingService } from './core/branding/branding.service';
@@ -49,7 +50,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     { provide: LOCALE_ID, useValue: 'fr' },
     provideRouter(routes, withComponentInputBinding()),
-    provideHttpClient(withInterceptors([authInterceptor])),
+    provideHttpClient(withInterceptors([authInterceptor, licenseInterceptor])),
     provideAppInitializer(bootstrapSession),
     provideServiceWorker('sw.js', {
       enabled: !isDevMode(),

@@ -6,7 +6,6 @@ pharmacore:
     keys-dir: ${PHARMACORE_DATA_DIR:./data}/keys
     cloud-url: ${PHARMACORE_CLOUD_URL:https://cloud.pharmacore.io}
     sync-interval: PT30S
-    subscription-grace: P30D
   security:
     # Les postes de l'officine : adresse du hub sur le LAN (http://pharmacore-hub:8080) et localhost
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:8080,http://pharmacore-hub:8080,http://127.0.0.1:8080}

@@ -22,7 +22,10 @@ const PERMISSION_GROUPS: { label: string; prefixes: string[] }[] = [
   { label: 'Stock et achats', prefixes: ['STOCK', 'PROCUREMENT', 'DATA'] },
   { label: 'Réseau et gardes', prefixes: ['NETWORK', 'GUARD', 'DIRECTORY'] },
   { label: 'Pilotage et comptabilité', prefixes: ['DASHBOARD', 'REPORT', 'ACCOUNTING'] },
-  { label: 'Administration', prefixes: ['CONFIG', 'USER', 'ROLE', 'AUDIT', 'HUB', 'PRINTER'] },
+  {
+    label: 'Administration',
+    prefixes: ['CONFIG', 'USER', 'ROLE', 'AUDIT', 'HUB', 'PRINTER', 'SUBSCRIPTION'],
+  },
 ];
 
 /** Permission matrix of the pharmacy: one column per role, one row per permission. */

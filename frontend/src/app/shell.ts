@@ -17,6 +17,8 @@ import { PermissionService } from './core/auth/permission.service';
 import { BrandingService } from './core/branding/branding.service';
 import { ConnectivityService } from './core/offline/connectivity.service';
 import { SaleOutboxService } from './core/offline/sale-outbox.service';
+import { LicenseBanner } from './core/subscription/license-banner';
+import { LicenseStateService } from './core/subscription/license-state.service';
 import { Density, DisplayPreferencesService } from './core/ui/display-preferences.service';
 import { Icon } from './shared/ui/icon';
 import { IconName } from './shared/ui/icons';
@@ -168,6 +170,7 @@ const PLATFORM_NAV: NavGroup[] = [
     items: [
       { path: '/platform', label: 'Supervision', icon: 'building', permissions: [] },
       { path: '/platform/catalog-import', label: 'Référentiel', icon: 'catalog', permissions: [] },
+      { path: '/platform/subscriptions', label: 'Abonnements', icon: 'license', permissions: [] },
     ],
   },
 ];
@@ -184,7 +187,7 @@ interface PaletteEntry {
 /** Application frame: grouped side navigation, top bar with status, command palette. */
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, FormsModule, Icon],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, FormsModule, Icon, LicenseBanner],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(document:keydown)': 'onKeydown($event)',
@@ -480,6 +483,15 @@ interface PaletteEntry {
                       <app-icon name="lock" [size]="16" /> Mot de passe et PIN
                     </a>
                   }
+                  @if (canSeeSubscription()) {
+                    <a
+                      routerLink="/account/subscription"
+                      class="menu-item"
+                      (click)="menu.set(null)"
+                    >
+                      <app-icon name="license" [size]="16" /> Mon abonnement
+                    </a>
+                  }
                   @if (canEditBranding()) {
                     <a
                       routerLink="/admin/branding"
@@ -518,6 +530,10 @@ interface PaletteEntry {
               >.</span
             >
           </div>
+        }
+
+        @if (license.notice(); as notice) {
+          <app-license-banner [state]="notice" [link]="canSeeSubscription()" />
         }
 
         <main class="min-h-0 flex-1 overflow-auto"><router-outlet /></main>
@@ -701,6 +717,7 @@ export class Shell {
   protected readonly branding = inject(BrandingService);
   protected readonly connectivity = inject(ConnectivityService);
   protected readonly outbox = inject(SaleOutboxService);
+  protected readonly license = inject(LicenseStateService);
   private readonly permissions = inject(PermissionService);
   protected readonly display = inject(DisplayPreferencesService);
   private readonly router = inject(Router);
@@ -711,6 +728,9 @@ export class Shell {
   protected readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   protected readonly canEditBranding = computed(() =>
     this.permissions.hasAny('CONFIG_BRANDING_MANAGE'),
+  );
+  protected readonly canSeeSubscription = computed(
+    () => !this.auth.isPlatformOperator() && this.permissions.hasAny('SUBSCRIPTION_VIEW'),
   );
   protected readonly collapsed = signal(readCollapsed());
   protected readonly mobileOpen = signal(false);
@@ -753,6 +773,9 @@ export class Shell {
           best = { label: item.label, group: group.label, length: item.path.length };
         }
       }
+    }
+    if (!best && path.startsWith('/account/subscription')) {
+      return { label: 'Mon abonnement', group: 'Mon compte' };
     }
     if (!best && path.startsWith('/account')) {
       return { label: 'Mot de passe et PIN', group: 'Mon compte' };
@@ -822,6 +845,9 @@ export class Shell {
   });
 
   constructor() {
+    if (!this.auth.isPlatformOperator()) {
+      this.license.start();
+    }
     this.router.events
       .pipe(
         filter((e): e is NavigationEnd => e instanceof NavigationEnd),

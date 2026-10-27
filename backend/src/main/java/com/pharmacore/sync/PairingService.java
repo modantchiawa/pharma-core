@@ -9,6 +9,9 @@ import com.pharmacore.shared.security.InternalIssuerRegistry;
 import com.pharmacore.shared.security.SigningKeyService;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
+import com.pharmacore.subscription.application.LicenseIssuer;
+import com.pharmacore.subscription.application.LicenseKeyRing;
+import com.pharmacore.subscription.application.LicenseKeyRing.PublicLicenseKey;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -19,6 +22,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -39,12 +43,17 @@ public class PairingService {
     private final TenantRepository tenants;
     private final AuditTrail audit;
     private final InternalIssuerRegistry issuers;
+    private final LicenseIssuer licenses;
+    private final LicenseKeyRing licenseKeys;
     private final TransactionTemplate tx;
     private final Clock clock;
 
     public PairingService(JdbcClient jdbc, TenantRepository tenants, AuditTrail audit, InternalIssuerRegistry issuers,
+                          LicenseIssuer licenses, LicenseKeyRing licenseKeys,
                           PlatformTransactionManager transactionManager, Clock clock) {
         this.jdbc = jdbc;
+        this.licenses = licenses;
+        this.licenseKeys = licenseKeys;
         this.tenants = tenants;
         this.audit = audit;
         this.issuers = issuers;
@@ -56,7 +65,13 @@ public class PairingService {
                                  String publicKeyPem) {
     }
 
-    public record PairingResult(UUID tenantId, String slug, String displayName, String cloudUrl) {
+    /**
+     * @param licenseKeys public keys of the license authority, pinned by the hub (first-pairing
+     *                    trust, over HTTPS): from then on it verifies its license offline
+     * @param license     the pharmacy's current license
+     */
+    public record PairingResult(UUID tenantId, String slug, String displayName, String cloudUrl,
+                                List<PublicLicenseKey> licenseKeys, String license) {
     }
 
     /** Platform operator creates a code to type on the hub's first-run screen (shown once). */
@@ -130,10 +145,12 @@ public class PairingService {
             // the tenant-scoped repository.
             String displayName = jdbc.sql("SELECT display_name FROM pharmacy_config WHERE tenant_id = :tenant")
                     .param("tenant", tenantId).query(String.class).optional().orElse(tenant.legalName());
-            return new PairingResult(tenantId, tenant.slug(), displayName, cloudUrl);
+            return new PairingResult(tenantId, tenant.slug(), displayName, cloudUrl, null, null);
         }));
         issuers.invalidate();
-        return result;
+        String license = licenses.issue(result.tenantId()).token();
+        return new PairingResult(result.tenantId(), result.slug(), result.displayName(), result.cloudUrl(),
+                licenseKeys.publicKeys(), license);
     }
 
     static String hash(String code) {

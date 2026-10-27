@@ -5,6 +5,8 @@ import com.pharmacore.shared.runtime.NodeIdentity;
 import com.pharmacore.shared.runtime.NodeProperties;
 import com.pharmacore.shared.security.SigningKeyService;
 import com.pharmacore.shared.web.BusinessRuleException;
+import com.pharmacore.subscription.application.HubLicenseService;
+import com.pharmacore.subscription.domain.LicenseRejectedException;
 import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,11 +27,14 @@ public class HubPairingService {
     private final HubCloudClient cloud;
     private final SigningKeyService signingKey;
     private final HubSyncService sync;
+    private final HubLicenseService licenses;
     private final Clock clock;
     private final ExecutorService bootstrapExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public HubPairingService(NodeIdentity node, NodeProperties properties, HubCloudClient cloud,
-                             SigningKeyService signingKey, HubSyncService sync, Clock clock) {
+                             SigningKeyService signingKey, HubSyncService sync, HubLicenseService licenses,
+                             Clock clock) {
+        this.licenses = licenses;
         this.node = node;
         this.properties = properties;
         this.cloud = cloud;
@@ -57,6 +62,15 @@ public class HubPairingService {
         node.recordPairing(tenant, reply.slug(), reply.cloudUrl() == null ? node.cloudUrl() : reply.cloudUrl(),
                 clock.instant().toString());
         signingKey.publish(tenant);
+        if (reply.licenseKeys() != null && reply.license() != null) {
+            licenses.pin(reply.licenseKeys());
+            try {
+                licenses.accept(reply.license());
+            } catch (LicenseRejectedException e) {
+                log.warn("Licence reçue à l'appairage refusée ({}), elle sera redemandée à la synchronisation",
+                        e.reason());
+            }
+        }
         // The initial load can take minutes on a large catalog: it runs in the background and
         // the first-run screen shows its progress through the sync status.
         bootstrapExecutor.submit(() -> {

@@ -34,6 +34,7 @@ import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.context.TenantId;
 import com.pharmacore.shared.runtime.NodeProperties;
 import com.pharmacore.shared.security.TenantUserLoader;
+import com.pharmacore.subscription.application.PlatformSubscriptionService;
 import com.pharmacore.tenant.application.TenantProvisioningService;
 import com.pharmacore.tenant.persistence.PharmacyConfigEntity.PublicSharing;
 import java.math.BigDecimal;
@@ -142,6 +143,7 @@ class DemoDataSeeder {
     private final GuardScheduleService guards;
     private final SaleRecordingService sales;
     private final CashSessionService cashSessions;
+    private final PlatformSubscriptionService subscriptions;
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
     private final Clock clock;
@@ -152,7 +154,9 @@ class DemoDataSeeder {
                    CustomerService customers, ProcurementService procurement, InsurerService insurers,
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
-                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations) {
+                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations,
+                   PlatformSubscriptionService subscriptions) {
+        this.subscriptions = subscriptions;
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -210,6 +214,8 @@ class DemoDataSeeder {
             seedPharmacy(PHARMACIES.get(i), new TenantId(tenantIds.get(i)), products, i);
         }
         seedNetwork(platform, tenantIds);
+        TenantContext.run(platform, () -> DemoSubscriptions.seed(provisioning, subscriptions, jdbc, tx, clock,
+                tenantIds.getFirst(), tenantIds.get(1)));
         log.info("Démonstration chargée : {} pharmacies, {} produits, comptes {} / mot de passe {} / PIN {}",
                 PHARMACIES.size(), products.size(), PHARMACIES.stream().map(Pharmacy::ownerEmail).toList(),
                 demo.accountPassword(), demo.pin());

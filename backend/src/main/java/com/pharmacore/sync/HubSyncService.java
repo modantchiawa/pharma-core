@@ -50,6 +50,7 @@ public class HubSyncService {
     private final ChangeLogReader reader;
     private final ChangeApplier applier;
     private final SyncCursorStore cursors;
+    private final HubLicenseSync licenses;
     private final TransactionTemplate tx;
     private final Clock clock;
     private final ReentrantLock lock = new ReentrantLock();
@@ -61,8 +62,9 @@ public class HubSyncService {
     private volatile String lastError;
 
     public HubSyncService(NodeIdentity node, NodeProperties properties, HubCloudClient cloud, ChangeLogReader reader,
-                          ChangeApplier applier, SyncCursorStore cursors, PlatformTransactionManager transactionManager,
-                          Clock clock) {
+                          ChangeApplier applier, SyncCursorStore cursors, HubLicenseSync licenses,
+                          PlatformTransactionManager transactionManager, Clock clock) {
+        this.licenses = licenses;
         this.node = node;
         this.properties = properties;
         this.cloud = cloud;
@@ -80,12 +82,26 @@ public class HubSyncService {
         }
     }
 
-    /** One full round (push then pull). Concurrent calls are coalesced. */
+    /** One full round (push, pull, license). Concurrent calls are coalesced. */
     public Status synchronize() {
         if (!lock.tryLock()) {
             return status();
         }
         running = true;
+        try {
+            exchange();
+            // The license does not wait for the data: a failing batch must not let the offline window run out
+            if (cloudReachable) {
+                refreshLicense();
+            }
+        } finally {
+            running = false;
+            lock.unlock();
+        }
+        return status();
+    }
+
+    private void exchange() {
         try {
             TenantId tenant = node.requireHubTenant();
             pushAll(tenant);
@@ -99,11 +115,15 @@ public class HubSyncService {
         } catch (RuntimeException e) {
             lastError = e.getMessage();
             log.warn("Synchronisation en erreur", e);
-        } finally {
-            running = false;
-            lock.unlock();
         }
-        return status();
+    }
+
+    private void refreshLicense() {
+        try {
+            licenses.refresh();
+        } catch (RuntimeException e) {
+            log.warn("Licence non renouvelée à cette synchronisation : {}", e.getMessage());
+        }
     }
 
     /** First synchronization after pairing: full snapshot from the cloud, then incremental. */

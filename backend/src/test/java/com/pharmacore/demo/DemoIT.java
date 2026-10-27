@@ -61,6 +61,24 @@ class DemoIT extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.roles[0]").value("CAISSIER"));
 
+        // subscriptions: the Sahel paid well ahead, Lacouroussou is warned its paid period ends; nobody is blocked
+        call(get("/api/v1/subscription"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status.state.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.plan.code").value("PRO"))
+                .andExpect(jsonPath("$.payments.length()").value(3));
+        call(get("/api/v1/subscription/state"), cashier, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state.status").value("WARNING"))
+                .andExpect(jsonPath("$.state.reason").value("PAYMENT_DUE"))
+                .andExpect(jsonPath("$.plan").value("ESSENTIEL"));
+        call(get("/api/v1/subscription"), cashier, null).andExpect(status().isForbidden());
+        String subscriptions = call(get("/api/platform/subscriptions"), platform, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) JsonPath.read(subscriptions, "$[?(@.state.status == 'BLOCKED')]")).isEmpty();
+        assertThat((List<?>) JsonPath.read(subscriptions, "$[?(@.slug == 'lacouroussou')].license.serial")).isNotEmpty();
+
         // two weeks of sales feed the dashboard; stock, customers and suppliers are there
         LocalDate today = LocalDate.now(DemoDataSeeder.ZONE);
         String dashboard = call(get("/api/v1/dashboard?from=" + today.minusDays(14) + "&to=" + today), owner, null)
