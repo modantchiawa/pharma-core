@@ -54,7 +54,7 @@ class StockReliabilityController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyAuthority('STOCK_COUNT', 'STOCK_COUNT_VALIDATE')")
     CountView start(@Valid @RequestBody StartRequest request) {
-        return counts.start(request.label(), request.location());
+        return counts.start(request.label(), request.locationId());
     }
 
     @GetMapping("/counts/{countId}")
@@ -119,7 +119,7 @@ class StockReliabilityController {
         return expiry.writeOffs(start, end);
     }
 
-    record StartRequest(@NotBlank @Size(max = 150) String label, @Size(max = 50) String location) {
+    record StartRequest(@NotBlank @Size(max = 150) String label, UUID locationId) {
     }
 
     record QuantityRequest(@Min(0) int quantity) {

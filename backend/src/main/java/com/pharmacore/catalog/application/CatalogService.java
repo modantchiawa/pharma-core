@@ -82,9 +82,14 @@ public class CatalogService {
                                    coalesce(s.selling_price_cents, p.public_price_cents) AS unit_price_cents,
                                    p.active,
                                    GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available,
-                                   GREATEST(p.updated_at, coalesce(s.updated_at, p.updated_at)) AS changed_at
+                                   loc.code AS location_code, loc.name AS location_name, loc.kind AS location_kind,
+                                   s.location_detail,
+                                   -- renaming a location re-emits the products stored there
+                                   GREATEST(p.updated_at, coalesce(s.updated_at, p.updated_at),
+                                            coalesce(loc.updated_at, p.updated_at)) AS changed_at
                             FROM product p
                             LEFT JOIN stock s ON s.product_id = p.id AND s.tenant_id = :tenant
+                            LEFT JOIN storage_location loc ON loc.id = s.location_id
                             LEFT JOIN LATERAL (
                                 SELECT sum(quantity) AS qty FROM stock_lot sl
                                 WHERE sl.stock_id = s.id AND sl.quantity > 0 AND sl.expiry_date > current_date
@@ -109,6 +114,10 @@ public class CatalogService {
                         (Long) rs.getObject("unit_price_cents"),
                         rs.getInt("available"),
                         rs.getBoolean("active"),
+                        rs.getString("location_code"),
+                        rs.getString("location_name"),
+                        rs.getString("location_kind"),
+                        rs.getString("location_detail"),
                         rs.getTimestamp("changed_at").toInstant()))
                 .list();
         boolean hasMore = items.size() == pageSize;
@@ -156,9 +165,11 @@ public class CatalogService {
                               String laboratory, Long unitPriceCents, int availableQuantity) {
     }
 
+    /** @param locationCode where the product is stored in this pharmacy, {@code null} when not placed */
     public record PosCatalogItem(UUID productId, String cip13, String ean13, String designation, String dci,
                                  String listing, java.math.BigDecimal vatRate, Long unitPriceCents,
-                                 int availableQuantity, boolean active, Instant changedAt) {
+                                 int availableQuantity, boolean active, String locationCode, String locationName,
+                                 String locationKind, String locationDetail, Instant changedAt) {
     }
 
     public record PosCatalogPage(List<PosCatalogItem> items, Instant nextSince, UUID nextAfter, boolean hasMore) {

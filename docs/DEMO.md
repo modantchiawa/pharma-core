@@ -141,13 +141,15 @@ le PIN avec `DEMO_PIN`.
 
 ## 4. Données préchargées
 
-* 26 produits du référentiel avec DCI, dosage et prix XOF (paracétamol, amoxicilline,
+* 27 produits du référentiel avec DCI, dosage et prix XOF (paracétamol, amoxicilline,
   artéméther-luméfantrine, metformine, amlodipine, tramadol…), dont des équivalents de même DCI.
 * Par pharmacie : stock par lot (quelques lots périmant sous 60 jours, quelques produits en rupture
   pour la substitution), seuils de réapprovisionnement, deux grossistes (Laborex Niger, Copharni)
   avec références et prix d'achat, trois clients dont une cliente à crédit assurée à 80 % par
   « NIA Assurances », deux semaines de ventes (espèces, Airtel Money, Zamani Cash, une vente à
-  crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`.
+  crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`, dix emplacements
+  (rayons A à C, tiroir des injectables, réfrigérateur pour l'insuline, coffre pour le tramadol,
+  comptoir, réserve) où chaque produit est rangé.
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -164,12 +166,14 @@ le PIN avec `DEMO_PIN`.
 | 7 | Clôture de caisse par coupures avec un écart | Rapprochement par mode, approbation demandée au-delà du seuil |
 | 8 | Annulation d'une vente au-dessus du seuil par le caissier | PIN du titulaire exigé |
 | 9 | Stocks › Inventaire : compter un rayon, valider en titulaire | Écarts appliqués, mouvements `COUNT_ADJUSTMENT` |
-| 10 | Commandes › Fiche du lendemain | Lignes proposées pour les produits sous seuil, envoi texte |
+| 10 | Commandes › Fiche du lendemain › « Générer les commandes » (tous fournisseurs) | Un brouillon par fournisseur (Copharni signalé sous son minimum), thermomètre « sans fournisseur » à associer ; regénérer met à jour les brouillons |
+| 10 bis | Commandes › Suivi : commande Copharni en retard de 2 j › Réceptionner une partie, puis Solder | Frise créée → envoyée → prévue → réception → soldée ; lots en stock, achat comptabilisé ; alerte « en retard » sur Pilotage |
 | 11 | Compta › Résultat et bilan du mois | Chiffres cohérents avec Pilotage |
 | 12 | Import › essai à blanc d'un CSV de clients puis import | Rapport ligne par ligne, pas de doublon au second passage |
 | 13 | Page publique `/public` : « paracetamol », Niamey | Les deux pharmacies, niveau sans quantité ; gardes du soir |
 | 14 | Réseau › « Qui l'a ? » depuis `lacouroussou` | Stock de `sahel` plafonné à 20 |
 | 15 | Console éditeur : liste des pharmacies, import du référentiel (essai à blanc) | Deux pharmacies actives, aperçu du fichier |
+| 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

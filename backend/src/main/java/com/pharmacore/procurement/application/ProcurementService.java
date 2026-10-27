@@ -5,9 +5,11 @@ import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.accounting.domain.VatSplit;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.TenantCalendar;
+import com.pharmacore.procurement.domain.OrderGrouping;
 import com.pharmacore.procurement.domain.OrderProposalCalculator;
 import com.pharmacore.procurement.domain.OrderProposalCalculator.Input;
 import com.pharmacore.procurement.domain.OrderProposalCalculator.Proposal;
+import com.pharmacore.procurement.domain.OrderTracking;
 import com.pharmacore.procurement.persistence.PurchaseOrderRepository;
 import com.pharmacore.procurement.persistence.SupplierProductRepository;
 import com.pharmacore.procurement.persistence.SupplierRepository;
@@ -27,12 +29,15 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +49,7 @@ public class ProcurementService {
     public static final int VELOCITY_PERIOD_DAYS = 28;
     static final String ORDER_SEQUENCE = "PURCHASE_ORDER";
     static final String SUPPLIER_SEQUENCE = "SUPPLIER";
+    private static final DateTimeFormatter FRENCH_DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final SupplierRepository suppliers;
     private final SupplierProductRepository supplierProducts;
@@ -161,7 +167,6 @@ public class ProcurementService {
                             SELECT DISTINCT ON (sp.product_id) sp.product_id, sp.supplier_id, s.name AS supplier_name,
                                    s.lead_time_days, sp.pack_size, sp.purchase_price_cents
                             FROM supplier_product sp JOIN supplier s ON s.id = sp.supplier_id AND s.active
-                            WHERE (:supplier::uuid IS NULL OR sp.supplier_id = :supplier::uuid)
                             ORDER BY sp.product_id, sp.preferred DESC, sp.last_purchase_at DESC NULLS LAST
                         ),
                         sold AS (
@@ -238,34 +243,115 @@ public class ProcurementService {
                                    String reason) {
     }
 
+    /** What the pharmacy needs to reach the supplier and to check the order before sending it. */
+    public record SupplierContact(String contactName, String phone, String whatsapp, String email,
+                                  long minOrderCents, int leadTimeDays) {
+    }
+
+    /**
+     * A purchase order with its follow-up: {@code overdue} when goods are still awaited after the
+     * announced day, {@code shortClosed} when it was closed although some units never came.
+     */
     public record OrderView(UUID id, String number, UUID supplierId, String supplierName, String status,
-                            Instant createdAt, Instant sentAt, LocalDate expectedAt, long totalCents, String notes,
+                            Instant createdAt, Instant sentAt, LocalDate expectedAt, Instant closedAt,
+                            long totalCents, String notes, boolean overdue, boolean shortClosed, int orderedUnits,
+                            int receivedUnits, long receivedCents, long remainingCents, SupplierContact supplier,
                             List<OrderLineView> lines) {
     }
 
+    /** One order line; the location says where the delivered boxes are put away (null when not assigned). */
     public record OrderLineView(int lineNo, UUID productId, String designation, String cip13, int quantityOrdered,
                                 int quantityReceived, long unitCostCents, int packSize, Integer suggestedQuantity,
-                                String reason) {
+                                String reason, String locationCode, String locationName, String locationKind,
+                                String locationDetail) {
+    }
+
+    /** Key figures of the tracking screen, as of {@code today} in the pharmacy's calendar. */
+    public record OrderSummary(LocalDate today, int drafts, int open, int overdue, int expectedToday,
+                               long openAmountCents) {
+    }
+
+    /** A delivery booked against an order. */
+    public record OrderReceiptView(UUID id, Instant receivedAt, String supplierInvoiceNumber, LocalDate invoiceDate,
+                                   long totalExclVatCents, long vatCents, int lines, int units, String receivedBy) {
+    }
+
+    /** Orders written by a generation, and the proposal lines no supplier sells yet. */
+    public record GenerationView(List<OrderView> orders, int created, int updated, List<ProposalLine> unassigned) {
     }
 
     @Transactional
     public OrderView createOrder(UUID supplierId, List<OrderLineCommand> lines, String notes) {
         var supplier = suppliers.findById(supplierId).orElseThrow(() -> new NotFoundException("Supplier", supplierId));
-        var user = TenantContext.requireTenantUser();
-        String number = "CMD-" + calendar.today().getYear() + "-" + String.format("%05d", sequences.next(ORDER_SEQUENCE));
-        var order = new PurchaseOrderEntity(supplierId, number, user.userId(), clock.instant(), notes);
-        order.replaceLines(toLines(supplierId, lines));
-        orders.save(order);
+        var order = newDraft(supplierId, lines, notes);
         audit.record("PURCHASE_ORDER_CREATED", "PURCHASE_ORDER", order.id(), Map.of(
-                "number", number, "supplier", supplier.name(), "lines", Integer.toString(lines.size())));
-        return view(order);
+                "number", order.number(), "supplier", supplier.name(), "lines", Integer.toString(order.lines().size())));
+        return reload(order.id());
+    }
+
+    /**
+     * Turns the current proposal into one draft per supplier in one go. A supplier that already
+     * has a draft gets its lines replaced rather than a second draft, so generating twice gives
+     * the same drafts. The supplier minimum is checked when sending, not here.
+     */
+    @Transactional
+    public GenerationView generate(UUID supplierId, Map<UUID, Integer> overrides) {
+        UUID tenant = TenantContext.requireTenant().value();
+        // Two pharmacists generating at the same time must not each create a draft for the same supplier
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 7342))")
+                .param("key", tenant + ":purchase-order-generation")
+                .query((RowCallbackHandler) rs -> { });
+        ProposalSheet sheet = proposal(supplierId);
+        Map<UUID, ProposalLine> proposed = sheet.lines().stream()
+                .collect(Collectors.toMap(ProposalLine::productId, line -> line));
+        OrderGrouping.Result grouping = OrderGrouping.group(sheet.lines().stream()
+                .map(line -> new OrderGrouping.Candidate(line.productId(), line.supplierId(), line.suggestedQuantity(),
+                        line.purchasePriceCents(), reasonText(line.reasons())))
+                .toList(), overrides);
+        List<UUID> supplierIds = grouping.groups().stream().map(OrderGrouping.Group::supplierId).toList();
+        Map<UUID, PurchaseOrderEntity> drafts = new HashMap<>();
+        Map<UUID, String> supplierNames = new HashMap<>();
+        if (!supplierIds.isEmpty()) {
+            // most recent draft first: it is the one the pharmacist has been working on
+            orders.findWithLinesBySupplier(PurchaseOrderEntity.Status.DRAFT, supplierIds)
+                    .forEach(draft -> drafts.putIfAbsent(draft.supplierId(), draft));
+            suppliers.findAllById(supplierIds).forEach(s -> supplierNames.put(s.id(), s.name()));
+        }
+        List<UUID> written = new ArrayList<>();
+        int created = 0;
+        for (OrderGrouping.Group group : grouping.groups()) {
+            List<OrderLineCommand> commands = group.lines().stream()
+                    .map(line -> new OrderLineCommand(line.productId(), line.quantity(), line.unitCostCents(),
+                            line.suggestedQuantity(), line.reason()))
+                    .toList();
+            PurchaseOrderEntity draft = drafts.get(group.supplierId());
+            boolean replaced = draft != null;
+            if (replaced) {
+                draft.replaceLines(toLines(group.supplierId(), commands));
+            } else {
+                draft = newDraft(group.supplierId(), commands, null);
+                created++;
+            }
+            written.add(draft.id());
+            audit.record(replaced ? "PURCHASE_ORDER_REGENERATED" : "PURCHASE_ORDER_GENERATED", "PURCHASE_ORDER",
+                    draft.id(), Map.of("number", draft.number(),
+                            "supplier", supplierNames.getOrDefault(group.supplierId(), "?"),
+                            "lines", Integer.toString(group.lines().size()),
+                            "estimatedCents", Long.toString(group.estimatedCents())));
+        }
+        entityManager.flush();
+        return new GenerationView(views(written), created, written.size() - created,
+                grouping.unassigned().stream().map(c -> proposed.get(c.productId())).toList());
     }
 
     @Transactional
     public OrderView updateOrder(UUID orderId, List<OrderLineCommand> lines, String notes) {
         var order = orders.findWithLines(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId));
         order.replaceLines(toLines(order.supplierId(), lines));
-        return view(order);
+        order.updateNotes(notes);
+        audit.record("PURCHASE_ORDER_UPDATED", "PURCHASE_ORDER", orderId, Map.of("number", order.number(),
+                "lines", Integer.toString(order.lines().size()), "totalCents", Long.toString(order.totalCents())));
+        return reload(orderId);
     }
 
     @Transactional
@@ -278,7 +364,7 @@ public class ProcurementService {
         order.send(clock.instant(), calendar.today().plusDays(Math.max(supplier.leadTimeDays(), 1)));
         audit.record("PURCHASE_ORDER_SENT", "PURCHASE_ORDER", orderId, Map.of("number", order.number(),
                 "totalCents", Long.toString(order.totalCents())));
-        return view(order);
+        return reload(orderId);
     }
 
     @Transactional
@@ -286,17 +372,108 @@ public class ProcurementService {
         var order = orders.findWithLines(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId));
         order.cancel(clock.instant());
         audit.record("PURCHASE_ORDER_CANCELLED", "PURCHASE_ORDER", orderId, Map.of("number", order.number()));
-        return view(order);
+        return reload(orderId);
+    }
+
+    /** The supplier announced another delivery day for goods still awaited. */
+    @Transactional
+    public OrderView reschedule(UUID orderId, LocalDate expectedAt) {
+        var order = orders.findWithLines(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId));
+        LocalDate previous = order.expectedAt();
+        order.reschedule(expectedAt, calendar.today());
+        audit.record("PURCHASE_ORDER_RESCHEDULED", "PURCHASE_ORDER", orderId, Map.of("number", order.number(),
+                "from", String.valueOf(previous), "to", expectedAt.toString()));
+        return reload(orderId);
+    }
+
+    /** Closes an order whose remainder will not be delivered (out of stock at the wholesaler, etc.). */
+    @Transactional
+    public OrderView closeShort(UUID orderId, String reason) {
+        var order = orders.findWithLines(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId));
+        int givenUp = order.closeShort(clock.instant());
+        audit.record("PURCHASE_ORDER_CLOSED", "PURCHASE_ORDER", orderId, Map.of("number", order.number(),
+                "unitsNotDelivered", Integer.toString(givenUp), "reason", reason == null ? "" : reason));
+        return reload(orderId);
     }
 
     @Transactional(readOnly = true)
     public OrderView order(UUID orderId) {
-        return view(orders.findWithLines(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId)));
+        return views(List.of(orderId)).stream().findFirst()
+                .orElseThrow(() -> new NotFoundException("Purchase order", orderId));
+    }
+
+    /** Orders of one tracking scope (or of one exact status), optionally for one supplier. */
+    @Transactional(readOnly = true)
+    public List<OrderView> orders(OrderTracking.Scope scope, PurchaseOrderEntity.Status status, UUID supplierId,
+                                  int limit) {
+        List<String> statuses = status != null ? List.of(status.name()) : scope.statuses();
+        List<UUID> ids = jdbc.sql("""
+                        SELECT o.id FROM purchase_order o
+                        WHERE o.tenant_id = :tenant AND o.status IN (:statuses)
+                          AND (:supplier::uuid IS NULL OR o.supplier_id = :supplier::uuid)
+                          AND (NOT :overdueOnly OR o.expected_at < :today)
+                        ORDER BY CASE WHEN :byExpected THEN o.expected_at END ASC NULLS LAST, o.created_at DESC
+                        LIMIT :limit""")
+                .param("tenant", TenantContext.requireTenant().value())
+                .param("statuses", statuses)
+                .param("supplier", supplierId)
+                .param("overdueOnly", status == null && scope == OrderTracking.Scope.OVERDUE)
+                .param("today", Date.valueOf(calendar.today()))
+                .param("byExpected", status == null && scope.byExpectedDate())
+                .param("limit", Math.clamp(limit, 1, 200))
+                .query(UUID.class)
+                .list();
+        return views(ids);
     }
 
     @Transactional(readOnly = true)
-    public List<OrderView> orders(PurchaseOrderEntity.Status status, int limit) {
-        return orders.findRecent(status, PageRequest.of(0, Math.clamp(limit, 1, 200))).stream().map(this::view).toList();
+    public OrderSummary summary() {
+        LocalDate today = calendar.today();
+        return jdbc.sql("""
+                        SELECT count(*) FILTER (WHERE o.status = 'DRAFT') AS drafts,
+                               count(*) FILTER (WHERE o.status <> 'DRAFT') AS open,
+                               count(*) FILTER (WHERE o.status <> 'DRAFT' AND o.expected_at < :today) AS overdue,
+                               count(*) FILTER (WHERE o.status <> 'DRAFT' AND o.expected_at = :today) AS expected_today,
+                               coalesce(sum(r.remaining) FILTER (WHERE o.status <> 'DRAFT'), 0) AS open_amount
+                        FROM purchase_order o
+                        LEFT JOIN LATERAL (
+                            SELECT sum(greatest(l.quantity_ordered - l.quantity_received, 0) * l.unit_cost_cents) AS remaining
+                            FROM purchase_order_line l WHERE l.purchase_order_id = o.id
+                        ) r ON true
+                        WHERE o.tenant_id = :tenant AND o.status IN ('DRAFT', 'SENT', 'PARTIALLY_RECEIVED')""")
+                .param("tenant", TenantContext.requireTenant().value())
+                .param("today", Date.valueOf(today))
+                .query((rs, rowNum) -> new OrderSummary(today, rs.getInt("drafts"), rs.getInt("open"),
+                        rs.getInt("overdue"), rs.getInt("expected_today"), rs.getLong("open_amount")))
+                .single();
+    }
+
+    /** Deliveries booked against an order, oldest first (the order's timeline). */
+    @Transactional(readOnly = true)
+    public List<OrderReceiptView> orderReceipts(UUID orderId) {
+        orders.findById(orderId).orElseThrow(() -> new NotFoundException("Purchase order", orderId));
+        return jdbc.sql("""
+                        SELECT g.id, g.received_at, g.supplier_invoice_number, g.invoice_date, g.total_excl_vat_cents,
+                               g.vat_cents, u.display_name, coalesce(gl.lines, 0) AS lines, coalesce(gl.units, 0) AS units
+                        FROM goods_receipt g
+                        LEFT JOIN app_user u ON u.id = g.received_by
+                        LEFT JOIN LATERAL (
+                            SELECT count(*) AS lines, sum(quantity) AS units
+                            FROM goods_receipt_line WHERE goods_receipt_id = g.id
+                        ) gl ON true
+                        WHERE g.tenant_id = :tenant AND g.purchase_order_id = :order
+                        ORDER BY g.received_at""")
+                .param("tenant", TenantContext.requireTenant().value())
+                .param("order", orderId)
+                .query((rs, rowNum) -> {
+                    Date invoiceDate = rs.getDate("invoice_date");
+                    return new OrderReceiptView(rs.getObject("id", UUID.class),
+                            rs.getTimestamp("received_at").toInstant(), rs.getString("supplier_invoice_number"),
+                            invoiceDate == null ? null : invoiceDate.toLocalDate(), rs.getLong("total_excl_vat_cents"),
+                            rs.getLong("vat_cents"), rs.getInt("lines"), rs.getInt("units"),
+                            rs.getString("display_name"));
+                })
+                .list();
     }
 
     /** Plain text ready to paste in WhatsApp or an e-mail to the wholesaler. */
@@ -306,7 +483,11 @@ public class ProcurementService {
         var text = new StringBuilder();
         text.append("Commande ").append(order.number()).append(" - ").append(pharmacyName).append('\n');
         text.append("Fournisseur : ").append(order.supplierName()).append('\n');
-        text.append("Date : ").append(calendar.today()).append("\n\n");
+        text.append("Date : ").append(calendar.today().format(FRENCH_DATE)).append('\n');
+        if (order.expectedAt() != null) {
+            text.append("Livraison souhaitée : ").append(order.expectedAt().format(FRENCH_DATE)).append('\n');
+        }
+        text.append('\n');
         for (OrderLineView line : order.lines()) {
             text.append(line.quantityOrdered()).append(" x ").append(line.designation())
                     .append(" (CIP ").append(line.cip13()).append(")\n");
@@ -426,19 +607,97 @@ public class ProcurementService {
         return lines;
     }
 
-    private OrderView view(PurchaseOrderEntity order) {
-        String supplierName = suppliers.findById(order.supplierId()).map(SupplierEntity::name).orElse("?");
-        Map<UUID, String[]> products = jdbc.sql("SELECT id, designation, cip13 FROM product WHERE id = ANY(:ids)")
-                .param("ids", order.lines().stream().map(PurchaseOrderLineEntity::productId).toArray(UUID[]::new))
-                .query((rs, rowNum) -> Map.entry(rs.getObject("id", UUID.class),
-                        new String[] {rs.getString("designation"), rs.getString("cip13")}))
-                .list().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        return new OrderView(order.id(), order.number(), order.supplierId(), supplierName, order.status().name(),
-                order.createdAt(), order.sentAt(), order.expectedAt(), order.totalCents(), order.notes(),
-                order.lines().stream().map(l -> new OrderLineView(l.lineNo(), l.productId(),
-                        products.getOrDefault(l.productId(), new String[] {"?", ""})[0],
-                        products.getOrDefault(l.productId(), new String[] {"?", ""})[1],
-                        l.quantityOrdered(), l.quantityReceived(), l.unitCostCents(), l.packSize(),
-                        l.suggestedQuantity(), l.reason())).toList());
+    private PurchaseOrderEntity newDraft(UUID supplierId, List<OrderLineCommand> lines, String notes) {
+        var user = TenantContext.requireTenantUser();
+        String number = "CMD-" + calendar.today().getYear() + "-" + String.format("%05d", sequences.next(ORDER_SEQUENCE));
+        var order = new PurchaseOrderEntity(supplierId, number, user.userId(), clock.instant(), notes);
+        order.replaceLines(toLines(supplierId, lines));
+        return orders.save(order);
+    }
+
+    private static String reasonText(List<OrderProposalCalculator.Reason> reasons) {
+        return reasons.stream().map(reason -> switch (reason) {
+            case BELOW_TARGET -> "sous la couverture";
+            case BELOW_THRESHOLD -> "sous le seuil";
+            case EXPIRING_REPLACEMENT -> "péremption proche";
+            case LOST_SALES -> "ventes perdues";
+        }).collect(Collectors.joining(", "));
+    }
+
+    /** View of an order just written in this transaction. */
+    private OrderView reload(UUID orderId) {
+        entityManager.flush();
+        return views(List.of(orderId)).getFirst();
+    }
+
+    /** Orders with supplier and lines in two queries, in the order of {@code ids}. */
+    private List<OrderView> views(List<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        UUID tenant = TenantContext.requireTenant().value();
+        UUID[] idArray = ids.toArray(UUID[]::new);
+        Map<UUID, List<OrderLineView>> lines = new HashMap<>();
+        jdbc.sql("""
+                        SELECT l.purchase_order_id, l.line_no, l.product_id, p.designation, p.cip13, l.quantity_ordered,
+                               l.quantity_received, l.unit_cost_cents, l.pack_size, l.suggested_quantity, l.reason,
+                               sl.code AS location_code, sl.name AS location_name, sl.kind AS location_kind,
+                               CASE WHEN sl.id IS NOT NULL THEN st.location_detail END AS location_detail
+                        FROM purchase_order_line l JOIN product p ON p.id = l.product_id
+                        LEFT JOIN stock st ON st.tenant_id = l.tenant_id AND st.product_id = l.product_id
+                        LEFT JOIN storage_location sl ON sl.id = st.location_id
+                        WHERE l.tenant_id = :tenant AND l.purchase_order_id = ANY(:ids)
+                        ORDER BY l.purchase_order_id, l.line_no""")
+                .param("tenant", tenant)
+                .param("ids", idArray)
+                .query((RowCallbackHandler) rs -> lines
+                        .computeIfAbsent(rs.getObject("purchase_order_id", UUID.class), id -> new ArrayList<>())
+                        .add(new OrderLineView(rs.getInt("line_no"), rs.getObject("product_id", UUID.class),
+                                rs.getString("designation"), rs.getString("cip13"), rs.getInt("quantity_ordered"),
+                                rs.getInt("quantity_received"), rs.getLong("unit_cost_cents"), rs.getInt("pack_size"),
+                                (Integer) rs.getObject("suggested_quantity"), rs.getString("reason"),
+                                rs.getString("location_code"), rs.getString("location_name"),
+                                rs.getString("location_kind"), rs.getString("location_detail"))));
+        LocalDate today = calendar.today();
+        Map<UUID, OrderView> byId = new HashMap<>();
+        jdbc.sql("""
+                        SELECT o.id, o.number, o.supplier_id, s.name, s.contact_name, s.phone, s.whatsapp, s.email,
+                               s.min_order_cents, s.lead_time_days, o.status, o.created_at, o.sent_at, o.expected_at,
+                               o.closed_at, o.total_cents, o.notes
+                        FROM purchase_order o JOIN supplier s ON s.id = o.supplier_id
+                        WHERE o.tenant_id = :tenant AND o.id = ANY(:ids)""")
+                .param("tenant", tenant)
+                .param("ids", idArray)
+                .query((RowCallbackHandler) rs -> {
+                    UUID id = rs.getObject("id", UUID.class);
+                    String status = rs.getString("status");
+                    Date expected = rs.getDate("expected_at");
+                    LocalDate expectedAt = expected == null ? null : expected.toLocalDate();
+                    List<OrderLineView> orderLines = List.copyOf(lines.getOrDefault(id, List.of()));
+                    int ordered = orderLines.stream().mapToInt(OrderLineView::quantityOrdered).sum();
+                    int received = orderLines.stream().mapToInt(OrderLineView::quantityReceived).sum();
+                    long receivedCents = orderLines.stream()
+                            .mapToLong(l -> (long) l.quantityReceived() * l.unitCostCents()).sum();
+                    long remainingCents = !OrderTracking.open(status) ? 0 : orderLines.stream()
+                            .mapToLong(l -> (long) Math.max(l.quantityOrdered() - l.quantityReceived(), 0)
+                                    * l.unitCostCents())
+                            .sum();
+                    boolean incomplete = orderLines.stream().anyMatch(l -> l.quantityReceived() < l.quantityOrdered());
+                    byId.put(id, new OrderView(id, rs.getString("number"), rs.getObject("supplier_id", UUID.class),
+                            rs.getString("name"), status, instant(rs.getTimestamp("created_at")),
+                            instant(rs.getTimestamp("sent_at")), expectedAt, instant(rs.getTimestamp("closed_at")),
+                            rs.getLong("total_cents"), rs.getString("notes"),
+                            OrderTracking.overdue(status, expectedAt, today),
+                            OrderTracking.shortClosed(status, incomplete), ordered, received, receivedCents,
+                            remainingCents, new SupplierContact(rs.getString("contact_name"), rs.getString("phone"),
+                                    rs.getString("whatsapp"), rs.getString("email"), rs.getLong("min_order_cents"),
+                                    rs.getInt("lead_time_days")),
+                            orderLines));
+                });
+        return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
+
+    private static Instant instant(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
     }
 }

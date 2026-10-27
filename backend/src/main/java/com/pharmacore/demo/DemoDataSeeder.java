@@ -18,6 +18,7 @@ import com.pharmacore.insurance.domain.InsurerKind;
 import com.pharmacore.insurance.persistence.InsurancePolicyEntity;
 import com.pharmacore.insurance.persistence.InsurerEntity;
 import com.pharmacore.inventory.application.StockService;
+import com.pharmacore.inventory.application.StorageLocationService;
 import com.pharmacore.network.application.NetworkDirectoryService;
 import com.pharmacore.network.application.PublicSharingService;
 import com.pharmacore.procurement.application.ProcurementService;
@@ -118,7 +119,9 @@ class DemoDataSeeder {
             new Drug("SALBUTAMOL 100µG AEROSOL", "SALBUTAMOL", "100µG", "Aérosol", "GSK", DrugListing.LIST_I, 3_800),
             new Drug("DICLOFENAC GEL 1% 50G", "DICLOFENAC", "1%", "Gel", "Novartis", DrugListing.NONE, 1_500),
             new Drug("MOUSTIQUAIRE IMPREGNEE 2 PLACES", "", "", "Accessoire", "Vestergaard", DrugListing.NONE, 3_500),
-            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 2_500));
+            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 2_500),
+            new Drug("INSULATARD 100UI/ML FL 10ML", "INSULINE HUMAINE ISOPHANE", "100UI/ML", "Injectable", "Novo Nordisk",
+                    DrugListing.LIST_I, 9_500));
 
     private final DemoProperties demo;
     private final NodeProperties node;
@@ -130,6 +133,7 @@ class DemoDataSeeder {
     private final TenantUserLoader loader;
     private final CatalogService catalog;
     private final StockService stock;
+    private final StorageLocationService locations;
     private final CustomerService customers;
     private final ProcurementService procurement;
     private final InsurerService insurers;
@@ -148,7 +152,7 @@ class DemoDataSeeder {
                    CustomerService customers, ProcurementService procurement, InsurerService insurers,
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
-                   PlatformTransactionManager transactionManager, Clock clock) {
+                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations) {
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -159,6 +163,7 @@ class DemoDataSeeder {
         this.loader = loader;
         this.catalog = catalog;
         this.stock = stock;
+        this.locations = locations;
         this.customers = customers;
         this.procurement = procurement;
         this.insurers = insurers;
@@ -282,7 +287,8 @@ class DemoDataSeeder {
             UUID copharni = procurement.createSupplier(new SupplierEntity.Details("Copharni", "M. Abdou",
                     "+22720750000", null, "ventes@copharni.ne", "Avenue du Progrès, Niamey", 2, "MAR,JEU",
                     100_000, "45 jours", null)).id();
-            for (int i = 0; i < products.size(); i++) {
+            // the last product (a thermometer) is bought locally: no wholesaler sells it
+            for (int i = 0; i < products.size() - 1; i++) {
                 ProductEntity product = products.get(i);
                 long purchase = Math.round(product.publicPriceCents() * 0.72 / 5) * 5;
                 procurement.linkProduct(i % 3 == 0 ? copharni : laborex, product.id(), "REF-" + (1000 + i), purchase,
@@ -302,8 +308,9 @@ class DemoDataSeeder {
                     // short-dated lot large enough to survive two weeks of FEFO sales: shows in the alerts
                     stock.receiveLot(product.id(), "L" + (2501 + i), today.plusDays(25 + random.nextInt(50)), 30, cost);
                 }
-                stock.configure(product.id(), product.publicPriceCents(), 10, 40, "Rayon " + (char) ('A' + i % 6));
+                stock.configure(product.id(), product.publicPriceCents(), 10, 40);
             }
+            DemoStorageLocations.seed(locations, products, DRUGS);
 
             // customers, one with a credit account and an insurance policy
             var hadiza = customers.create(new CustomerEntity.Details("Mme Hadiza Moussa", "+22790" + (300000 + index),
@@ -379,11 +386,85 @@ class DemoDataSeeder {
                     List.of(new SaleDraft.Line(first.id(), 1, first.publicPriceCents(), 0)),
                     List.of(new SaleDraft.Payment(PaymentMethod.CREDIT, first.publicPriceCents(), null, null, null, null)),
                     null));
+            seedOrders(tenant, laborex, copharni, products, today);
             cashSessions.openSession(TERMINAL, 50_000);
             if (rejected > 0) {
                 log.warn("Démonstration : {} vente(s) de {} refusée(s) par les règles métier", rejected, pharmacy.slug());
             }
         });
+    }
+
+    /**
+     * Purchase orders at every stage of the follow-up: a draft below the supplier minimum, one sent
+     * and due tomorrow, one two days late, one partly delivered (real receipt: lots and purchase
+     * entry) and one fully delivered; then a few products fall under their minimum so that
+     * tomorrow's sheet has lines to turn into orders.
+     */
+    private void seedOrders(TenantId tenant, UUID laborex, UUID copharni, List<ProductEntity> products,
+                            LocalDate today) {
+        Instant now = clock.instant();
+        procurement.createOrder(copharni, orderLines(products, Map.of(0, 50, 18, 30, 3, 20)), null);
+
+        procurement.send(procurement.createOrder(laborex, orderLines(products, Map.of(7, 60, 11, 30, 13, 20)), null)
+                .id());
+
+        UUID late = procurement.send(procurement.createOrder(copharni, orderLines(products, Map.of(6, 20, 9, 10)),
+                "Relancer M. Abdou").id()).id();
+        backdate(late, now.minus(java.time.Duration.ofDays(5)), today.minusDays(2));
+
+        var partial = procurement.send(procurement.createOrder(laborex,
+                orderLines(products, Map.of(1, 100, 4, 60, 14, 40, 22, 20)), null).id());
+        backdate(partial.id(), now.minus(java.time.Duration.ofDays(3)), today);
+        procurement.receive(receipt(laborex, partial, products, Map.of(1, 100, 4, 40, 14, 40),
+                "LBX-F-" + partial.number(), today));
+
+        var full = procurement.send(procurement.createOrder(copharni,
+                orderLines(products, Map.of(15, 40, 12, 30, 21, 20)), null).id());
+        backdate(full.id(), now.minus(java.time.Duration.ofDays(2)), today);
+        procurement.receive(receipt(copharni, full, products, Map.of(15, 40, 12, 30, 21, 20),
+                "CPH-" + full.number(), today));
+
+        // tomorrow's sheet: products under a raised minimum, for both wholesalers and the thermometer
+        Map<Integer, Integer> reorder = Map.of(5, 60, 8, 80, 19, 100, 20, 50, 0, 60, 18, 40, products.size() - 1, 10);
+        tx.executeWithoutResult(status -> reorder.forEach((index, quantity) -> jdbc.sql("""
+                        UPDATE stock SET reorder_threshold = 200, reorder_quantity = :quantity
+                        WHERE tenant_id = :tenant AND product_id = :product""")
+                .param("quantity", quantity).param("tenant", tenant.value())
+                .param("product", products.get(index).id()).update()));
+    }
+
+    private static List<ProcurementService.OrderLineCommand> orderLines(List<ProductEntity> products,
+                                                                        Map<Integer, Integer> quantityByIndex) {
+        return quantityByIndex.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .map(e -> new ProcurementService.OrderLineCommand(products.get(e.getKey()).id(), e.getValue(), null,
+                        e.getValue(), null))
+                .toList();
+    }
+
+    private static ProcurementService.ReceiptCommand receipt(UUID supplierId, ProcurementService.OrderView order,
+                                                             List<ProductEntity> products,
+                                                             Map<Integer, Integer> quantityByIndex, String invoice,
+                                                             LocalDate today) {
+        Map<UUID, Integer> delivered = new java.util.HashMap<>();
+        quantityByIndex.forEach((index, quantity) -> delivered.put(products.get(index).id(), quantity));
+        String batch = order.number().substring(order.number().length() - 3);
+        List<ProcurementService.ReceiptLineCommand> lines = order.lines().stream()
+                .filter(line -> delivered.containsKey(line.productId()))
+                .map(line -> new ProcurementService.ReceiptLineCommand(line.productId(), "R" + batch + "-" + line.lineNo(),
+                        today.plusMonths(18), delivered.get(line.productId()), line.unitCostCents(), BigDecimal.ZERO,
+                        null))
+                .toList();
+        return new ProcurementService.ReceiptCommand(supplierId, order.id(), invoice, today, null, lines);
+    }
+
+    /** Orders placed earlier than the seeding day, so the follow-up has a history. */
+    private void backdate(UUID orderId, Instant placedAt, LocalDate expectedAt) {
+        tx.executeWithoutResult(status -> jdbc.sql("""
+                        UPDATE purchase_order SET created_at = :at::timestamptz, sent_at = :at::timestamptz + interval '2 hours',
+                                                  expected_at = :expected
+                        WHERE id = :id""")
+                .param("at", java.sql.Timestamp.from(placedAt)).param("expected", java.sql.Date.valueOf(expectedAt))
+                .param("id", orderId).update());
     }
 
     private void setCredentials(String email) {

@@ -143,7 +143,7 @@ class CounterDayIT extends IntegrationTest {
         // Next-day order sheet: paracetamol sells 2/day over the window → coverage → not needed yet
         // (68 on hand); lower the threshold rule: set a minimum of 80 to force a proposal line.
         call(put("/api/v1/inventory/stocks/" + paracetamol + "/settings"), pharmacy.ownerToken(), """
-                {"sellingPriceCents":550,"reorderThreshold":80,"reorderQuantity":60,"location":"A1"}""")
+                {"sellingPriceCents":550,"reorderThreshold":80,"reorderQuantity":60}""")
                 .andExpect(status().isNoContent());
         call(put("/api/v1/procurement/suppliers/" + supplierId + "/products/" + paracetamol), pharmacy.ownerToken(), """
                 {"supplierReference":"LBX-001","purchasePriceCents":300,"packSize":10,"preferred":true}""")

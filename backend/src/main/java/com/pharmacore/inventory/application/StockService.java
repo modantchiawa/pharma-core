@@ -1,5 +1,6 @@
 package com.pharmacore.inventory.application;
 
+import com.pharmacore.inventory.domain.StorageLocationKind;
 import com.pharmacore.inventory.persistence.StockLotEntity;
 import com.pharmacore.inventory.persistence.StockLotRepository;
 import com.pharmacore.inventory.persistence.StockMovementEntity;
@@ -95,8 +96,7 @@ public class StockService {
         if (previous != null && previous == sellingPriceCents) {
             return;
         }
-        stock.configure(sellingPriceCents, stock.reorderThreshold(), stock.reorderQuantity(), stock.location(),
-                clock.instant());
+        stock.configure(sellingPriceCents, stock.reorderThreshold(), stock.reorderQuantity(), clock.instant());
         audit.record("STOCK_PRICE_UPDATED", "STOCK", stock.id(), Map.of(
                 "productId", productId.toString(),
                 "previousPriceCents", String.valueOf(previous),
@@ -112,11 +112,10 @@ public class StockService {
     }
 
     @Transactional
-    public void configure(UUID productId, Long sellingPriceCents, int reorderThreshold, int reorderQuantity,
-                          String location) {
+    public void configure(UUID productId, Long sellingPriceCents, int reorderThreshold, int reorderQuantity) {
         var stock = ledger.lock(List.of(productId)).get(productId);
         Long previousPrice = stock.sellingPriceCents();
-        stock.configure(sellingPriceCents, reorderThreshold, reorderQuantity, location, clock.instant());
+        stock.configure(sellingPriceCents, reorderThreshold, reorderQuantity, clock.instant());
         audit.record("STOCK_CONFIGURED", "STOCK", stock.id(), Map.of(
                 "productId", productId.toString(),
                 "previousPriceCents", String.valueOf(previousPrice),
@@ -125,17 +124,39 @@ public class StockService {
                 "reorderQuantity", Integer.toString(reorderQuantity)));
     }
 
+    /** Which products to list by placement: all, those stored at one location, or those stored nowhere. */
+    public sealed interface LocationFilter {
+
+        record Any() implements LocationFilter {
+        }
+
+        record At(UUID locationId) implements LocationFilter {
+        }
+
+        record Unassigned() implements LocationFilter {
+        }
+    }
+
     @Transactional(readOnly = true)
     public List<StockOverview> overview(String search, boolean onlyBelowThreshold, int limit, int offset) {
+        return overview(search, onlyBelowThreshold, new LocationFilter.Any(), limit, offset);
+    }
+
+    @Transactional(readOnly = true)
+    public List<StockOverview> overview(String search, boolean onlyBelowThreshold, LocationFilter location, int limit,
+                                        int offset) {
         return jdbc.sql("""
-                        SELECT s.product_id, p.cip13, p.designation, s.location, s.selling_price_cents,
+                        SELECT s.product_id, p.cip13, p.designation, s.selling_price_cents,
                                p.public_price_cents, s.reorder_threshold, s.reorder_quantity, s.reserved_quantity,
                                s.shortfall_quantity,
                                coalesce(l.on_hand, 0) AS on_hand,
                                coalesce(l.sellable, 0) AS sellable,
-                               l.next_expiry
+                               l.next_expiry,
+                               s.location_id, loc.code AS location_code, loc.name AS location_name,
+                               loc.kind AS location_kind, s.location_detail
                         FROM stock s
                         JOIN product p ON p.id = s.product_id
+                        LEFT JOIN storage_location loc ON loc.id = s.location_id
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) AS on_hand,
                                    sum(quantity) FILTER (WHERE expiry_date > :today) AS sellable,
@@ -144,9 +165,18 @@ public class StockService {
                         ) l ON true
                         WHERE (:search = '' OR p.designation ILIKE '%' || :search || '%' OR p.cip13 = :search)
                           AND (NOT :below OR coalesce(l.sellable, 0) - s.reserved_quantity <= s.reorder_threshold)
+                          AND (:locationMode = 'ANY'
+                               OR (:locationMode = 'AT' AND s.location_id = :locationId::uuid)
+                               OR (:locationMode = 'NONE' AND s.location_id IS NULL))
                         ORDER BY p.designation
                         LIMIT :limit OFFSET :offset""")
                 .param("today", Date.valueOf(calendar.today()))
+                .param("locationMode", switch (location) {
+                    case LocationFilter.Any _ -> "ANY";
+                    case LocationFilter.At _ -> "AT";
+                    case LocationFilter.Unassigned _ -> "NONE";
+                })
+                .param("locationId", location instanceof LocationFilter.At at ? at.locationId() : null)
                 .param("search", search == null ? "" : search.trim())
                 .param("below", onlyBelowThreshold)
                 .param("limit", Math.clamp(limit, 1, 500))
@@ -156,11 +186,15 @@ public class StockService {
                     int reserved = rs.getInt("reserved_quantity");
                     int threshold = rs.getInt("reorder_threshold");
                     Date nextExpiry = rs.getDate("next_expiry");
+                    UUID locationId = rs.getObject("location_id", UUID.class);
                     return new StockOverview(
                             rs.getObject("product_id", UUID.class),
                             rs.getString("cip13"),
                             rs.getString("designation"),
-                            rs.getString("location"),
+                            locationId == null ? null : new StockLocation(locationId, rs.getString("location_code"),
+                                    rs.getString("location_name"),
+                                    StorageLocationKind.valueOf(rs.getString("location_kind")),
+                                    rs.getString("location_detail")),
                             (Long) rs.getObject("selling_price_cents"),
                             (Long) rs.getObject("public_price_cents"),
                             rs.getInt("on_hand"),
@@ -219,7 +253,11 @@ public class StockService {
                 .toList();
     }
 
-    public record StockOverview(UUID productId, String cip13, String designation, String location,
+    /** Where the product is stored, as shown in the stock lists, the POS and on shelf labels. */
+    public record StockLocation(UUID id, String code, String name, StorageLocationKind kind, String detail) {
+    }
+
+    public record StockOverview(UUID productId, String cip13, String designation, StockLocation location,
                                 Long sellingPriceCents, Long publicPriceCents, int onHand, int available,
                                 int reserved, int shortfall, int reorderThreshold, int reorderQuantity,
                                 LocalDate nextExpiry, boolean belowThreshold) {

@@ -1,5 +1,6 @@
 package com.pharmacore.inventory.persistence;
 
+import com.pharmacore.inventory.domain.Placement;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -43,8 +44,11 @@ public class StockEntity {
     @Column(name = "shortfall_quantity", nullable = false)
     private int shortfallQuantity;
 
-    @Column(length = 50)
-    private String location;
+    @Column(name = "location_id")
+    private UUID locationId;
+
+    @Column(name = "location_detail", length = 40)
+    private String locationDetail;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
@@ -55,12 +59,16 @@ public class StockEntity {
     protected StockEntity() {
     }
 
-    public void configure(Long sellingPriceCents, int reorderThreshold, int reorderQuantity, String location,
-                          Instant now) {
+    public void configure(Long sellingPriceCents, int reorderThreshold, int reorderQuantity, Instant now) {
         this.sellingPriceCents = sellingPriceCents;
         this.reorderThreshold = reorderThreshold;
         this.reorderQuantity = reorderQuantity;
-        this.location = location;
+        touch(now);
+    }
+
+    public void place(Placement placement, Instant now) {
+        this.locationId = placement.locationId();
+        this.locationDetail = placement.detail();
         touch(now);
     }
 
@@ -133,7 +141,7 @@ public class StockEntity {
         return shortfallQuantity;
     }
 
-    public String location() {
-        return location;
+    public Placement placement() {
+        return new Placement(locationId, locationDetail);
     }
 }

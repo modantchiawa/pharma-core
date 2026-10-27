@@ -10,6 +10,7 @@ import {
 } from '../../core/api/models';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CachedProduct } from '../../core/offline/pos-database';
+import { ProductPlace, placeOf } from '../../shared/storage-location';
 
 export interface CartLine {
   productId: string;
@@ -21,6 +22,8 @@ export interface CartLine {
   quantity: number;
   discountCents: number;
   availableQuantity: number;
+  /** Shelf to pick the box from, shown under the line (absent on reprinted sales). */
+  place?: ProductPlace | null;
 }
 
 export interface CartPayment {
@@ -185,6 +188,7 @@ export class CartStore {
           quantity,
           discountCents: 0,
           availableQuantity: product.availableQuantity,
+          place: placeOf(product),
         },
       ];
     });

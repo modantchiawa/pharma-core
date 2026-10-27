@@ -373,7 +373,7 @@ const SAMPLE_LINE: CartLine = {
             </p>
             <div class="flex flex-1 justify-end gap-2 sm:flex-none">
               <button type="button" class="btn btn-ghost" (click)="reset()">
-                Annuler<span class="hidden sm:inline">&nbsp;les modifications</span>
+                Annuler<span class="hidden sm:inline">les modifications</span>
               </button>
               <button type="submit" class="btn btn-primary">
                 <app-icon name="check" [size]="16" />

@@ -209,6 +209,14 @@ dans `sync_table`, clés étrangères différables.
 
 Migrations `V12` et `V13`.
 
+### 4.3 Emplacements de rangement
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Emplacements** | `StorageLocationService`, `LocationCode`, `Placement`, `StorageLocationKind` (domaine pur), table `storage_location`, colonnes `stock.location_id` / `location_detail` | Code court unique par pharmacie, normalisé (majuscules sans accents, 16 caractères) ; détail libre (« case 12 ») oublié quand le produit change d'emplacement ; désactivation refusée tant que des produits y sont rangés, sauf réaffectation dans la même opération (verrous : partagé à l'affectation, exclusif à la désactivation) ; renommer un emplacement réémet ses produits vers le cache hors ligne des caisses (`updated_at` dans le curseur du flux POS) ; inventaire limité à un emplacement ; import d'un emplacement en texte libre rattaché au code existant ou créé. L'ancien texte libre `stock.location` est repris par `V14` avec des identifiants déterministes (mêmes lignes sur le hub et le cloud) |
+
+Migration `V14`.
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste
