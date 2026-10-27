@@ -884,3 +884,91 @@ export interface TerminalTicketRequest {
   vat: { rate: number; totalTtcCents: number; vatCents: number }[];
   offline: boolean;
 }
+
+// ---------------------------------------------------------------- supervision des postes et des comptes
+
+/** Synchronization verdict of a cash register (server rules, thresholds in `SyncSupervision`). */
+export type TerminalSyncState = 'SYNCED' | 'PENDING' | 'STALE' | 'NEVER';
+
+export interface TerminalView {
+  terminalId: string;
+  appVersion: string;
+  lastSeenAt: string;
+  lastSyncAt: string | null;
+  pendingSales: number;
+  /** Sales refused by the server awaiting the pharmacist; null when the register does not report it. */
+  rejectedSales: number | null;
+  state: TerminalSyncState;
+}
+
+export interface TerminalCounts {
+  total: number;
+  synced: number;
+  pending: number;
+  stale: number;
+  never: number;
+  pendingSales: number;
+}
+
+export interface TerminalBoard {
+  /** Instant the states are computed at: now, or the hub's last contact when relayed by a hub. */
+  observedAt: string;
+  relayedByHub: boolean;
+  staleAfterSeconds: number;
+  counts: TerminalCounts;
+  terminals: TerminalView[];
+}
+
+export interface HubView {
+  nodeId: string;
+  appVersion: string | null;
+  pairedAt: string;
+  lastContactAt: string | null;
+  lastPushAt: string | null;
+  lastPullAt: string | null;
+  reachable: boolean;
+}
+
+export interface SupervisedPharmacy {
+  id: string;
+  slug: string;
+  legalName: string;
+  displayName: string | null;
+  city: string | null;
+  status: string;
+  topology: 'CLOUD' | 'HUB';
+  subscriptionPlan: string;
+  subscriptionExpiresAt: string | null;
+  createdAt: string;
+}
+
+export interface SupervisedAccount {
+  id: string;
+  displayName: string;
+  email: string;
+  roles: { code: string; name: string }[];
+  active: boolean;
+  locked: boolean;
+  mustChangePassword: boolean;
+  pinSet: boolean;
+  lastLoginAt: string | null;
+}
+
+export interface PharmacySupervision {
+  pharmacy: SupervisedPharmacy;
+  hub: HubView | null;
+  terminals: TerminalBoard;
+  accounts: SupervisedAccount[];
+}
+
+export interface PharmacySyncHealth {
+  tenantId: string;
+  topology: 'CLOUD' | 'HUB';
+  terminals: number;
+  outOfSync: number;
+  stale: number;
+  pendingSales: number;
+  hubLastContactAt: string | null;
+  hubReachable: boolean;
+  observedAt: string;
+}

@@ -8,7 +8,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Liveness and backlog of POS terminals, displayed on the Super-Admin supervision dashboard. */
+/**
+ * Liveness and backlog of POS terminals, displayed on the Super-Admin supervision dashboard and the
+ * pharmacy's "Serveur local" page. {@code rejectedSales} is {@code null} for registers running a
+ * version that does not report it.
+ */
 @Service
 public class TerminalHeartbeatService {
 
@@ -21,19 +25,22 @@ public class TerminalHeartbeatService {
     }
 
     @Transactional
-    public void beat(String terminalId, String appVersion, int pendingSales, Instant lastSyncAt) {
+    public void beat(String terminalId, String appVersion, int pendingSales, Instant lastSyncAt, Integer rejectedSales) {
         jdbc.sql("""
-                        INSERT INTO terminal_heartbeat (tenant_id, terminal_id, app_version, pending_sales, last_sync_at, last_seen_at)
-                        VALUES (:tenant, :terminal, :version, :pending, :lastSync, :now)
+                        INSERT INTO terminal_heartbeat (tenant_id, terminal_id, app_version, pending_sales, rejected_sales,
+                                                        last_sync_at, last_seen_at)
+                        VALUES (:tenant, :terminal, :version, :pending, :rejected, :lastSync, :now)
                         ON CONFLICT (tenant_id, terminal_id) DO UPDATE
                         SET app_version = EXCLUDED.app_version,
                             pending_sales = EXCLUDED.pending_sales,
+                            rejected_sales = EXCLUDED.rejected_sales,
                             last_sync_at = coalesce(EXCLUDED.last_sync_at, terminal_heartbeat.last_sync_at),
                             last_seen_at = EXCLUDED.last_seen_at""")
                 .param("tenant", TenantContext.requireTenant().value())
                 .param("terminal", terminalId)
                 .param("version", appVersion)
                 .param("pending", pendingSales)
+                .param("rejected", rejectedSales)
                 .param("lastSync", lastSyncAt == null ? null : Timestamp.from(lastSyncAt))
                 .param("now", Timestamp.from(clock.instant()))
                 .update();

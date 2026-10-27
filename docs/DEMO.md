@@ -150,6 +150,12 @@ le PIN avec `DEMO_PIN`.
   crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`, dix emplacements
   (rayons A à C, tiroir des injectables, réfrigérateur pour l'insuline, coffre pour le tramadol,
   comptoir, réserve) où chaque produit est rangé.
+* Postes de caisse dans chaque état de synchronisation : à `sahel`, `DEMO-1` synchronisé, `CAISSE-2`
+  avec 3 ventes en attente, `CAISSE-3` hors ligne depuis 2 jours (1 vente bloquée sur le poste) et
+  `BUREAU` jamais synchronisé ; à `lacouroussou`, `DEMO-1` synchronisé et `CAISSE-2` hors ligne. Les
+  postes « allumés » renvoient un signal chaque minute pour que le tableau reste le même pendant
+  toute la démo. Chaque navigateur qui ouvre la caisse apparaît en plus comme un poste (identifiant
+  aléatoire) : la console et la page « Serveur local » permettent de les oublier une fois hors ligne.
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -173,6 +179,8 @@ le PIN avec `DEMO_PIN`.
 | 13 | Page publique `/public` : « paracetamol », Niamey | Les deux pharmacies, niveau sans quantité ; gardes du soir |
 | 14 | Réseau › « Qui l'a ? » depuis `lacouroussou` | Stock de `sahel` plafonné à 20 |
 | 15 | Console éditeur : liste des pharmacies, import du référentiel (essai à blanc) | Deux pharmacies actives, aperçu du fichier |
+| 15 bis | Console éditeur › clic sur « Pharmacie du Sahel » | Fiche : serveur local, abonnement, 4 postes (synchronisé, 3 ventes en attente, hors ligne depuis 2 j, jamais synchronisé), comptes avec rôles et dernière connexion ; « Oublier » sur le poste hors ligne |
+| 15 ter | Titulaire `sahel` › Administration › Serveur local | Mêmes postes, « ce poste » repéré, oubli des postes hors ligne sans vente en attente |
 | 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de

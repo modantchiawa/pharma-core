@@ -70,7 +70,8 @@ final class SaleRequests {
     record HeartbeatRequest(@NotBlank @Size(max = 40) String terminalId,
                             @NotBlank @Size(max = 40) String appVersion,
                             @PositiveOrZero int pendingSales,
-                            Instant lastSyncAt) {
+                            Instant lastSyncAt,
+                            @PositiveOrZero Integer rejectedSales) {
     }
 
     /** Supervisor credentials are only needed when the operation exceeds the pharmacy's thresholds. */

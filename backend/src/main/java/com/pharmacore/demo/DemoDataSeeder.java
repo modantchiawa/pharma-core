@@ -388,6 +388,10 @@ class DemoDataSeeder {
                     null));
             seedOrders(tenant, laborex, copharni, products, today);
             cashSessions.openSession(TERMINAL, 50_000);
+            tx.executeWithoutResult(status -> DemoTerminals.seed(jdbc, tenant, pharmacy.slug(), clock.instant()));
+            // the staff opened DEMO-1: every account shows a last login in the console
+            auth.login(pharmacy.slug(), pharmacy.cashierEmail(), demo.accountPassword(), TERMINAL);
+            auth.login(pharmacy.slug(), pharmacy.ownerEmail(), demo.accountPassword(), TERMINAL);
             if (rejected > 0) {
                 log.warn("Démonstration : {} vente(s) de {} refusée(s) par les règles métier", rejected, pharmacy.slug());
             }

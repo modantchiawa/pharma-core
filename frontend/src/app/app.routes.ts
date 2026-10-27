@@ -37,6 +37,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'pharmacies/:id',
+        title: 'Pharmacie · postes et comptes',
+        loadComponent: () =>
+          import('./features/platform/pharmacy-supervision-page').then(
+            (m) => m.PharmacySupervisionPage,
+          ),
+      },
+      {
         path: 'catalog-import',
         title: 'Référentiel · import',
         data: { platform: true },
