@@ -692,6 +692,13 @@
   }
 }
 
+/* Toasts stay in the visible area left of an open side panel (42rem, see [data-side-panel]). */
+@media (min-width: 640px) {
+  body:has([data-side-panel]) .toaster {
+    left: calc((100vw - min(42rem, 100vw)) / 2);
+  }
+}
+
 /* Dark mode: hard-coded white surfaces of older pages follow the theme. */
 :root[data-theme='dark'] .bg-white {
   background-color: var(--surface);

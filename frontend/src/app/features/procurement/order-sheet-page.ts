@@ -100,7 +100,7 @@ type Tab = 'proposal' | 'orders';
             (click)="activeTab.set('proposal')"
           >
             <app-icon name="spreadsheet" [size]="15" />
-            Fiche<span class="hidden sm:inline">&nbsp;de commande</span>
+            Fiche<span class="hidden sm:inline">de commande</span>
           </button>
           <button
             type="button"
@@ -110,7 +110,7 @@ type Tab = 'proposal' | 'orders';
             (click)="activeTab.set('orders')"
           >
             <app-icon name="procurement" [size]="15" />
-            Suivi<span class="hidden sm:inline">&nbsp;des commandes</span>
+            Suivi<span class="hidden sm:inline">des commandes</span>
             @if ((summary()?.overdue ?? 0) > 0) {
               <span class="badge badge-danger">{{ summary()?.overdue }}</span>
             }

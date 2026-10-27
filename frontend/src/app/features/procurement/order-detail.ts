@@ -63,6 +63,7 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
       class="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-surface shadow-[var(--shadow-lg)] sm:max-w-2xl print:hidden animate-in"
       role="dialog"
       aria-modal="true"
+      data-side-panel
       [attr.aria-label]="'Commande ' + (order()?.number ?? '')"
     >
       @if (order(); as o) {
