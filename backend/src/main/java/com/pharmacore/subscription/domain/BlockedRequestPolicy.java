@@ -24,7 +24,8 @@ public final class BlockedRequestPolicy {
             "/api/v1/hub/sync/run",
             "/api/v1/pos/heartbeat",
             "/api/v1/pos/sync/sales",
-            "/api/v1/print/tickets");
+            "/api/v1/print/tickets",
+            "/api/v1/me/session-events");
 
     private static final List<String> ALLOWED_PREFIXES = List.of("/api/v1/print/receipts/");
 

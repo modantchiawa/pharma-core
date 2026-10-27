@@ -5,6 +5,7 @@ import com.pharmacore.shared.context.Actor;
 import com.pharmacore.shared.context.RequestContext;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.context.TenantId;
+import com.pharmacore.shared.media.ImageTypes;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
 import com.pharmacore.tenant.persistence.PharmacyConfigEntity;
@@ -13,12 +14,7 @@ import com.pharmacore.tenant.persistence.PharmacyConfigRepository;
 import com.pharmacore.tenant.persistence.TenantAssetEntity;
 import com.pharmacore.tenant.persistence.TenantAssetRepository;
 import com.pharmacore.tenant.persistence.TenantRepository;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -75,7 +71,7 @@ public class BrandingService {
     @Transactional
     public BrandingView replaceLogo(byte[] content) {
         String contentType = detectImageType(content);
-        var asset = assets.save(new TenantAssetEntity("LOGO", contentType, content, sha256(content), clock.instant()));
+        var asset = assets.save(new TenantAssetEntity("LOGO", contentType, content, ImageTypes.sha256(content), clock.instant()));
         var config = load();
         config.useLogo(asset.id(), clock.instant());
         audit.record("LOGO_REPLACED", "PHARMACY_CONFIG", config.tenantId(), Map.of(
@@ -131,29 +127,8 @@ public class BrandingService {
         if (content.length == 0 || content.length > MAX_LOGO_BYTES) {
             throw new BusinessRuleException("logo-size", "Logo must be between 1 byte and 512 KB");
         }
-        if (startsWith(content, new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'})) {
-            return "image/png";
-        }
-        if (startsWith(content, new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF})) {
-            return "image/jpeg";
-        }
-        if (content.length > 12 && startsWith(content, "RIFF".getBytes(StandardCharsets.US_ASCII))
-                && Arrays.equals(Arrays.copyOfRange(content, 8, 12), "WEBP".getBytes(StandardCharsets.US_ASCII))) {
-            return "image/webp";
-        }
-        throw new BusinessRuleException("logo-format", "Logo must be a PNG, JPEG or WebP image");
-    }
-
-    private static boolean startsWith(byte[] content, byte[] prefix) {
-        return content.length >= prefix.length && Arrays.equals(Arrays.copyOf(content, prefix.length), prefix);
-    }
-
-    private static String sha256(byte[] content) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return ImageTypes.detect(content).orElseThrow(() ->
+                new BusinessRuleException("logo-format", "Logo must be a PNG, JPEG or WebP image"));
     }
 
     public record Logo(String contentType, byte[] content, String sha256) {

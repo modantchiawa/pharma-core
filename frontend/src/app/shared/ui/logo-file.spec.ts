@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { LOGO_MAX_BYTES, LogoFileError, fitWithin, needsRedraw, prepareLogo } from './logo-file';
+import {
+  ImageFileError,
+  LOGO_MAX_BYTES,
+  LogoFileError,
+  fitWithin,
+  needsRedraw,
+  prepareLogo,
+  prepareProductPhoto,
+  squareCrop,
+} from './logo-file';
 
 describe('fitWithin', () => {
   it('scales the longest side down to the limit and keeps the ratio', () => {
@@ -41,5 +50,29 @@ describe('prepareLogo', () => {
   it('refuses a file that is not an image', async () => {
     const pdf = new File(['%PDF-1.7'], 'logo.pdf', { type: 'application/pdf' });
     await expect(prepareLogo(pdf)).rejects.toThrow(/pas une image/);
+  });
+});
+
+describe('squareCrop', () => {
+  it('keeps the centered square of a landscape or portrait photo', () => {
+    expect(squareCrop(4032, 3024)).toEqual({ sx: 504, sy: 0, side: 3024 });
+    expect(squareCrop(1080, 1920)).toEqual({ sx: 0, sy: 420, side: 1080 });
+  });
+
+  it('takes a square picture whole', () => {
+    expect(squareCrop(256, 256)).toEqual({ sx: 0, sy: 0, side: 256 });
+  });
+});
+
+describe('prepareProductPhoto', () => {
+  it('explains how to get a JPEG instead of a HEIC photo', async () => {
+    const heic = new File([new Uint8Array(10)], 'IMG_0002.heic', { type: 'image/heic' });
+    await expect(prepareProductPhoto(heic)).rejects.toThrow(ImageFileError);
+    await expect(prepareProductPhoto(heic)).rejects.toThrow(/compatible/);
+  });
+
+  it('refuses a document that is not a picture', async () => {
+    const text = new File(['notice'], 'notice.txt', { type: 'text/plain' });
+    await expect(prepareProductPhoto(text)).rejects.toThrow(/pas une image/);
   });
 });

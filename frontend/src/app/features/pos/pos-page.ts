@@ -3,8 +3,10 @@ import {
   Component,
   ElementRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
@@ -40,6 +42,8 @@ import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
 import { LocationChip } from '../../shared/ui/location-chip';
 import { placeOf } from '../../shared/storage-location';
+import { ProductThumb } from '../../shared/ui/product-thumb';
+import { IdleService } from '../../core/session/idle.service';
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -47,7 +51,7 @@ import { placeOf } from '../../shared/storage-location';
  */
 @Component({
   selector: 'app-pos-page',
-  imports: [FormsModule, MoneyPipe, Receipt, Icon, LocationChip],
+  imports: [FormsModule, MoneyPipe, Receipt, Icon, LocationChip, ProductThumb],
   providers: [CartStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
@@ -89,11 +93,12 @@ import { placeOf } from '../../shared/storage-location';
                   class="flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5"
                   (mousedown)="pick(product)"
                 >
-                  <span
-                    class="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-muted sm:flex"
-                  >
-                    <app-icon name="pill" [size]="16" />
-                  </span>
+                  <app-product-thumb
+                    [productId]="product.productId"
+                    [version]="product.imageVersion"
+                    [name]="product.designation"
+                    [size]="40"
+                  />
                   <span class="min-w-0 flex-1">
                     <span class="block truncate font-medium">{{ product.designation }}</span>
                     <span
@@ -174,7 +179,14 @@ import { placeOf } from '../../shared/storage-location';
                 <tbody>
                   @for (line of cart.lines(); track line.productId) {
                     <tr>
-                      <td>
+                      <td class="relative !pl-[3.75rem]">
+                        <app-product-thumb
+                          class="!absolute top-1/2 left-4 -translate-y-1/2"
+                          [productId]="line.productId"
+                          [version]="line.imageVersion"
+                          [name]="line.designation"
+                          [size]="36"
+                        />
                         <div class="flex items-center gap-2 font-medium">
                           {{ line.designation }}
                           @if (line.listing !== 'NONE') {
@@ -759,9 +771,28 @@ export class PosPage {
     this.methods.filter((m) => m.code !== 'THIRD_PARTY_PAYER' || this.policies().length === 0),
   );
   private readonly cashierName = computed(() => this.permissions.profile()?.displayName ?? '');
+  private readonly idle = inject(IdleService);
 
   constructor() {
     void this.checkCashSession();
+    // Another user switched in from the lock screen: the basket stays at the counter, but the
+    // amounts the previous cashier typed are dropped and taken again by whoever cashes the sale.
+    let cashier = this.permissions.profile()?.userId;
+    effect(() => {
+      const current = this.permissions.profile()?.userId;
+      if (current && cashier && current !== cashier) {
+        untracked(() => {
+          if (this.cart.payments().length > 0) {
+            this.cart.payments.set([]);
+            this.amount = '';
+            this.message.set(
+              `Panier conservé pour ${this.cashierName()} : ressaisissez les règlements`,
+            );
+          }
+        });
+      }
+      cashier = current ?? cashier;
+    });
   }
 
   private async loadCustomerFiles(customer: Customer): Promise<void> {
@@ -1027,6 +1058,7 @@ export class PosPage {
       return;
     }
     this.busy.set(true);
+    const release = this.idle.hold();
     try {
       const profile = this.permissions.profile();
       if (!profile) {
@@ -1100,6 +1132,7 @@ export class PosPage {
     } catch (error) {
       this.message.set(`Vente non enregistrée : ${(error as Error).message}`);
     } finally {
+      release();
       this.busy.set(false);
       this.searchInput().nativeElement.focus();
     }

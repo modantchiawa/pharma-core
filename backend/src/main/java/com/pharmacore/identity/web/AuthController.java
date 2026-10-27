@@ -2,6 +2,7 @@ package com.pharmacore.identity.web;
 
 import com.pharmacore.identity.application.LocalAuthService;
 import com.pharmacore.identity.application.LocalAuthService.Tokens;
+import com.pharmacore.identity.domain.IdlePolicy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -68,14 +69,15 @@ class AuthController {
     }
 
     record TokenResponse(String accessToken, Instant accessExpiresAt, String refreshToken, String terminalToken,
-                         boolean mustChangePassword, Profile profile) {
+                         boolean mustChangePassword, Profile profile, IdlePolicy sessionPolicy) {
 
         static TokenResponse of(Tokens tokens) {
             var user = tokens.user();
             return new TokenResponse(tokens.accessToken(), tokens.accessExpiresAt(), tokens.refreshToken(),
                     tokens.terminalToken(), tokens.mustChangePassword(),
                     new Profile(user.userId(), user.tenant().value(), user.displayName(), user.roles(),
-                            user.permissions(), user.maxDiscountPercent()));
+                            user.permissions(), user.maxDiscountPercent()),
+                    tokens.idlePolicy());
         }
     }
 }

@@ -17,6 +17,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,13 +40,15 @@ class CatalogController {
     @PutMapping("/api/platform/catalog/products/{cip13}")
     ProductView upsert(@PathVariable @Pattern(regexp = "^[0-9]{13}$") String cip13,
                        @Valid @RequestBody ProductRequest request) {
-        return ProductView.of(catalog.upsert(cip13, request.toData()));
+        return ProductView.of(catalog.upsert(cip13, request.toData()), null);
     }
 
     @GetMapping("/api/v1/catalog/products")
     List<ProductView> search(@RequestParam @Size(min = 2, max = 100) String q,
                              @RequestParam(defaultValue = "20") int limit) {
-        return catalog.search(q, limit).stream().map(ProductView::of).toList();
+        List<ProductEntity> found = catalog.search(q, limit);
+        Map<UUID, String> images = catalog.imageVersions(found.stream().map(ProductEntity::id).toList());
+        return found.stream().map(product -> ProductView.of(product, images.get(product.id()))).toList();
     }
 
     /** Substitutes with the same active substance, with this pharmacy's price and stock. */
@@ -83,10 +86,11 @@ class CatalogController {
         }
     }
 
-    record ProductView(UUID id, String cip13, ProductData data, Instant updatedAt) {
+    /** @param imageVersion version of the current pharmacy's photo of the product, {@code null} without photo */
+    record ProductView(UUID id, String cip13, ProductData data, Instant updatedAt, String imageVersion) {
 
-        static ProductView of(ProductEntity product) {
-            return new ProductView(product.id(), product.cip13(), product.data(), product.updatedAt());
+        static ProductView of(ProductEntity product, String imageVersion) {
+            return new ProductView(product.id(), product.cip13(), product.data(), product.updatedAt(), imageVersion);
         }
     }
 }

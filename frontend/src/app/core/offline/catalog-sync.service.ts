@@ -121,5 +121,6 @@ export function toCachedProduct(item: PosCatalogItem): CachedProduct {
     locationKind: item.locationKind,
     locationDetail: item.locationDetail,
     changedAt: item.changedAt,
+    imageVersion: item.imageVersion,
   };
 }

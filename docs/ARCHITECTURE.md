@@ -250,6 +250,29 @@ de réappairer les hubs (aucune nouvelle clé ne peut plus être endossée).
 
 Migration `V15`, permission `SUBSCRIPTION_VIEW` (titulaire).
 
+### 4.6 Miniatures des produits et postes inactifs
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Miniatures** | `ProductImageRules` (domaine pur), `ImageTypes` (partagé avec le logo), `ProductImageService`, `ProductImageController` (`/api/v1/inventory/products/{id}/image`), table `product_image` ; PWA : `prepareProductPhoto` (`logo-file.ts`), `ProductImageService`, `<app-product-thumb>` | Une photo par produit et par pharmacie, recadrée au carré et réduite à 256 px (WebP 80 %, JPEG à défaut) **dans le navigateur** ; le serveur lit le type dans les octets (PNG, JPEG, WebP ; SVG refusé), 256 Ko au plus. Modification : `STOCK_PRICE_MANAGE` (comme le prix et les seuils), lecture : tout membre. Version = 16 premiers caractères du SHA-256, exposée en `imageVersion` dans le flux POS, la recherche, les équivalents, la liste des stocks, les alertes de péremption, les lignes de commande et la fiche produit : l'URL `…/image?v=<version>` est **immuable** (`private, max-age=1 an, immutable`, ETag = SHA-256 ; version périmée → `no-cache`). Le point d'accès est authentifié : la PWA télécharge l'image par le client HTTP (jeton) et l'affiche par URL objet, au moment où la miniature entre à l'écran (un seul `IntersectionObserver`). Groupe de données `product-images` du service worker (stratégie `performance`, 3 000 images, 1 an) : la caisse hors ligne affiche les miniatures déjà vues, les autres gardent l'initiale. Suppression = ligne vidée (et non effacée) : répliquée comme une mise à jour, elle réémet le produit vers le cache des caisses (`updated_at` dans le curseur du flux POS). Réplication : `bytea` sérialisé en hexadécimal par `to_jsonb`, relu par `jsonb_populate_record` (environ 2× la taille de l'image dans le journal). Audit `PRODUCT_IMAGE_UPDATED`, `PRODUCT_IMAGE_REMOVED` |
+| **Verrouillage et déconnexion** | `IdlePolicy`, `SessionEvent` (domaine pur), `SessionPolicyService`, `SessionPolicyController` (`/api/v1/pharmacy/session-policy`, `/api/v1/me/session-events`), colonnes `pharmacy_config.idle_lock_minutes` / `idle_logout_minutes` ; PWA : `idle.ts` (règles pures), `IdleService`, `LockScreen`, `UnlockVerifier` | Délais de la pharmacie (verrouillage 5 min, 0 = jamais, au plus 120 ; déconnexion 30 min, de 5 min à 12 h, après le verrouillage), modifiables avec `ROLE_MANAGE` (page Rôles et droits), audités `SESSION_POLICY_UPDATED`, envoyés avec chaque jeton (`sessionPolicy` de la connexion, du PIN et du rafraîchissement) et gardés sur le poste. Activité = pointeur, clavier (douchette comprise), toucher, molette, défilement ; partagée entre onglets (`BroadcastChannel`, repli sur l'événement `storage`). Avertissement 30 s avant (anneau, « Je suis là »), puis écran plein flouté qui garde la page (panier compris), `inert` sur l'application et touches interceptées (F9, Échap, Ctrl K sans effet derrière). Déverrouillage par PIN ou mot de passe (nouvelle session, l'ancienne révoquée), « Changer d'utilisateur » par PIN. Déconnexion au délai (compté depuis la dernière activité, verrouillé ou non) ou au 5ᵉ code erroné : jetons révoqués et effacés, retour à la connexion avec « Session fermée après X min d'inactivité ». Une vente en cours de validation ou une impression navigateur suspend les délais. Verrouillages et déconnexions automatiques journalisés `SESSION_LOCKED`, `SESSION_IDLE_LOGOUT`, `SESSION_PIN_LOGOUT` (perdus si le serveur est injoignable) |
+
+**Changer d'utilisateur.** Le panier reste au comptoir pour la personne qui prend la suite : les
+produits sont devant le client, les règles (plafond de remise, droits de délivrance, crédit) se
+réappliquent avec les droits du nouvel utilisateur et la vente est enregistrée à son nom. Les
+**règlements déjà saisis sont effacés** : l'argent annoncé par le caissier précédent n'est pas
+attribué au suivant sans qu'il l'ait reçu.
+
+**Hors ligne.** Le PIN est vérifié par le serveur de la pharmacie (hub sur le réseau local, ou
+cloud). Quand il ne répond pas, l'écran verrouillé compare le code saisi aux empreintes PBKDF2
+(SHA-256, 150 000 itérations, sel aléatoire) du PIN et du mot de passe déjà saisis avec succès sur ce
+poste par **ce** même utilisateur, gardées 14 h au plus (durée de la session de rafraîchissement) et
+effacées à la déconnexion. Le changement d'utilisateur exige le serveur. Limite assumée : l'écran
+verrouillé est une protection d'usage au comptoir ; une personne qui a la main sur le navigateur
+(outils de développement) contourne l'écran comme elle lirait les jetons.
+
+Migration `V18`.
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste

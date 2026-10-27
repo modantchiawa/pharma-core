@@ -3,6 +3,7 @@ package com.pharmacore.demo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -133,6 +134,19 @@ class DemoIT extends IntegrationTest {
         String safe = JsonPath.<List<String>>read(locations, "$[?(@.kind == 'SAFE')].id").getFirst();
         call(get("/api/v1/inventory/stocks?locationId=" + safe), owner, null)
                 .andExpect(jsonPath("$[0].designation").value("TRAMADOL 50MG GEL B/20"));
+
+        // the counter's best sellers have a photo, served to the cashier as well
+        String stockList = call(get("/api/v1/inventory/stocks"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        List<String> photographed = JsonPath.read(stockList, "$[?(@.imageVersion != null)].productId");
+        assertThat(photographed).hasSizeGreaterThanOrEqualTo(12);
+        String cashierSahel = login("sahel", "caisse@sahel.demo", "Demo2026!");
+        String version = JsonPath.<List<String>>read(stockList,
+                "$[?(@.productId == '" + photographed.getFirst() + "')].imageVersion").getFirst();
+        call(get("/api/v1/inventory/products/" + photographed.getFirst() + "/image?v=" + version), cashierSahel, null)
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/jpeg"));
 
         // public directory: availability of paracetamol in Niamey and tonight's guard
         String availability = mvc.perform(get("/api/public/directory/availability?q=paracetamol&city=Niamey"))

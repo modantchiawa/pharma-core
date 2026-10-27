@@ -101,6 +101,7 @@ describe('toCachedProduct', () => {
       locationKind: 'FRIDGE',
       locationDetail: 'clayette 1',
       changedAt: '2026-10-27T00:00:00Z',
+      imageVersion: '0123456789abcdef',
     });
 
     expect(cached.designationKey).toBe('INSULATARD 100UI/ML');
@@ -109,5 +110,6 @@ describe('toCachedProduct', () => {
       'FRIDGE',
       'clayette 1',
     ]);
+    expect(cached.imageVersion).toBe('0123456789abcdef');
   });
 });

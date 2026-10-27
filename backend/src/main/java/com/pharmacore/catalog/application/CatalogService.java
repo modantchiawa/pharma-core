@@ -4,16 +4,20 @@ import com.pharmacore.catalog.domain.Cip13;
 import com.pharmacore.catalog.persistence.ProductEntity;
 import com.pharmacore.catalog.persistence.ProductEntity.ProductData;
 import com.pharmacore.catalog.persistence.ProductRepository;
+import com.pharmacore.inventory.domain.ProductImageRules;
 import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.web.BusinessRuleException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,6 +72,28 @@ public class CatalogService {
     }
 
     /**
+     * Photo versions of the current pharmacy for these products, in one query; empty outside a
+     * pharmacy (the platform operator sees the national catalog only).
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> imageVersions(Collection<UUID> productIds) {
+        var tenant = TenantContext.current().flatMap(context -> context.actor().tenantId());
+        if (tenant.isEmpty() || productIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> versions = new HashMap<>();
+        jdbc.sql("""
+                        SELECT product_id, left(sha256, :versionLength) AS image_version FROM product_image
+                        WHERE tenant_id = :tenant AND product_id = ANY(:ids) AND sha256 IS NOT NULL""")
+                .param("tenant", tenant.get().value())
+                .param("ids", productIds.toArray(UUID[]::new))
+                .param("versionLength", ProductImageRules.VERSION_LENGTH)
+                .query((RowCallbackHandler) rs -> versions.put(rs.getObject("product_id", UUID.class),
+                        rs.getString("image_version")));
+        return versions;
+    }
+
+    /**
      * Delta feed for the offline POS cache: national catalog merged with the pharmacy's own price
      * and available quantity. Keyset pagination on (changed_at, product_id) keeps it stable while
      * rows keep changing.
@@ -83,13 +109,15 @@ public class CatalogService {
                                    p.active,
                                    GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available,
                                    loc.code AS location_code, loc.name AS location_name, loc.kind AS location_kind,
-                                   s.location_detail,
-                                   -- renaming a location re-emits the products stored there
+                                   s.location_detail, left(pi.sha256, :versionLength) AS image_version,
+                                   -- renaming a location or changing a photo re-emits the products concerned
                                    GREATEST(p.updated_at, coalesce(s.updated_at, p.updated_at),
-                                            coalesce(loc.updated_at, p.updated_at)) AS changed_at
+                                            coalesce(loc.updated_at, p.updated_at),
+                                            coalesce(pi.updated_at, p.updated_at)) AS changed_at
                             FROM product p
                             LEFT JOIN stock s ON s.product_id = p.id AND s.tenant_id = :tenant
                             LEFT JOIN storage_location loc ON loc.id = s.location_id
+                            LEFT JOIN product_image pi ON pi.product_id = p.id AND pi.tenant_id = :tenant
                             LEFT JOIN LATERAL (
                                 SELECT sum(quantity) AS qty FROM stock_lot sl
                                 WHERE sl.stock_id = s.id AND sl.quantity > 0 AND sl.expiry_date > current_date
@@ -103,6 +131,7 @@ public class CatalogService {
                 .param("since", Timestamp.from(since))
                 .param("after", afterProductId == null ? new UUID(0L, 0L) : afterProductId)
                 .param("limit", pageSize)
+                .param("versionLength", ProductImageRules.VERSION_LENGTH)
                 .query((rs, rowNum) -> new PosCatalogItem(
                         rs.getObject("id", UUID.class),
                         rs.getString("cip13"),
@@ -118,7 +147,8 @@ public class CatalogService {
                         rs.getString("location_name"),
                         rs.getString("location_kind"),
                         rs.getString("location_detail"),
-                        rs.getTimestamp("changed_at").toInstant()))
+                        rs.getTimestamp("changed_at").toInstant(),
+                        rs.getString("image_version")))
                 .list();
         boolean hasMore = items.size() == pageSize;
         var last = items.isEmpty() ? null : items.getLast();
@@ -139,12 +169,14 @@ public class CatalogService {
         return jdbc.sql("""
                         SELECT alt.id, alt.cip13, alt.designation, alt.dosage, alt.pharmaceutical_form, alt.laboratory,
                                coalesce(s.selling_price_cents, alt.public_price_cents) AS unit_price_cents,
-                               GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available
+                               GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available,
+                               left(pi.sha256, :versionLength) AS image_version
                         FROM product ref
                         JOIN product alt ON alt.id <> ref.id AND alt.active
                              AND lower(alt.dci) = lower(ref.dci)
                              AND (ref.dosage IS NULL OR alt.dosage IS NULL OR lower(alt.dosage) = lower(ref.dosage))
                         LEFT JOIN stock s ON s.product_id = alt.id AND s.tenant_id = :tenant
+                        LEFT JOIN product_image pi ON pi.product_id = alt.id AND pi.tenant_id = :tenant
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) AS qty FROM stock_lot sl
                             WHERE sl.stock_id = s.id AND sl.quantity > 0 AND sl.expiry_date > current_date
@@ -154,22 +186,28 @@ public class CatalogService {
                         LIMIT 20""")
                 .param("tenant", tenant)
                 .param("product", productId)
+                .param("versionLength", ProductImageRules.VERSION_LENGTH)
                 .query((rs, rowNum) -> new Alternative(
                         rs.getObject("id", UUID.class), rs.getString("cip13"), rs.getString("designation"),
                         rs.getString("dosage"), rs.getString("pharmaceutical_form"), rs.getString("laboratory"),
-                        (Long) rs.getObject("unit_price_cents"), rs.getInt("available")))
+                        (Long) rs.getObject("unit_price_cents"), rs.getInt("available"),
+                        rs.getString("image_version")))
                 .list();
     }
 
     public record Alternative(UUID productId, String cip13, String designation, String dosage, String pharmaceuticalForm,
-                              String laboratory, Long unitPriceCents, int availableQuantity) {
+                              String laboratory, Long unitPriceCents, int availableQuantity, String imageVersion) {
     }
 
-    /** @param locationCode where the product is stored in this pharmacy, {@code null} when not placed */
+    /**
+     * @param locationCode where the product is stored in this pharmacy, {@code null} when not placed
+     * @param imageVersion version of the pharmacy's photo of the product, {@code null} without photo
+     */
     public record PosCatalogItem(UUID productId, String cip13, String ean13, String designation, String dci,
                                  String listing, java.math.BigDecimal vatRate, Long unitPriceCents,
                                  int availableQuantity, boolean active, String locationCode, String locationName,
-                                 String locationKind, String locationDetail, Instant changedAt) {
+                                 String locationKind, String locationDetail, Instant changedAt,
+                                 String imageVersion) {
     }
 
     public record PosCatalogPage(List<PosCatalogItem> items, Instant nextSince, UUID nextAfter, boolean hasMore) {

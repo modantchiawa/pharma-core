@@ -20,6 +20,7 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
 import { LocationChip } from '../../shared/ui/location-chip';
+import { ProductThumb } from '../../shared/ui/product-thumb';
 
 const DAY_MS = 86_400_000;
 const EXPIRY_WINDOW_DAYS = 90;
@@ -38,6 +39,7 @@ interface StockOverview {
   nextExpiry: string | null;
   belowThreshold: boolean;
   location: StockLocation | null;
+  imageVersion: string | null;
 }
 
 /** Location filter of the stock list: every product, those put nowhere, or one location id. */
@@ -45,6 +47,8 @@ type LocationFilter = 'ALL' | 'NONE' | string;
 
 interface ExpiryAlert {
   lotId: string;
+  productId: string;
+  imageVersion: string | null;
   designation: string;
   lotNumber: string;
   expiryDate: string;
@@ -77,6 +81,7 @@ interface CatalogHit {
     Icon,
     LocationChip,
     RouterLink,
+    ProductThumb,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -360,8 +365,26 @@ interface CatalogHit {
                           </td>
                         }
                         <td class="min-w-56">
-                          <p class="font-medium">{{ s.designation }}</p>
-                          <p class="text-xs text-subtle tabular-nums">{{ s.cip13 }}</p>
+                          <a
+                            class="product-link flex items-center gap-3"
+                            [routerLink]="['/inventory/products', s.productId]"
+                            [attr.aria-label]="'Fiche produit ' + s.designation"
+                          >
+                            <app-product-thumb
+                              [productId]="s.productId"
+                              [version]="s.imageVersion"
+                              [name]="s.designation"
+                              [size]="36"
+                            />
+                            <span class="min-w-0">
+                              <span class="product-name block font-medium">{{
+                                s.designation
+                              }}</span>
+                              <span class="block text-xs text-subtle tabular-nums">{{
+                                s.cip13
+                              }}</span>
+                            </span>
+                          </a>
                         </td>
                         <td class="min-w-40">
                           @if (editing() === s.productId) {
@@ -511,7 +534,20 @@ interface CatalogHit {
                   <tbody>
                     @for (a of expiry(); track a.lotId) {
                       <tr>
-                        <td class="min-w-56 font-medium">{{ a.designation }}</td>
+                        <td class="min-w-56">
+                          <a
+                            class="product-link flex items-center gap-2.5 font-medium"
+                            [routerLink]="['/inventory/products', a.productId]"
+                          >
+                            <app-product-thumb
+                              [productId]="a.productId"
+                              [version]="a.imageVersion"
+                              [name]="a.designation"
+                              [size]="28"
+                            />
+                            <span class="product-name">{{ a.designation }}</span>
+                          </a>
+                        </td>
                         <td class="font-mono text-xs">{{ a.lotNumber }}</td>
                         <td class="whitespace-nowrap">{{ a.expiryDate | date: 'dd/MM/yyyy' }}</td>
                         <td class="num">{{ a.quantity }}</td>
@@ -741,6 +777,12 @@ interface CatalogHit {
       border-color: var(--brand-primary);
       background: var(--brand-soft);
       color: var(--brand-text);
+    }
+    .product-link:hover .product-name,
+    .product-link:focus-visible .product-name {
+      color: var(--brand-text);
+      text-decoration: underline;
+      text-underline-offset: 2px;
     }
   `,
 })
