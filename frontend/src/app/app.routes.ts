@@ -42,6 +42,14 @@ export const routes: Routes = [
         data: { platform: true },
         loadComponent: () => import('./features/admin/import-page').then((m) => m.ImportPage),
       },
+      {
+        path: 'subscriptions',
+        title: 'Abonnements',
+        loadComponent: () =>
+          import('./features/platform/platform-subscriptions-page').then(
+            (m) => m.PlatformSubscriptionsPage,
+          ),
+      },
     ],
   },
   {
@@ -54,6 +62,13 @@ export const routes: Routes = [
         path: 'account/password',
         title: 'Mot de passe',
         loadComponent: () => import('./features/auth/password-page').then((m) => m.PasswordPage),
+      },
+      {
+        path: 'account/subscription',
+        title: 'Mon abonnement',
+        canActivate: [permissionGuard('SUBSCRIPTION_VIEW')],
+        loadComponent: () =>
+          import('./features/subscription/subscription-page').then((m) => m.SubscriptionPage),
       },
       {
         path: 'cash',

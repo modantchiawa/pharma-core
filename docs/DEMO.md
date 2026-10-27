@@ -150,6 +150,9 @@ le PIN avec `DEMO_PIN`.
   crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`, dix emplacements
   (rayons A à C, tiroir des injectables, réfrigérateur pour l'insuline, coffre pour le tramadol,
   comptoir, réserve) où chaque produit est rangé.
+* Abonnements : `sahel` en formule Pro payée sept mois d'avance (trois règlements), `lacouroussou`
+  en formule Essentiel dont la période payée se termine dans cinq jours (bandeau « Abonnement : plus
+  que … jours » dès la connexion).
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -174,6 +177,8 @@ le PIN avec `DEMO_PIN`.
 | 14 | Réseau › « Qui l'a ? » depuis `lacouroussou` | Stock de `sahel` plafonné à 20 |
 | 15 | Console éditeur : liste des pharmacies, import du référentiel (essai à blanc) | Deux pharmacies actives, aperçu du fichier |
 | 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
+| 17 | Console éditeur › Abonnements : `lacouroussou` › règlement de 3 mois en mobile money | Montant prérempli (formule × mois), période prolongée depuis la fin de la période payée, licence réémise, bandeau disparu chez la pharmacie |
+| 18 | Console éditeur : suspendre `sahel`, puis vendre au comptoir et consulter le stock et l'ordonnancier ; réactiver | Vente refusée (bandeau rouge, bouton désactivé, 423 côté serveur), consultation et exports ouverts ; tout revient à la réactivation |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

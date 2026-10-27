@@ -884,3 +884,107 @@ export interface TerminalTicketRequest {
   vat: { rate: number; totalTtcCents: number; vatCents: number }[];
   offline: boolean;
 }
+
+// ---------------------------------------------------------------- abonnement et licence
+
+export type LicenseStatusCode = 'ACTIVE' | 'WARNING' | 'GRACE' | 'BLOCKED';
+export type LicenseReason =
+  | 'PAYMENT_DUE'
+  | 'OFFLINE_LIMIT'
+  | 'EXPIRED'
+  | 'SUSPENDED'
+  | 'OFFLINE_TOO_LONG'
+  | 'CLOCK_TAMPERED'
+  | 'NO_LICENSE';
+export type SubscriptionPaymentMethod =
+  'MOBILE_MONEY' | 'VIREMENT' | 'ESPECES' | 'CHEQUE' | 'AUTRE';
+
+export interface LicenseStateView {
+  status: LicenseStatusCode;
+  reason: LicenseReason | null;
+  deadline: string | null;
+  daysLeft: number | null;
+  blocksAt: string | null;
+  blockedSince: string | null;
+}
+
+export interface LicenseInfo {
+  serial: number | null;
+  issuedAt: string | null;
+  validUntil: string | null;
+  verifiedAt: string | null;
+}
+
+/** What every terminal polls, caches and enforces (banner, counter). */
+export interface LicenseStatus {
+  state: LicenseStateView;
+  plan: string | null;
+  paidUntil: string | null;
+  graceUntil: string | null;
+  license: LicenseInfo;
+  mode: 'HUB' | 'CLOUD';
+  serverTime: string;
+}
+
+export interface SubscriptionPlan {
+  code: string;
+  name: string;
+  monthlyPriceXof: number;
+  maxTerminals: number;
+  description: string | null;
+  active: boolean;
+}
+
+export interface SubscriptionPayment {
+  id: string;
+  planCode: string;
+  amountXof: number;
+  method: SubscriptionPaymentMethod;
+  reference: string | null;
+  months: number;
+  periodFrom: string;
+  periodTo: string;
+  paidAt: string;
+  recordedBy: string;
+  recordedAt: string;
+  note: string | null;
+}
+
+export interface PharmacySubscription {
+  status: LicenseStatus;
+  plan: SubscriptionPlan | null;
+  payments: SubscriptionPayment[];
+  vendor: { name: string | null; email: string | null; phone: string | null };
+}
+
+export interface TenantSubscription {
+  tenantId: string;
+  slug: string;
+  legalName: string;
+  tenantStatus: 'PROVISIONING' | 'ACTIVE' | 'SUSPENDED' | 'TERMINATED';
+  topology: 'HUB' | 'CLOUD';
+  plan: string;
+  planName: string | null;
+  monthlyPriceXof: number;
+  paidUntil: string | null;
+  graceUntil: string | null;
+  suspendedAt: string | null;
+  suspensionReason: string | null;
+  lastPaymentOn: string | null;
+  lastPaymentXof: number | null;
+  license: LicenseInfo;
+  lastHubContactAt: string | null;
+  state: LicenseStateView;
+}
+
+export interface TenantSubscriptionDetail {
+  subscription: TenantSubscription;
+  payments: SubscriptionPayment[];
+  hubs: {
+    nodeId: string;
+    appVersion: string | null;
+    pairedAt: string | null;
+    lastSeenAt: string | null;
+    lastPullAt: string | null;
+  }[];
+}

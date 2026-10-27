@@ -26,6 +26,8 @@ import { CachedProduct } from '../../core/offline/pos-database';
 import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { SaleOutboxService } from '../../core/offline/sale-outbox.service';
 import { TerminalService } from '../../core/offline/terminal.service';
+import { LicenseStateService } from '../../core/subscription/license-state.service';
+import { saleRefusal } from '../../core/subscription/license-text';
 import { uuidv7 } from '../../core/util/uuid';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
@@ -526,10 +528,19 @@ import { placeOf } from '../../shared/storage-location';
               <span class="num text-xl">{{ cart.changeDueCents() | money }}</span>
             </p>
           }
+          @if (saleRefusal(); as refusal) {
+            <p
+              class="flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger-strong)]"
+              role="alert"
+              data-testid="pos-license-blocked"
+            >
+              <app-icon name="ban" [size]="16" class="mt-0.5 shrink-0" />{{ refusal }}
+            </p>
+          }
           <button
             type="button"
             class="btn btn-primary btn-lg w-full"
-            [disabled]="!cart.canCheckout() || busy()"
+            [disabled]="!cart.canCheckout() || busy() || license.blocked()"
             (click)="checkout()"
           >
             <app-icon name="check" [size]="20" [stroke]="2.25" />
@@ -698,6 +709,8 @@ export class PosPage {
   protected readonly cart = inject(CartStore);
   protected readonly connectivity = inject(ConnectivityService);
   protected readonly outbox = inject(SaleOutboxService);
+  protected readonly license = inject(LicenseStateService);
+  protected readonly saleRefusal = computed(() => saleRefusal(this.license.state()));
   private readonly catalog = inject(CatalogSyncService);
   private readonly terminal = inject(TerminalService);
   private readonly permissions = inject(PermissionService);
@@ -1005,6 +1018,12 @@ export class PosPage {
   /** Commits the sale locally first (zero data loss), prints, then lets the outbox sync it. */
   protected async checkout(): Promise<void> {
     if (!this.cart.canCheckout() || this.busy()) {
+      return;
+    }
+    // Enforced offline too, from the state cached on this terminal; the server refuses anyway
+    const refusal = this.saleRefusal();
+    if (refusal) {
+      this.message.set(refusal);
       return;
     }
     this.busy.set(true);

@@ -1,6 +1,8 @@
 package com.pharmacore.shared.security;
 
 import com.pharmacore.shared.runtime.NodeProperties;
+import com.pharmacore.subscription.application.LicenseStateService;
+import com.pharmacore.subscription.web.LicenseEnforcementFilter;
 import jakarta.servlet.DispatcherType;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +20,7 @@ import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWrite
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
@@ -25,7 +28,7 @@ class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http, BearerTokenAuthenticator authenticator, NodeProperties node,
-                                    JdbcClient jdbc) throws Exception {
+                                    JdbcClient jdbc, LicenseStateService licenses, ObjectMapper json) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> { })
@@ -48,6 +51,7 @@ class SecurityConfiguration {
                 .oauth2ResourceServer(oauth -> oauth.authenticationManagerResolver(request -> authenticator))
                 .addFilterAfter(new TenantContextFilter(), BearerTokenAuthenticationFilter.class)
                 .addFilterAfter(new TopologyGuardFilter(node, jdbc), TenantContextFilter.class)
+                .addFilterAfter(new LicenseEnforcementFilter(licenses, json), TopologyGuardFilter.class)
                 .build();
     }
 

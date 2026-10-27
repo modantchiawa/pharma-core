@@ -72,7 +72,7 @@ aucune résolution de conflit à inventer.
 
 | Propriétaire | Tables |
 |---|---|
-| **Cloud** | `product` (catalogue national), `tenant` (abonnement), `pharmacy_network`, `network_membership`, `inter_pharmacy_transfer`, `guard_schedule`, `conversation`, `chat_message` |
+| **Cloud** | `product` (catalogue national), `tenant` (abonnement), `subscription_plan`, `subscription_payment`, `tenant_license`, `pharmacy_network`, `network_membership`, `inter_pharmacy_transfer`, `guard_schedule`, `conversation`, `chat_message` |
 | **Hub** | tout le reste : configuration, utilisateurs et rôles, stocks et lots, ventes, caisse, clients, fournisseurs, commandes, réceptions, comptabilité, clés de signature |
 | **Les deux, par origine** | `audit_event` : chaque côté chaîne ses propres événements (`origin = HUB|CLOUD`) et pousse les siens |
 
@@ -154,8 +154,7 @@ sequenceDiagram
   (30 jours), **PIN** pour basculer de caissier, verrouillage 15 min après 5 échecs, jetons
   d'accès 15 min + rafraîchissement 14 h avec rotation. Les échecs sont journalisés dans l'audit
   (transaction séparée, donc conservés même si la tentative est rejetée).
-* **Abonnement** : le hub lit l'état d'abonnement répliqué et continue de servir pendant un
-  délai de grâce (30 jours) s'il ne peut joindre le cloud.
+* **Abonnement** : le hub applique la licence signée par le cloud, sans réseau (voir §4.4).
 
 ---
 
@@ -217,6 +216,32 @@ Migrations `V12` et `V13`.
 
 Migration `V14`.
 
+### 4.4 Abonnements et licence hors ligne
+
+L'éditeur encaisse les abonnements hors de l'application (mobile money, virement, espèces,
+chèque) et les enregistre dans la console (`/platform/subscriptions`). Le blocage d'une pharmacie
+doit tenir même si son serveur local ne revient jamais en ligne : le hub applique une **licence
+signée par le cloud**, qu'il vérifie seul.
+
+| Élément | Composants | Règles clés |
+|---|---|---|
+| **Formules et règlements** | `subscription_plan` (référentiel, prix mensuel en francs CFA, postes), `subscription_payment` (écriture seule), `PlatformSubscriptionService` | Un règlement prolonge `tenant.subscription_expires_at` (= payé jusqu'au) à partir de sa fin, ou d'aujourd'hui si elle est passée (`SubscriptionPeriod`, mois calendaires dans le fuseau de la pharmacie) ; changement de formule ; suspension motivée et datée (`tenant.suspended_at`) puis réactivation ; chaque action est auditée et réémet la licence |
+| **Licence** | `LicenseCodec`, `LicenseKeys` (domaine pur), `LicenseKeyRing`, `LicenseIssuer`, table `tenant_license` | Jeton compact `PCL1.<kid>.<revendications>.<signature>` signé en **Ed25519** par une clé dédiée du cloud (fichier `license-<kid>.p8` du dossier des clés, clé publique dans `license_key`) ; revendications : pharmacie, identifiant, formule, postes, statut, payé jusqu'au, fin de grâce, date de suspension, émission, **validité = émission + 15 jours**, **numéro de série croissant** ; réémise à chaque règlement, changement de formule, suspension ou réactivation, et dès qu'elle a plus d'une heure quand un hub la demande |
+| **Épinglage et rafraîchissement** | `PairingService` (réponse d'appairage), `HubLicenseService`, `HubLicenseSync`, `POST /api/sync/license`, `GET /api/sync/license-keys` | À l'appairage (HTTPS, confiance au premier appairage) le hub épingle les clés publiques de licence et reçoit sa première licence ; à chaque cycle de synchronisation (et sur `POST /api/v1/subscription/refresh`) il demande une licence fraîche : la fenêtre de 15 jours glisse tant qu'il est en ligne et à jour. Une nouvelle clé (rotation : `POST /api/platform/subscriptions/license-keys/rotation`) n'est épinglée que si une clé déjà épinglée l'**endosse** : un faux cloud ne peut pas imposer la sienne. Un hub appairé avant les licences épingle la première liste reçue et dispose d'une fenêtre de 15 jours pour la recevoir |
+| **Anti-fraude du hub** | `HubLicenseRules` (domaine pur) | Signature vérifiée avec une clé épinglée, pharmacie du hub, jamais de numéro de série inférieur à celui détenu ; **filigrane d'horloge** persistant (plus grande heure vue) : un retour en arrière de plus de 10 minutes bloque (« horloge du poste incohérente ») ; une licence fraîche réancre le filigrane quand l'horloge locale concorde avec celle du cloud (sortie d'erreur après correction de l'heure) |
+| **État et application** | `LicenseEvaluator` (domaine pur), `LicenseStateService`, `LicenseEnforcementFilter`, `BlockedRequestPolicy` | États `ACTIVE`, `WARNING` (fin de période payée à J-7, fenêtre hors ligne à J-5), `GRACE` (3 jours après la période payée : « Abonnement expiré — régularisez avant le … »), `BLOCKED` (`SUSPENDED`, `EXPIRED`, `OFFLINE_TOO_LONG`, `CLOCK_TAMPERED`, `NO_LICENSE`). Cloud : calculé depuis sa base (cache 30 s vidé à chaque événement, donc immédiat) ; hub : depuis la licence détenue et le filigrane. Bloqué : toute modification d'un membre de la pharmacie reçoit **423** et un problème en français ; restent ouverts la lecture (registres, ordonnancier, rapports, exports), la connexion, le mot de passe et le PIN, la synchronisation, le rafraîchissement de licence, le signal de vie des postes et la réimpression. L'opérateur éditeur, les hubs et les processus système ne sont jamais bloqués |
+| **Ventes hors ligne rejouées** | `SaleSyncService` | **Décision** : une vente faite sur un poste hors ligne **avant** le blocage (`occurredAt` antérieur à la suspension, à la fin de grâce ou à la limite hors ligne) est enregistrée : la marchandise est sortie et l'argent encaissé quand la pharmacie en avait le droit. Une vente postérieure, ou toute vente quand le blocage n'est pas datable (horloge, absence de licence), reçoit `RETRY` : elle reste dans le journal du poste et passe à la régularisation, jamais perdue, jamais enregistrée pendant le blocage |
+| **Postes** | `LicenseStateService` (PWA), `license.ts`, bandeau du shell, caisse | L'état est interrogé toutes les 5 minutes et mis en cache par pharmacie ; hors ligne, le poste fait avancer l'état avec son horloge (avertissement, grâce, blocage aux dates annoncées, état de plus de 15 jours = blocage) et la caisse refuse de valider une vente bloquée |
+
+Limites assumées : la protection est logicielle. Un binaire modifié, ou un administrateur de la
+base du hub qui remplace la clé épinglée, le jeton et le filigrane dans `node_setting`, contourne
+le blocage ; l'horloge d'un poste PWA isolé de son serveur n'est contrôlée que par rapport à sa
+dernière réponse. Le cloud multi-instances applique une suspension au plus 30 s plus tard sur les
+autres instances (cache local). La clé privée de licence est un secret du cloud : la perdre impose
+de réappairer les hubs (aucune nouvelle clé ne peut plus être endossée).
+
+Migration `V15`, permission `SUBSCRIPTION_VIEW` (titulaire).
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste
@@ -243,7 +268,8 @@ Migration `V14`.
 | `PHARMACORE_MODE` (`pharmacore.node.mode`) | `HUB` ou `CLOUD` |
 | `PHARMACORE_KEYS_DIR` | Dossier de la clé privée de signature |
 | `PHARMACORE_CLOUD_URL` | Cloud joint par le hub |
-| `pharmacore.node.sync-interval`, `subscription-grace` | Cadence de synchronisation, délai de grâce d'abonnement |
+| `pharmacore.node.sync-interval` | Cadence de synchronisation (et de rafraîchissement de la licence) |
+| `pharmacore.subscription.*` (`PHARMACORE_VENDOR_NAME`, `_EMAIL`, `_PHONE`) | Contact de l'éditeur affiché aux pharmacies ; délais (avertissement 7 j, grâce 3 j, fenêtre hors ligne 15 j, avertissement 5 j, tolérance d'horloge 10 min) |
 | `INVOICE_CERTIFICATION` | `NONE` (défaut) ou le nom de l'adaptateur de certification |
 | `DB_*`, `OIDC_PLATFORM_ISSUER`, `ALLOWED_ORIGINS` | Voir v1 |
 

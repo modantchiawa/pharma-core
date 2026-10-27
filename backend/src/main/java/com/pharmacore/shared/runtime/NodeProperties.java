@@ -12,8 +12,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param accessTokenTtl     lifetime of user access tokens
  * @param refreshTokenTtl    lifetime of refresh tokens
  * @param terminalTokenTtl   lifetime of the terminal binding allowing PIN switches
- * @param subscriptionGrace  how long a hub keeps working after the subscription expired
- *                           while it cannot reach the cloud
  */
 @ConfigurationProperties("pharmacore.node")
 public record NodeProperties(DeploymentMode mode,
@@ -22,8 +20,7 @@ public record NodeProperties(DeploymentMode mode,
                              Duration syncInterval,
                              Duration accessTokenTtl,
                              Duration refreshTokenTtl,
-                             Duration terminalTokenTtl,
-                             Duration subscriptionGrace) {
+                             Duration terminalTokenTtl) {
 
     public NodeProperties {
         mode = mode == null ? DeploymentMode.CLOUD : mode;
@@ -32,7 +29,6 @@ public record NodeProperties(DeploymentMode mode,
         accessTokenTtl = accessTokenTtl == null ? Duration.ofMinutes(15) : accessTokenTtl;
         refreshTokenTtl = refreshTokenTtl == null ? Duration.ofHours(14) : refreshTokenTtl;
         terminalTokenTtl = terminalTokenTtl == null ? Duration.ofDays(30) : terminalTokenTtl;
-        subscriptionGrace = subscriptionGrace == null ? Duration.ofDays(30) : subscriptionGrace;
     }
 
     public boolean isHub() {
