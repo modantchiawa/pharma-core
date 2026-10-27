@@ -2,8 +2,11 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
 import { firstValueFrom } from 'rxjs';
-import { Me } from '../api/models';
+import { Me, SessionPolicy } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
+import { SessionPolicyService } from '../session/session-policy.service';
+import { readCurrentUser, sessionEnded, sessionStarted } from '../session/session-store';
+import type { SecretKind } from '../session/unlock-verifier';
 import { PermissionService } from './permission.service';
 
 export type Realm = 'pharmacy' | 'platform';
@@ -22,6 +25,8 @@ interface TokenResponse {
   terminalToken: string | null;
   mustChangePassword: boolean;
   profile: Me;
+  /** The pharmacy's inactivity delays, absent from a server of an earlier version. */
+  sessionPolicy?: SessionPolicy;
 }
 
 /**
@@ -37,6 +42,7 @@ export class AuthService {
   private readonly env = inject(APP_ENVIRONMENT);
   private readonly http = inject(HttpClient);
   private readonly permissions = inject(PermissionService);
+  private readonly sessionPolicy = inject(SessionPolicyService);
   private readonly realmState = signal<Realm>(
     (sessionStorage.getItem(REALM_KEY) as Realm) ?? 'pharmacy',
   );
@@ -111,7 +117,7 @@ export class AuthService {
       localStorage.setItem(TERMINAL_TOKEN_KEY, response.terminalToken);
     }
     this.rememberKnownUser(email, response.profile.displayName);
-    return this.accept(response);
+    return this.started(response, email, 'password', password);
   }
 
   async loginWithPin(email: string, pin: string, terminalId: string): Promise<Me> {
@@ -127,7 +133,27 @@ export class AuthService {
         terminalId,
       }),
     );
-    return this.accept(response);
+    return this.started(response, email, 'pin', pin);
+  }
+
+  /** E-mail of the staff member signed in on this terminal, to unlock the screen by PIN. */
+  currentEmail(): string | null {
+    return readCurrentUser()?.email ?? null;
+  }
+
+  /**
+   * Signs in again from the lock screen (same user or another one) and revokes the refresh
+   * session it replaces: a locked terminal never keeps two sessions open.
+   */
+  async replaceSession(login: () => Promise<Me>): Promise<Me> {
+    const previous = localStorage.getItem(REFRESH_KEY);
+    const me = await login();
+    if (previous && previous !== localStorage.getItem(REFRESH_KEY)) {
+      firstValueFrom(
+        this.http.post(`${this.env.apiUrl}/auth/logout`, { refreshToken: previous }),
+      ).catch(() => undefined);
+    }
+    return me;
   }
 
   /** Called by the HTTP layer on 401 and at startup; concurrent callers share one refresh. */
@@ -156,6 +182,8 @@ export class AuthService {
     sessionStorage.removeItem(ACCESS_KEY);
     this.accessState.set(null);
     this.permissions.clear();
+    sessionEnded();
+    void unlockVerifier().then((verifier) => verifier.clear());
     if (refreshToken) {
       try {
         await firstValueFrom(this.http.post(`${this.env.apiUrl}/auth/logout`, { refreshToken }));
@@ -214,6 +242,16 @@ export class AuthService {
 
   // ------------------------------------------------------------------ internals
 
+  /** A sign-in typed by the user: the inactivity count restarts and offline unlock is armed. */
+  private started(response: TokenResponse, email: string, kind: SecretKind, secret: string): Me {
+    const me = this.accept(response);
+    sessionStarted({ userId: me.userId, email });
+    unlockVerifier()
+      .then((verifier) => verifier.remember(me.userId, kind, secret))
+      .catch(() => undefined);
+    return me;
+  }
+
   private accept(response: TokenResponse): Me {
     sessionStorage.setItem(REALM_KEY, 'pharmacy');
     this.realmState.set('pharmacy');
@@ -222,6 +260,7 @@ export class AuthService {
     this.accessState.set(response.accessToken);
     this.mustChange.set(response.mustChangePassword);
     this.permissions.setProfile(response.profile);
+    this.sessionPolicy.set(response.sessionPolicy);
     return response.profile;
   }
 
@@ -281,6 +320,11 @@ export class AuthService {
     }
     return this.platformManager;
   }
+}
+
+/** Loaded on demand: the PBKDF2 code stays out of the first screen. */
+function unlockVerifier() {
+  return import('../session/unlock-verifier').then((m) => new m.UnlockVerifier());
 }
 
 export function decodeJwtPayload(token: string | null): Record<string, unknown> | null {

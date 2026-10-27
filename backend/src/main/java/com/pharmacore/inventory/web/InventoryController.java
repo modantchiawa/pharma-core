@@ -3,6 +3,7 @@ package com.pharmacore.inventory.web;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.StockService.ExpiryAlert;
 import com.pharmacore.inventory.application.StockService.LocationFilter;
+import com.pharmacore.inventory.application.StockService.ProductSheet;
 import com.pharmacore.inventory.application.StockService.ReorderSuggestion;
 import com.pharmacore.inventory.application.StockService.StockOverview;
 import com.pharmacore.inventory.domain.InsufficientStockException;
@@ -83,6 +84,12 @@ class InventoryController {
     @PreAuthorize("hasAuthority('STOCK_PRICE_MANAGE')")
     void configure(@PathVariable UUID productId, @Valid @RequestBody SettingsRequest request) {
         stock.configure(productId, request.sellingPriceCents(), request.reorderThreshold(), request.reorderQuantity());
+    }
+
+    @GetMapping("/products/{productId}")
+    @PreAuthorize("hasAuthority('STOCK_VIEW')")
+    ProductSheet productSheet(@PathVariable UUID productId) {
+        return stock.productSheet(productId);
     }
 
     @GetMapping("/expiry-alerts")

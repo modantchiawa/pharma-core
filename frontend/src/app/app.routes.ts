@@ -216,6 +216,13 @@ export const routes: Routes = [
         canActivate: [permissionGuard('ROLE_MANAGE')],
         loadComponent: () => import('./features/admin/roles-page').then((m) => m.RolesPage),
       },
+      {
+        path: 'inventory/products/:productId',
+        title: 'Fiche produit',
+        canActivate: [permissionGuard('STOCK_VIEW')],
+        loadComponent: () =>
+          import('./features/inventory/product-sheet-page').then((m) => m.ProductSheetPage),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

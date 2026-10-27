@@ -2,6 +2,7 @@ package com.pharmacore.identity.application;
 
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.pharmacore.identity.application.AuthSessionStore.Kind;
+import com.pharmacore.identity.domain.IdlePolicy;
 import com.pharmacore.identity.persistence.AppUserEntity;
 import com.pharmacore.identity.persistence.AppUserRepository;
 import com.pharmacore.shared.audit.AuditTrail;
@@ -56,6 +57,7 @@ public class LocalAuthService {
     private final NodeProperties properties;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
+    private final SessionPolicyService sessionPolicy;
     private final TransactionTemplate tx;
     private final TransactionTemplate txNew;
     private final Clock clock;
@@ -64,7 +66,8 @@ public class LocalAuthService {
     public LocalAuthService(AppUserRepository users, TenantRepository tenants, AuthSessionStore sessions,
                             SigningKeyService signingKey, TenantUserLoader loader, NodeIdentity node,
                             NodeProperties properties, AuditTrail audit, JdbcClient jdbc,
-                            PlatformTransactionManager transactionManager, Clock clock) {
+                            PlatformTransactionManager transactionManager, Clock clock,
+                            SessionPolicyService sessionPolicy) {
         this.users = users;
         this.tenants = tenants;
         this.sessions = sessions;
@@ -74,14 +77,16 @@ public class LocalAuthService {
         this.properties = properties;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.sessionPolicy = sessionPolicy;
         this.tx = new TransactionTemplate(transactionManager);
         this.txNew = new TransactionTemplate(transactionManager);
         this.txNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clock;
     }
 
+    /** @param idlePolicy the pharmacy's inactivity delays, applied by the terminal even offline */
     public record Tokens(String accessToken, Instant accessExpiresAt, String refreshToken, String terminalToken,
-                         Actor.TenantUser user, boolean mustChangePassword) {
+                         Actor.TenantUser user, boolean mustChangePassword, IdlePolicy idlePolicy) {
     }
 
     /** @param pharmacySlug ignored on a hub (single pharmacy), required on the cloud */
@@ -254,7 +259,7 @@ public class LocalAuthService {
         loader.evictAll();
         var actor = loader.load(tenant, user.externalSubject());
         return new Tokens(accessToken(tenant, user, now), now.plus(properties.accessTokenTtl()), refresh,
-                terminalToken, actor, user.mustChangePassword());
+                terminalToken, actor, user.mustChangePassword(), sessionPolicy.current());
     }
 
     private TenantId resolveTenant(String pharmacySlug) {

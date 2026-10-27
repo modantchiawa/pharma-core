@@ -24,6 +24,8 @@ export interface CartLine {
   availableQuantity: number;
   /** Shelf to pick the box from, shown under the line (absent on reprinted sales). */
   place?: ProductPlace | null;
+  /** Version of the product photo shown beside the line. */
+  imageVersion?: string | null;
 }
 
 export interface CartPayment {
@@ -189,6 +191,7 @@ export class CartStore {
           discountCents: 0,
           availableQuantity: product.availableQuantity,
           place: placeOf(product),
+          imageVersion: product.imageVersion ?? null,
         },
       ];
     });

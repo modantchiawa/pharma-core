@@ -1,5 +1,6 @@
 package com.pharmacore.inventory.application;
 
+import com.pharmacore.inventory.domain.ProductImageRules;
 import com.pharmacore.inventory.domain.StorageLocationKind;
 import com.pharmacore.inventory.persistence.StockLotEntity;
 import com.pharmacore.inventory.persistence.StockLotRepository;
@@ -10,6 +11,7 @@ import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
+import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.Clock;
 import java.time.Instant;
@@ -153,10 +155,11 @@ public class StockService {
                                coalesce(l.sellable, 0) AS sellable,
                                l.next_expiry,
                                s.location_id, loc.code AS location_code, loc.name AS location_name,
-                               loc.kind AS location_kind, s.location_detail
+                               loc.kind AS location_kind, s.location_detail, pi.sha256 AS image_sha256
                         FROM stock s
                         JOIN product p ON p.id = s.product_id
                         LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        LEFT JOIN product_image pi ON pi.tenant_id = s.tenant_id AND pi.product_id = s.product_id
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) AS on_hand,
                                    sum(quantity) FILTER (WHERE expiry_date > :today) AS sellable,
@@ -204,9 +207,86 @@ public class StockService {
                             threshold,
                             rs.getInt("reorder_quantity"),
                             nextExpiry == null ? null : nextExpiry.toLocalDate(),
-                            sellable - reserved <= threshold);
+                            sellable - reserved <= threshold,
+                            ProductImageRules.version(rs.getString("image_sha256")));
                 })
                 .list();
+    }
+
+    /**
+     * Everything the product sheet shows in one place: catalog data, this pharmacy's price,
+     * quantities, placement, lots on the shelf and photo. A product never received has no stock
+     * row yet: its quantities are zero and its price is the public one.
+     */
+    @Transactional(readOnly = true)
+    public ProductSheet productSheet(UUID productId) {
+        UUID tenant = TenantContext.requireTenant().value();
+        LocalDate today = calendar.today();
+        List<SheetLot> lots = jdbc.sql("""
+                        SELECT l.id, l.lot_number, l.expiry_date, l.quantity
+                        FROM stock_lot l JOIN stock s ON s.id = l.stock_id
+                        WHERE s.tenant_id = :tenant AND s.product_id = :product AND l.quantity > 0
+                        ORDER BY l.expiry_date, l.lot_number""")
+                .param("tenant", tenant)
+                .param("product", productId)
+                .query((rs, rowNum) -> {
+                    LocalDate expiry = rs.getDate("expiry_date").toLocalDate();
+                    return new SheetLot(rs.getObject("id", UUID.class), rs.getString("lot_number"), expiry,
+                            rs.getInt("quantity"), !expiry.isAfter(today));
+                })
+                .list();
+        int onHand = lots.stream().mapToInt(SheetLot::quantity).sum();
+        int sellable = lots.stream().filter(lot -> !lot.expired()).mapToInt(SheetLot::quantity).sum();
+        return jdbc.sql("""
+                        SELECT p.id, p.cip13, p.ean13, p.designation, p.dci, p.pharmaceutical_form, p.dosage,
+                               p.laboratory, p.listing, p.vat_rate, p.public_price_cents, p.active,
+                               s.id AS stock_id, s.selling_price_cents, s.reorder_threshold, s.reorder_quantity,
+                               s.reserved_quantity, s.location_id, loc.code AS location_code,
+                               loc.name AS location_name, loc.kind AS location_kind, s.location_detail,
+                               pi.sha256 AS image_sha256, pi.size_bytes AS image_size, pi.updated_at AS image_updated_at
+                        FROM product p
+                        LEFT JOIN stock s ON s.product_id = p.id AND s.tenant_id = :tenant
+                        LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        LEFT JOIN product_image pi ON pi.product_id = p.id AND pi.tenant_id = :tenant
+                        WHERE p.id = :product""")
+                .param("tenant", tenant)
+                .param("product", productId)
+                .query((rs, rowNum) -> {
+                    UUID locationId = rs.getObject("location_id", UUID.class);
+                    int reserved = rs.getInt("reserved_quantity");
+                    String sha256 = rs.getString("image_sha256");
+                    java.sql.Timestamp imageUpdatedAt = rs.getTimestamp("image_updated_at");
+                    return new ProductSheet(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("cip13"),
+                            rs.getString("ean13"),
+                            rs.getString("designation"),
+                            rs.getString("dci"),
+                            rs.getString("pharmaceutical_form"),
+                            rs.getString("dosage"),
+                            rs.getString("laboratory"),
+                            rs.getString("listing"),
+                            rs.getBigDecimal("vat_rate"),
+                            (Long) rs.getObject("public_price_cents"),
+                            (Long) rs.getObject("selling_price_cents"),
+                            rs.getBoolean("active"),
+                            rs.getObject("stock_id") != null,
+                            onHand,
+                            Math.max(sellable - reserved, 0),
+                            reserved,
+                            rs.getInt("reorder_threshold"),
+                            rs.getInt("reorder_quantity"),
+                            locationId == null ? null : new StockLocation(locationId, rs.getString("location_code"),
+                                    rs.getString("location_name"),
+                                    StorageLocationKind.valueOf(rs.getString("location_kind")),
+                                    rs.getString("location_detail")),
+                            ProductImageRules.version(sha256),
+                            sha256 == null ? null : (Integer) rs.getObject("image_size"),
+                            sha256 == null ? null : imageUpdatedAt.toInstant(),
+                            lots);
+                })
+                .optional()
+                .orElseThrow(() -> new NotFoundException("Product", productId));
     }
 
     /** Lots still on the shelf that expire within the given horizon (or are already expired). */
@@ -214,10 +294,12 @@ public class StockService {
     public List<ExpiryAlert> expiryAlerts(int withinDays) {
         LocalDate today = calendar.today();
         return jdbc.sql("""
-                        SELECT l.id, p.id AS product_id, p.cip13, p.designation, l.lot_number, l.expiry_date, l.quantity
+                        SELECT l.id, p.id AS product_id, p.cip13, p.designation, l.lot_number, l.expiry_date, l.quantity,
+                               pi.sha256 AS image_sha256
                         FROM stock_lot l
                         JOIN stock s ON s.id = l.stock_id
                         JOIN product p ON p.id = s.product_id
+                        LEFT JOIN product_image pi ON pi.tenant_id = s.tenant_id AND pi.product_id = s.product_id
                         WHERE l.quantity > 0 AND l.expiry_date <= :horizon
                         ORDER BY l.expiry_date, p.designation""")
                 .param("horizon", Date.valueOf(today.plusDays(Math.clamp(withinDays, 0, 730))))
@@ -231,7 +313,8 @@ public class StockService {
                             rs.getString("lot_number"),
                             expiry,
                             rs.getInt("quantity"),
-                            !expiry.isAfter(today));
+                            !expiry.isAfter(today),
+                            ProductImageRules.version(rs.getString("image_sha256")));
                 })
                 .list();
     }
@@ -257,14 +340,31 @@ public class StockService {
     public record StockLocation(UUID id, String code, String name, StorageLocationKind kind, String detail) {
     }
 
+    /** @param imageVersion version of the product photo for the thumbnail URL, {@code null} without photo */
     public record StockOverview(UUID productId, String cip13, String designation, StockLocation location,
                                 Long sellingPriceCents, Long publicPriceCents, int onHand, int available,
                                 int reserved, int shortfall, int reorderThreshold, int reorderQuantity,
-                                LocalDate nextExpiry, boolean belowThreshold) {
+                                LocalDate nextExpiry, boolean belowThreshold, String imageVersion) {
+    }
+
+    /**
+     * @param stocked whether the pharmacy ever received the product
+     * @param imageVersion version of the photo for its URL, {@code null} without photo
+     */
+    public record ProductSheet(UUID productId, String cip13, String ean13, String designation, String dci,
+                               String pharmaceuticalForm, String dosage, String laboratory, String listing,
+                               BigDecimal vatRate, Long publicPriceCents, Long sellingPriceCents,
+                               boolean active, boolean stocked, int onHand, int available, int reserved,
+                               int reorderThreshold, int reorderQuantity, StockLocation location,
+                               String imageVersion, Integer imageSizeBytes, Instant imageUpdatedAt,
+                               List<SheetLot> lots) {
+    }
+
+    public record SheetLot(UUID lotId, String lotNumber, LocalDate expiryDate, int quantity, boolean expired) {
     }
 
     public record ExpiryAlert(UUID lotId, UUID productId, String cip13, String designation, String lotNumber,
-                              LocalDate expiryDate, int quantity, boolean expired) {
+                              LocalDate expiryDate, int quantity, boolean expired, String imageVersion) {
     }
 
     public record ReorderSuggestion(UUID productId, String cip13, String designation, int available,

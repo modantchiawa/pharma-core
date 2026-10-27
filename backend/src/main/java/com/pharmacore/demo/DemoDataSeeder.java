@@ -17,6 +17,7 @@ import com.pharmacore.insurance.application.InsurerService;
 import com.pharmacore.insurance.domain.InsurerKind;
 import com.pharmacore.insurance.persistence.InsurancePolicyEntity;
 import com.pharmacore.insurance.persistence.InsurerEntity;
+import com.pharmacore.inventory.application.ProductImageService;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.StorageLocationService;
 import com.pharmacore.network.application.NetworkDirectoryService;
@@ -144,6 +145,7 @@ class DemoDataSeeder {
     private final SaleRecordingService sales;
     private final CashSessionService cashSessions;
     private final PlatformSubscriptionService subscriptions;
+    private final ProductImageService productImages;
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
     private final Clock clock;
@@ -155,8 +157,9 @@ class DemoDataSeeder {
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
                    PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations,
-                   PlatformSubscriptionService subscriptions) {
+                   PlatformSubscriptionService subscriptions, ProductImageService productImages) {
         this.subscriptions = subscriptions;
+        this.productImages = productImages;
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -317,6 +320,7 @@ class DemoDataSeeder {
                 stock.configure(product.id(), product.publicPriceCents(), 10, 40);
             }
             DemoStorageLocations.seed(locations, products, DRUGS);
+            DemoProductImages.seed(productImages, products);
 
             // customers, one with a credit account and an insurance policy
             var hadiza = customers.create(new CustomerEntity.Details("Mme Hadiza Moussa", "+22790" + (300000 + index),

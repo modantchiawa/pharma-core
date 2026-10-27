@@ -149,7 +149,8 @@ le PIN avec `DEMO_PIN`.
   « NIA Assurances », deux semaines de ventes (espèces, Airtel Money, Zamani Cash, une vente à
   crédit, des ordonnances), une session de caisse ouverte sur le poste `DEMO-1`, dix emplacements
   (rayons A à C, tiroir des injectables, réfrigérateur pour l'insuline, coffre pour le tramadol,
-  comptoir, réserve) où chaque produit est rangé.
+  comptoir, réserve) où chaque produit est rangé, et des photos de boîte pour les 16 produits
+  génériques les plus vendus (images dessinées pour la démonstration, sans marque ni laboratoire).
 * Postes de caisse dans chaque état de synchronisation : à `sahel`, `DEMO-1` synchronisé, `CAISSE-2`
   avec 3 ventes en attente, `CAISSE-3` hors ligne depuis 2 jours (1 vente bloquée sur le poste) et
   `BUREAU` jamais synchronisé ; à `lacouroussou`, `DEMO-1` synchronisé et `CAISSE-2` hors ligne. Les
@@ -187,6 +188,8 @@ le PIN avec `DEMO_PIN`.
 | 16 | Stock et achats › Emplacements : ouvrir B2, renommer A1, désactiver un rayon non vide | Produits par case ; l'emplacement renommé apparaît au comptoir après synchronisation ; désactivation refusée tant que les produits ne sont pas déplacés |
 | 17 | Console éditeur › Abonnements : `lacouroussou` › règlement de 3 mois en mobile money | Montant prérempli (formule × mois), période prolongée depuis la fin de la période payée, licence réémise, bandeau disparu chez la pharmacie |
 | 18 | Console éditeur : suspendre `sahel`, puis vendre au comptoir et consulter le stock et l'ordonnancier ; réactiver | Vente refusée (bandeau rouge, bouton désactivé, 423 côté serveur), consultation et exports ouverts ; tout revient à la réactivation |
+| 19 | Stocks › clic sur un produit sans photo › « Prendre une photo » (mobile) ou glisser une image | Photo recadrée au carré ; miniature visible au comptoir, dans les stocks et les commandes, puis hors ligne |
+| 20 | Rôles et droits › délais 1 min / 5 min ; panier en cours, ne plus toucher au poste | Avertissement à 30 s, écran verrouillé, panier intact après le PIN `1234` ; « Changer d'utilisateur » vers le caissier garde le panier ; 5 codes faux ferment la session |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

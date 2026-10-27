@@ -22,6 +22,8 @@ export interface CachedProduct {
   locationKind?: StorageLocationKind | null;
   locationDetail?: string | null;
   changedAt: string;
+  /** Version of the product photo, absent from entries cached before photos existed. */
+  imageVersion?: string | null;
 }
 
 export type OutboxStatus = 'PENDING' | 'SYNCED' | 'REJECTED';

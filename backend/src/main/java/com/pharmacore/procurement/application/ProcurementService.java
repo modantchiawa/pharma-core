@@ -5,6 +5,7 @@ import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.accounting.domain.VatSplit;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.TenantCalendar;
+import com.pharmacore.inventory.domain.ProductImageRules;
 import com.pharmacore.procurement.domain.OrderGrouping;
 import com.pharmacore.procurement.domain.OrderProposalCalculator;
 import com.pharmacore.procurement.domain.OrderProposalCalculator.Input;
@@ -263,7 +264,7 @@ public class ProcurementService {
     public record OrderLineView(int lineNo, UUID productId, String designation, String cip13, int quantityOrdered,
                                 int quantityReceived, long unitCostCents, int packSize, Integer suggestedQuantity,
                                 String reason, String locationCode, String locationName, String locationKind,
-                                String locationDetail) {
+                                String locationDetail, String imageVersion) {
     }
 
     /** Key figures of the tracking screen, as of {@code today} in the pharmacy's calendar. */
@@ -642,10 +643,12 @@ public class ProcurementService {
                         SELECT l.purchase_order_id, l.line_no, l.product_id, p.designation, p.cip13, l.quantity_ordered,
                                l.quantity_received, l.unit_cost_cents, l.pack_size, l.suggested_quantity, l.reason,
                                sl.code AS location_code, sl.name AS location_name, sl.kind AS location_kind,
-                               CASE WHEN sl.id IS NOT NULL THEN st.location_detail END AS location_detail
+                               CASE WHEN sl.id IS NOT NULL THEN st.location_detail END AS location_detail,
+                               pi.sha256 AS image_sha256
                         FROM purchase_order_line l JOIN product p ON p.id = l.product_id
                         LEFT JOIN stock st ON st.tenant_id = l.tenant_id AND st.product_id = l.product_id
                         LEFT JOIN storage_location sl ON sl.id = st.location_id
+                        LEFT JOIN product_image pi ON pi.tenant_id = l.tenant_id AND pi.product_id = l.product_id
                         WHERE l.tenant_id = :tenant AND l.purchase_order_id = ANY(:ids)
                         ORDER BY l.purchase_order_id, l.line_no""")
                 .param("tenant", tenant)
@@ -657,7 +660,8 @@ public class ProcurementService {
                                 rs.getInt("quantity_received"), rs.getLong("unit_cost_cents"), rs.getInt("pack_size"),
                                 (Integer) rs.getObject("suggested_quantity"), rs.getString("reason"),
                                 rs.getString("location_code"), rs.getString("location_name"),
-                                rs.getString("location_kind"), rs.getString("location_detail"))));
+                                rs.getString("location_kind"), rs.getString("location_detail"),
+                                ProductImageRules.version(rs.getString("image_sha256")))));
         LocalDate today = calendar.today();
         Map<UUID, OrderView> byId = new HashMap<>();
         jdbc.sql("""

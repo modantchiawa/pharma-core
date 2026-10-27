@@ -48,6 +48,8 @@ export interface PosCatalogItem {
   locationKind: StorageLocationKind | null;
   locationDetail: string | null;
   changedAt: string;
+  /** Version of the pharmacy's photo of the product (thumbnail URL); null without photo. */
+  imageVersion: string | null;
 }
 
 export interface PosCatalogPage {
@@ -281,6 +283,8 @@ export interface PurchaseOrderLine {
   locationName: string | null;
   locationKind: StorageLocationKind | null;
   locationDetail: string | null;
+  /** Version of the product photo; null without photo. */
+  imageVersion: string | null;
 }
 
 export interface SupplierContact {
@@ -1076,3 +1080,61 @@ export interface TenantSubscriptionDetail {
     lastPullAt: string | null;
   }[];
 }
+
+// ---------------------------------------------------------------- miniatures et inactivité
+
+/** Answer of the photo upload and removal: the version to use in the image URL. */
+export interface ProductImageView {
+  productId: string;
+  /** Null once the photo is removed. */
+  imageVersion: string | null;
+  contentType: string | null;
+  sizeBytes: number | null;
+  updatedAt: string;
+}
+
+export interface ProductSheetLot {
+  lotId: string;
+  lotNumber: string;
+  expiryDate: string;
+  quantity: number;
+  expired: boolean;
+}
+
+/** Product sheet of the pharmacy: catalog data, own price and stock, placement, photo. */
+export interface ProductSheet {
+  productId: string;
+  cip13: string;
+  ean13: string | null;
+  designation: string;
+  dci: string | null;
+  pharmaceuticalForm: string | null;
+  dosage: string | null;
+  laboratory: string | null;
+  listing: DrugListing;
+  vatRate: number;
+  publicPriceCents: number | null;
+  sellingPriceCents: number | null;
+  active: boolean;
+  /** Whether the pharmacy ever received the product. */
+  stocked: boolean;
+  onHand: number;
+  available: number;
+  reserved: number;
+  reorderThreshold: number;
+  reorderQuantity: number;
+  location: StockLocation | null;
+  imageVersion: string | null;
+  imageSizeBytes: number | null;
+  imageUpdatedAt: string | null;
+  lots: ProductSheetLot[];
+}
+
+/** Inactivity delays of the pharmacy, in minutes; a lock delay of 0 never locks. */
+export interface SessionPolicy {
+  lockAfterMinutes: number;
+  logoutAfterMinutes: number;
+}
+
+/** What a terminal journals when it locks or closes a session on its own. */
+export type SessionEventKind = 'IDLE_LOCK' | 'MANUAL_LOCK' | 'IDLE_LOGOUT' | 'PIN_FAILURES_LOGOUT';

@@ -17,6 +17,8 @@ import { PermissionService } from './core/auth/permission.service';
 import { BrandingService } from './core/branding/branding.service';
 import { ConnectivityService } from './core/offline/connectivity.service';
 import { SaleOutboxService } from './core/offline/sale-outbox.service';
+import { IdleService } from './core/session/idle.service';
+import { LockScreen } from './core/session/lock-screen';
 import { LicenseBanner } from './core/subscription/license-banner';
 import { LicenseStateService } from './core/subscription/license-state.service';
 import { Density, DisplayPreferencesService } from './core/ui/display-preferences.service';
@@ -187,14 +189,25 @@ interface PaletteEntry {
 /** Application frame: grouped side navigation, top bar with status, command palette. */
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, FormsModule, Icon, LicenseBanner],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    FormsModule,
+    Icon,
+    LicenseBanner,
+    LockScreen,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(document:keydown)': 'onKeydown($event)',
     '(document:click)': 'onDocumentClick($event)',
   },
   template: `
-    <div class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink">
+    <div
+      class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink"
+      [attr.inert]="idle.locked() ? '' : null"
+    >
       <!-- Mobile backdrop -->
       @if (mobileOpen()) {
         <div
@@ -379,6 +392,19 @@ interface PaletteEntry {
               </span>
             }
 
+            @if (!auth.isPlatformOperator()) {
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon"
+                (click)="idle.lockNow()"
+                [attr.title]="'Verrouiller le poste (' + (isMac ? '⌘' : 'Ctrl') + ' L)'"
+                aria-label="Verrouiller le poste"
+                data-testid="lock-now"
+              >
+                <app-icon name="lock" />
+              </button>
+            }
+
             <button
               type="button"
               class="btn btn-ghost btn-icon"
@@ -480,8 +506,14 @@ interface PaletteEntry {
                   <div class="divider my-1"></div>
                   @if (!auth.isPlatformOperator()) {
                     <a routerLink="/account/password" class="menu-item" (click)="menu.set(null)">
-                      <app-icon name="lock" [size]="16" /> Mot de passe et PIN
+                      <app-icon name="key" [size]="16" /> Mot de passe et PIN
                     </a>
+                    <button type="button" class="menu-item w-full" (click)="lock()">
+                      <app-icon name="lock" [size]="16" /> Verrouiller le poste
+                      <span class="kbd ml-auto whitespace-nowrap"
+                        >{{ isMac ? '⌘' : 'Ctrl' }} L</span
+                      >
+                    </button>
                   }
                   @if (canSeeSubscription()) {
                     <a
@@ -589,6 +621,12 @@ interface PaletteEntry {
         </div>
       }
     </div>
+    <!-- Loaded as soon as the browser is idle: ready before any lock, offline included -->
+    @if (!auth.isPlatformOperator()) {
+      @defer (on idle) {
+        <app-lock-screen />
+      }
+    }
   `,
   styles: `
     :host {
@@ -718,6 +756,7 @@ export class Shell {
   protected readonly connectivity = inject(ConnectivityService);
   protected readonly outbox = inject(SaleOutboxService);
   protected readonly license = inject(LicenseStateService);
+  protected readonly idle = inject(IdleService);
   private readonly permissions = inject(PermissionService);
   protected readonly display = inject(DisplayPreferencesService);
   private readonly router = inject(Router);
@@ -828,12 +867,20 @@ export class Shell {
       },
     ];
     if (!this.auth.isPlatformOperator()) {
-      actions.unshift({
-        label: 'Mot de passe et PIN',
-        group: 'Compte',
-        icon: 'lock',
-        run: () => void this.router.navigateByUrl('/account/password'),
-      });
+      actions.unshift(
+        {
+          label: 'Verrouiller le poste',
+          group: 'Compte',
+          icon: 'lock',
+          run: () => this.idle.lockNow(),
+        },
+        {
+          label: 'Mot de passe et PIN',
+          group: 'Compte',
+          icon: 'key',
+          run: () => void this.router.navigateByUrl('/account/password'),
+        },
+      );
     }
     return [...pages, ...actions];
   });
@@ -845,13 +892,15 @@ export class Shell {
   });
 
   constructor() {
+    const destroyRef = inject(DestroyRef);
     if (!this.auth.isPlatformOperator()) {
       this.license.start();
+      this.idle.start(destroyRef);
     }
     this.router.events
       .pipe(
         filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-        takeUntilDestroyed(inject(DestroyRef)),
+        takeUntilDestroyed(destroyRef),
       )
       .subscribe((e) => {
         this.url.set(e.urlAfterRedirects);
@@ -931,7 +980,14 @@ export class Shell {
   }
 
   protected onKeydown(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'l' &&
+      !this.auth.isPlatformOperator()
+    ) {
+      event.preventDefault();
+      this.lock();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       if (this.paletteOpen()) {
         this.closePalette();
@@ -957,6 +1013,12 @@ export class Shell {
     if (container && !container.contains(target)) {
       this.menu.set(null);
     }
+  }
+
+  protected lock(): void {
+    this.menu.set(null);
+    this.paletteOpen.set(false);
+    this.idle.lockNow();
   }
 
   protected async logout(): Promise<void> {

@@ -42,6 +42,7 @@ function order(overrides: Partial<PurchaseOrder> = {}): PurchaseOrder {
         locationName: 'Rayon A · antalgiques',
         locationKind: 'SHELF',
         locationDetail: 'case 1',
+        imageVersion: null,
       },
       {
         lineNo: 2,
@@ -58,6 +59,7 @@ function order(overrides: Partial<PurchaseOrder> = {}): PurchaseOrder {
         locationName: null,
         locationKind: null,
         locationDetail: null,
+        imageVersion: null,
       },
     ],
     closedAt: null,

@@ -20,6 +20,7 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { placeOf, ProductPlace } from '../../shared/storage-location';
 import { Icon } from '../../shared/ui/icon';
 import { LocationChip } from '../../shared/ui/location-chip';
+import { ProductThumb } from '../../shared/ui/product-thumb';
 import {
   applyGs1,
   errorDetail,
@@ -36,7 +37,7 @@ import {
  */
 @Component({
   selector: 'app-order-receive',
-  imports: [FormsModule, MoneyPipe, Icon, LocationChip],
+  imports: [FormsModule, MoneyPipe, Icon, LocationChip, ProductThumb],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="space-y-4" (ngSubmit)="submit()" aria-label="Réception de la livraison">
@@ -80,9 +81,17 @@ import {
             [attr.data-testid]="'receive-line-' + line.cip13"
           >
             <div class="flex flex-wrap items-start justify-between gap-2">
-              <div class="min-w-0">
-                <p class="font-medium">{{ line.designation }}</p>
-                <p class="text-xs text-subtle tabular-nums">{{ line.cip13 }}</p>
+              <div class="flex min-w-0 items-center gap-3">
+                <app-product-thumb
+                  [productId]="line.productId"
+                  [version]="images().get(line.productId)"
+                  [name]="line.designation"
+                  [size]="40"
+                />
+                <div class="min-w-0">
+                  <p class="font-medium">{{ line.designation }}</p>
+                  <p class="text-xs text-subtle tabular-nums">{{ line.cip13 }}</p>
+                </div>
               </div>
               <div class="flex flex-wrap items-center gap-1.5">
                 @if (places().get(line.productId); as place) {
@@ -218,6 +227,10 @@ export class OrderReceive implements OnInit {
     }
     return places;
   });
+  /** Photo of each ordered product, to recognize the boxes being unpacked. */
+  protected readonly images = computed(
+    () => new Map(this.order().lines.map((line) => [line.productId, line.imageVersion])),
+  );
   protected readonly units = computed(() => {
     this.revision();
     return this.lines().reduce((sum, l) => sum + (l.quantity > 0 ? Number(l.quantity) : 0), 0);
