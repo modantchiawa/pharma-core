@@ -50,8 +50,10 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Seuils mini / quantité de réappro par produit | Oui | ✅ + jours de couverture et stock de sécurité |
 | **Fiche de commande du lendemain** calculée (vitesse de vente, délai fournisseur, en commande, péremptions, ventes perdues) | Oui (souvent sur seuils seuls) | ✅ |
 | Fournisseurs (grossistes-répartiteurs), références, prix d'achat, colisage, minimum de commande | Oui | ✅ |
-| Envoi de commande : texte WhatsApp / e-mail, impression, CSV | Oui | ✅ texte · 🟡 PDF : phase 2 |
-| Réception de livraison lot par lot, mise à jour des prix, suivi des reliquats | Oui | ✅ |
+| Envoi de commande : texte WhatsApp / e-mail, impression, CSV | Oui | ✅ WhatsApp (wa.me), e-mail, bon de commande A4 imprimé · 🟡 PDF : phase 2 |
+| Génération directe d'une commande par fournisseur depuis la fiche, brouillons mis à jour sans doublon | Partiel | ✅ |
+| Suivi des commandes : retards, livraisons du jour, montant en attente, report de date, solde des reliquats | Partiel | ✅ |
+| Réception de livraison lot par lot, mise à jour des prix, suivi des reliquats | Oui | ✅ depuis la commande, pré-remplie, scan GS1 |
 | Inventaire (comptage, écarts, valorisation) | Oui | ✅ session d'inventaire **à l'aveugle** par scan ou saisie, attendu masqué au compteur, validation par un pharmacien, écarts audités |
 | **Contrôle d'intégrité** nocturne du stock (lots recalculés depuis les mouvements, réservations), sortie automatique des lots périmés avec valeur au coût | Rare | ✅ |
 | Lecture des codes **GS1 DataMatrix** (lot, péremption) au comptoir, à la réception et à l'inventaire | Partiel | ✅ |

@@ -57,12 +57,26 @@ public class PurchaseOrderLineEntity {
         this.reason = reason;
     }
 
+    /** Takes the quantities and terms of {@code other}, a line for the same product. */
+    void revise(PurchaseOrderLineEntity other) {
+        this.lineNo = other.lineNo;
+        this.quantityOrdered = other.quantityOrdered;
+        this.unitCostCents = other.unitCostCents;
+        this.packSize = other.packSize;
+        this.suggestedQuantity = other.suggestedQuantity;
+        this.reason = other.reason;
+    }
+
     void receive(int quantity) {
         this.quantityReceived += quantity;
     }
 
     boolean complete() {
         return quantityReceived >= quantityOrdered;
+    }
+
+    int remaining() {
+        return Math.max(quantityOrdered - quantityReceived, 0);
     }
 
     public short lineNo() {

@@ -246,18 +246,99 @@ export interface PurchaseOrder {
   expectedAt: string | null;
   totalCents: number;
   notes: string | null;
+  lines: PurchaseOrderLine[];
+  closedAt: string | null;
+  /** Goods still awaited after the announced delivery day (pharmacy calendar). */
+  overdue: boolean;
+  /** Closed as received although some ordered units never came. */
+  shortClosed: boolean;
+  orderedUnits: number;
+  receivedUnits: number;
+  receivedCents: number;
+  /** Value of the units still awaited (0 once closed). */
+  remainingCents: number;
+  supplier: SupplierContact;
+}
+
+export interface PurchaseOrderLine {
+  lineNo: number;
+  productId: string;
+  designation: string;
+  cip13: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCostCents: number;
+  packSize: number;
+  suggestedQuantity: number | null;
+  reason: string | null;
+}
+
+export interface SupplierContact {
+  contactName: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  minOrderCents: number;
+  leadTimeDays: number;
+}
+
+export type PurchaseOrderStatus = PurchaseOrder['status'];
+
+export type PurchaseOrderScope = 'DRAFTS' | 'OPEN' | 'OVERDUE' | 'CLOSED' | 'ALL';
+
+export interface PurchaseOrderSummary {
+  /** Today in the pharmacy's calendar. */
+  today: string;
+  drafts: number;
+  open: number;
+  overdue: number;
+  expectedToday: number;
+  openAmountCents: number;
+}
+
+export interface PurchaseOrderGeneration {
+  orders: PurchaseOrder[];
+  created: number;
+  updated: number;
+  /** Proposal lines that no supplier sells yet. */
+  unassigned: ProposalLine[];
+}
+
+export interface PurchaseOrderReceipt {
+  id: string;
+  receivedAt: string;
+  supplierInvoiceNumber: string | null;
+  invoiceDate: string | null;
+  totalExclVatCents: number;
+  vatCents: number;
+  lines: number;
+  units: number;
+  receivedBy: string | null;
+}
+
+export interface GoodsReceiptRequest {
+  supplierId: string;
+  purchaseOrderId: string | null;
+  supplierInvoiceNumber: string | null;
+  invoiceDate: string | null;
+  notes: string | null;
   lines: {
-    lineNo: number;
     productId: string;
-    designation: string;
-    cip13: string;
-    quantityOrdered: number;
-    quantityReceived: number;
+    lotNumber: string;
+    expiryDate: string;
+    quantity: number;
     unitCostCents: number;
-    packSize: number;
-    suggestedQuantity: number | null;
-    reason: string | null;
+    vatRate: number | null;
+    sellingPriceCents: number | null;
   }[];
+}
+
+export interface GoodsReceiptResult {
+  id: string;
+  totalExclVatCents: number;
+  vatCents: number;
+  lines: number;
+  orderStatus: PurchaseOrderStatus | null;
 }
 
 export interface IncomeStatement {

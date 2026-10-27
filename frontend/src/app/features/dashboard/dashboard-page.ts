@@ -12,8 +12,10 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { Dashboard } from '../../core/api/models';
+import { Dashboard, PurchaseOrderSummary } from '../../core/api/models';
+import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
@@ -56,7 +58,7 @@ const METHOD_LABELS: Record<string, string> = {
 /** Steering dashboard: sales, margin, payment mix, best sellers, stock exposure, receivables. */
 @Component({
   selector: 'app-dashboard-page',
-  imports: [FormsModule, MoneyPipe, DatePipe, DecimalPipe, Icon, SetupChecklist],
+  imports: [FormsModule, RouterLink, MoneyPipe, DatePipe, DecimalPipe, Icon, SetupChecklist],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in space-y-5">
@@ -104,6 +106,24 @@ const METHOD_LABELS: Record<string, string> = {
       </header>
 
       <app-setup-checklist />
+
+      @if ((purchaseOrders()?.overdue ?? 0) > 0) {
+        <a
+          class="alert alert-warning items-center"
+          routerLink="/procurement"
+          [queryParams]="{ tab: 'orders', scope: 'OVERDUE' }"
+          data-testid="overdue-orders"
+        >
+          <app-icon name="procurement" [size]="16" />
+          <span class="flex-1">
+            <strong>{{ purchaseOrders()?.overdue }} commande(s) fournisseur en retard</strong> : la
+            date de livraison est passée, relancez le fournisseur.
+          </span>
+          <span class="inline-flex items-center gap-1 whitespace-nowrap font-medium">
+            Voir le suivi <app-icon name="arrowRight" [size]="14" />
+          </span>
+        </a>
+      }
 
       @if (data(); as d) {
         <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicateurs">
@@ -498,6 +518,7 @@ export class DashboardPage {
   private readonly chart = viewChild<ElementRef<HTMLElement>>('chart');
   protected readonly currency = inject(CurrencyService);
   protected readonly data = signal<Dashboard | null>(null);
+  protected readonly purchaseOrders = signal<PurchaseOrderSummary | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly view = signal<'chart' | 'table'>('chart');
   protected readonly hovered = signal<Bar | null>(null);
@@ -585,6 +606,14 @@ export class DashboardPage {
 
   constructor() {
     void this.load(29);
+    if (inject(PermissionService).has('PROCUREMENT_VIEW')) {
+      firstValueFrom(
+        this.http.get<PurchaseOrderSummary>(`${this.env.apiUrl}/v1/procurement/orders/summary`),
+      ).then(
+        (summary) => this.purchaseOrders.set(summary),
+        () => this.purchaseOrders.set(null),
+      );
+    }
     const destroyRef = inject(DestroyRef);
     let observer: ResizeObserver | null = null;
     effect(() => {
