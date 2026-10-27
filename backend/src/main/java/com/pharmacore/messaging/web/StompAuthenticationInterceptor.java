@@ -23,22 +23,30 @@ import org.springframework.stereotype.Component;
 /**
  * Authenticates the STOMP CONNECT frame with the same multi-issuer JWT logic as HTTP, then
  * authorizes every SUBSCRIBE and SEND: a pharmacy can only listen to conversations it can see
- * (RLS) and to its own notification topic. Expired tokens are refused on every frame, forcing
- * the client to reconnect with a fresh token.
+ * (RLS) and to its own notification topics, the internal control alerts being reserved to
+ * holders of {@code CONTROL_VIEW}. Expired tokens are refused on every frame, forcing
+ * the client to reconnect with a fresh token. A locked terminal keeps its connection but sends
+ * nothing and receives nothing ({@link LockedSessionGuard}) until it is unlocked.
  */
 @Component
 class StompAuthenticationInterceptor implements ChannelInterceptor {
 
     static final Pattern CONVERSATION_TOPIC = Pattern.compile("^/topic/conversations\\.([0-9a-f-]{36})$");
     static final Pattern TENANT_TOPIC = Pattern.compile("^/topic/tenants\\.([0-9a-f-]{36})\\.[a-z-]+$");
+    static final String CHAT_PERMISSION = "NETWORK_CHAT";
+    static final String CONTROL_PERMISSION = "CONTROL_VIEW";
+    static final String CONTROL_TOPIC_SUFFIX = ".control-alerts";
     static final Pattern SEND_DESTINATION = Pattern.compile("^/app/conversations\\.([0-9a-f-]{36})\\.messages$");
 
     private final BearerTokenAuthenticator authenticator;
     private final ChatService chat;
+    private final LockedSessionGuard lockedSessions;
 
-    StompAuthenticationInterceptor(BearerTokenAuthenticator authenticator, ChatService chat) {
+    StompAuthenticationInterceptor(BearerTokenAuthenticator authenticator, ChatService chat,
+                                   LockedSessionGuard lockedSessions) {
         this.authenticator = authenticator;
         this.chat = chat;
+        this.lockedSessions = lockedSessions;
     }
 
     @Override
@@ -49,7 +57,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
         }
         StompCommand command = accessor.getCommand();
         if (command == StompCommand.CONNECT) {
-            accessor.setUser(connect(accessor));
+            var token = connect(accessor);
+            lockedSessions.connected(accessor.getSessionId(), token);
+            accessor.setUser(token);
             return message;
         }
         if (command == StompCommand.DISCONNECT || command == StompCommand.UNSUBSCRIBE) {
@@ -58,7 +68,13 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
         var token = authenticated(accessor);
         switch (command) {
             case SUBSCRIBE -> authorizeSubscription(token, accessor.getDestination());
-            case SEND -> authorizeSend(accessor.getDestination());
+            case SEND -> {
+                requirePermission(token, CHAT_PERMISSION);
+                authorizeSend(accessor.getDestination());
+                if (!lockedSessions.open(accessor.getSessionId())) {
+                    throw new AccessDeniedException("Session locked");
+                }
+            }
             default -> {
                 // ACK, NACK, BEGIN, COMMIT, ABORT carry no destination to authorize
             }
@@ -72,8 +88,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
             throw new AccessDeniedException("Missing bearer token on STOMP CONNECT");
         }
         var token = authenticator.authenticate(header.substring("Bearer ".length()).trim());
-        if (!(token.actor() instanceof Actor.TenantUser user) || !user.can("NETWORK_CHAT")) {
-            throw new AccessDeniedException("NETWORK_CHAT permission required");
+        if (!(token.actor() instanceof Actor.TenantUser user)
+                || !(user.can(CHAT_PERMISSION) || user.can(CONTROL_PERMISSION))) {
+            throw new AccessDeniedException("NETWORK_CHAT or CONTROL_VIEW permission required");
         }
         return token;
     }
@@ -102,10 +119,13 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
             if (!tenant.equals(tenantTopic.group(1))) {
                 throw new AccessDeniedException("Cannot subscribe to another pharmacy's notifications");
             }
+            // Internal control alerts are for the owner's team, the other topics for the network users
+            requirePermission(token, destination.endsWith(CONTROL_TOPIC_SUFFIX) ? CONTROL_PERMISSION : CHAT_PERMISSION);
             return;
         }
         Matcher conversation = CONVERSATION_TOPIC.matcher(destination);
         if (conversation.matches()) {
+            requirePermission(token, CHAT_PERMISSION);
             UUID conversationId = UUID.fromString(conversation.group(1));
             boolean visible = TenantContext.call(new RequestContext(UUID.randomUUID().toString(), token.actor()),
                     () -> chat.canAccess(conversationId));
@@ -115,6 +135,12 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
             return;
         }
         throw new AccessDeniedException("Subscription to " + destination + " is not allowed");
+    }
+
+    private static void requirePermission(PharmacyAuthenticationToken token, String permission) {
+        if (!(token.actor() instanceof Actor.TenantUser user) || !user.can(permission)) {
+            throw new AccessDeniedException(permission + " permission required");
+        }
     }
 
     private static void authorizeSend(String destination) {

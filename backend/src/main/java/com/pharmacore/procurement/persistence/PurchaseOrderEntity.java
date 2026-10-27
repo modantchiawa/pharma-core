@@ -199,6 +199,10 @@ public class PurchaseOrderEntity {
         return id;
     }
 
+    public UUID createdBy() {
+        return createdBy;
+    }
+
     public UUID supplierId() {
         return supplierId;
     }

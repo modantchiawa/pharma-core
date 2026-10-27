@@ -44,6 +44,12 @@ public class TenantEntity {
     @Column(nullable = false, length = 10)
     private TenantTopology topology;
 
+    @Column(name = "suspended_at")
+    private Instant suspendedAt;
+
+    @Column(name = "suspension_reason", length = 255)
+    private String suspensionReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -71,7 +77,17 @@ public class TenantEntity {
         this.updatedAt = now;
     }
 
-    public void changeStatus(TenantStatus newStatus, Instant now) {
+    /** A suspension is dated: sales made offline before it are still recorded when they sync. */
+    public void changeStatus(TenantStatus newStatus, String reason, Instant now) {
+        if (newStatus == TenantStatus.SUSPENDED) {
+            if (status != TenantStatus.SUSPENDED) {
+                this.suspendedAt = now;
+            }
+            this.suspensionReason = reason;
+        } else {
+            this.suspendedAt = null;
+            this.suspensionReason = null;
+        }
         this.status = newStatus;
         this.updatedAt = now;
     }
@@ -82,21 +98,12 @@ public class TenantEntity {
         this.updatedAt = now;
     }
 
-    public boolean isOperational(Instant now) {
-        return isOperational(now, java.time.Duration.ZERO);
-    }
-
     /**
-     * A hub that cannot reach the cloud keeps serving its pharmacy during the grace period after
-     * the subscription end, so a late payment or a long outage never stops the counter.
+     * A suspended or unpaid pharmacy still signs in: it keeps reading its registers, reports and
+     * exports, only modifications are blocked (see the license enforcement).
      */
-    public boolean isOperational(Instant now, java.time.Duration grace) {
-        return status == TenantStatus.ACTIVE
-                && (subscriptionExpiresAt == null || subscriptionExpiresAt.plus(grace).isAfter(now));
-    }
-
-    public boolean subscriptionExpired(Instant now) {
-        return subscriptionExpiresAt != null && !subscriptionExpiresAt.isAfter(now);
+    public boolean acceptsLogins() {
+        return status == TenantStatus.ACTIVE || status == TenantStatus.SUSPENDED;
     }
 
     public void attachHub(Instant now) {
@@ -138,5 +145,13 @@ public class TenantEntity {
 
     public String timeZone() {
         return timeZone;
+    }
+
+    public Instant suspendedAt() {
+        return suspendedAt;
+    }
+
+    public String suspensionReason() {
+        return suspensionReason;
     }
 }

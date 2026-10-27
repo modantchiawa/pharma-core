@@ -77,6 +77,10 @@ public class SaleLineEntity {
         return quantity - allocations.stream().mapToInt(SaleLineAllocationEntity::quantity).sum();
     }
 
+    public UUID id() {
+        return id;
+    }
+
     public short lineNo() {
         return lineNo;
     }

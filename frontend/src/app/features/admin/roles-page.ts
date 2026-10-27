@@ -2,7 +2,11 @@ import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
+import { SessionPolicy } from '../../core/api/models';
 import { APP_ENVIRONMENT } from '../../core/config';
+import { IDLE_LIMITS, sessionPolicyProblem } from '../../core/session/idle';
+import { SessionPolicyService } from '../../core/session/session-policy.service';
+import { ToastService } from '../../core/ui/toast.service';
 import { Icon } from '../../shared/ui/icon';
 
 interface Role {
@@ -22,7 +26,11 @@ const PERMISSION_GROUPS: { label: string; prefixes: string[] }[] = [
   { label: 'Stock et achats', prefixes: ['STOCK', 'PROCUREMENT', 'DATA'] },
   { label: 'Réseau et gardes', prefixes: ['NETWORK', 'GUARD', 'DIRECTORY'] },
   { label: 'Pilotage et comptabilité', prefixes: ['DASHBOARD', 'REPORT', 'ACCOUNTING'] },
-  { label: 'Administration', prefixes: ['CONFIG', 'USER', 'ROLE', 'AUDIT', 'HUB', 'PRINTER'] },
+  { label: 'Contrôle interne', prefixes: ['CONTROL'] },
+  {
+    label: 'Administration',
+    prefixes: ['CONFIG', 'USER', 'ROLE', 'AUDIT', 'HUB', 'PRINTER', 'SUBSCRIPTION'],
+  },
 ];
 
 /** Permission matrix of the pharmacy: one column per role, one row per permission. */
@@ -64,6 +72,88 @@ const PERMISSION_GROUPS: { label: string; prefixes: string[] }[] = [
           <span>{{ status() }}</span>
         </p>
       }
+
+      <form class="card mb-5" (ngSubmit)="savePolicy()" data-testid="session-policy">
+        <div class="card-header">
+          <div class="flex items-center gap-3">
+            <span class="kpi-icon"><app-icon name="lock" [size]="16" /></span>
+            <div>
+              <h2 class="card-title">Postes laissés sans surveillance</h2>
+              <p class="text-xs text-muted">
+                Écran masqué puis session fermée après une période sans activité, sur tous les
+                postes de la pharmacie, même hors ligne.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1.4fr]">
+          <label class="block">
+            <span class="label">Verrouillage de l'écran</span>
+            <span class="suffix-field">
+              <input
+                class="input num"
+                type="number"
+                name="lock"
+                min="0"
+                [max]="limits.maxLock"
+                [(ngModel)]="lockMinutes"
+                aria-describedby="lock-hint"
+              />
+              <span>min</span>
+            </span>
+            <span id="lock-hint" class="hint block"
+              >0 = jamais · {{ limits.maxLock }} min au plus</span
+            >
+          </label>
+          <label class="block">
+            <span class="label">Déconnexion complète</span>
+            <span class="suffix-field">
+              <input
+                class="input num"
+                type="number"
+                name="logout"
+                [min]="limits.minLogout"
+                [max]="limits.maxLogout"
+                [(ngModel)]="logoutMinutes"
+                aria-describedby="logout-hint"
+              />
+              <span>min</span>
+            </span>
+            <span id="logout-hint" class="hint block"
+              >Après le verrouillage · {{ limits.maxLogout / 60 }} h au plus</span
+            >
+          </label>
+          <ul class="policy-notes sm:col-span-2 lg:col-span-1">
+            <li>
+              <app-icon name="timer" [size]="14" />Avertissement 30 secondes avant, avec « Je suis
+              là »
+            </li>
+            <li>
+              <app-icon name="lockOpen" [size]="14" />Reprise par code PIN ou mot de passe, la page
+              et le panier restent en l'état
+            </li>
+            <li>
+              <app-icon name="logout" [size]="14" />Session fermée au délai de déconnexion ou après
+              5 codes erronés
+            </li>
+          </ul>
+        </div>
+        <div class="card-footer">
+          @if (policyProblem(); as problem) {
+            <span class="text-xs text-[var(--danger-strong)]" role="alert">{{ problem }}</span>
+          } @else {
+            <span class="text-xs text-muted">{{ policySummary() }}</span>
+          }
+          <button
+            type="submit"
+            class="btn btn-primary btn-sm ml-auto"
+            [disabled]="!!policyProblem() || savingPolicy()"
+          >
+            <app-icon name="check" [size]="14" />
+            Enregistrer les délais
+          </button>
+        </div>
+      </form>
 
       <section class="card overflow-hidden">
         <div class="card-header">
@@ -156,6 +246,48 @@ const PERMISSION_GROUPS: { label: string; prefixes: string[] }[] = [
     </div>
   `,
   styles: `
+    .card-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1.25rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+    .suffix-field {
+      position: relative;
+      display: block;
+    }
+    .suffix-field > input {
+      padding-right: 2.75rem;
+    }
+    .suffix-field > span {
+      position: absolute;
+      top: 50%;
+      right: 0.75rem;
+      transform: translateY(-50%);
+      font-size: 0.8125rem;
+      color: var(--text-subtle);
+      pointer-events: none;
+    }
+    .policy-notes {
+      display: grid;
+      gap: 0.45rem;
+      align-content: center;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+    .policy-notes li {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .policy-notes app-icon {
+      margin-top: 0.15rem;
+      color: var(--brand-text);
+    }
     .matrix th:first-child,
     .matrix td:first-child {
       position: sticky;
@@ -230,8 +362,64 @@ export class RolesPage {
   protected readonly dirty = signal(new Set<string>());
   protected readonly status = signal<string | null>(null);
 
+  private readonly sessionPolicy = inject(SessionPolicyService);
+  private readonly toasts = inject(ToastService);
+  protected readonly limits = IDLE_LIMITS;
+  protected readonly lockMinutes = signal(this.sessionPolicy.policy().lockAfterMinutes);
+  protected readonly logoutMinutes = signal(this.sessionPolicy.policy().logoutAfterMinutes);
+  protected readonly savingPolicy = signal(false);
+  protected readonly policyProblem = computed(() =>
+    sessionPolicyProblem(Number(this.lockMinutes()), Number(this.logoutMinutes())),
+  );
+  protected readonly policySummary = computed(() => {
+    const lock = Number(this.lockMinutes());
+    const logout = Number(this.logoutMinutes());
+    return lock === 0
+      ? `Jamais verrouillé · session fermée après ${logout} min sans activité`
+      : `Verrouillé après ${lock} min · session fermée après ${logout} min sans activité`;
+  });
+
   constructor() {
     void this.load();
+    void this.loadPolicy();
+  }
+
+  protected async savePolicy(): Promise<void> {
+    if (this.policyProblem()) {
+      return;
+    }
+    this.savingPolicy.set(true);
+    try {
+      const saved = await firstValueFrom(
+        this.http.put<SessionPolicy>(`${this.api}/pharmacy/session-policy`, {
+          lockAfterMinutes: Number(this.lockMinutes()),
+          logoutAfterMinutes: Number(this.logoutMinutes()),
+        }),
+      );
+      this.sessionPolicy.set(saved);
+      this.toasts.success(
+        'Délais enregistrés : appliqués ici tout de suite, sur les autres postes dans le quart d’heure',
+      );
+    } catch (error) {
+      this.toasts.error(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Délais refusés',
+      );
+    } finally {
+      this.savingPolicy.set(false);
+    }
+  }
+
+  private async loadPolicy(): Promise<void> {
+    try {
+      const policy = await firstValueFrom(
+        this.http.get<SessionPolicy>(`${this.api}/pharmacy/session-policy`),
+      );
+      this.sessionPolicy.set(policy);
+      this.lockMinutes.set(policy.lockAfterMinutes);
+      this.logoutMinutes.set(policy.logoutAfterMinutes);
+    } catch {
+      // Offline: the delays cached on this terminal are shown
+    }
   }
 
   protected toggle(role: Role, permission: string): void {

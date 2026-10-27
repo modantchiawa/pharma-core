@@ -18,8 +18,14 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { PaperFormat } from '../../core/api/models';
 import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Icon } from '../../shared/ui/icon';
+import { SkeletonRows } from '../../shared/ui/skeleton-rows';
+import { FourEyesThresholdsService } from '../../core/control/four-eyes.service';
+import { ToastService } from '../../core/ui/toast.service';
+import { isFourEyesRefusal, secondPersonNeeded } from '../../shared/four-eyes';
 import { Receipt, ReceiptData } from './receipt';
+import { SaleReturnDialog } from './sale-return-dialog';
 
 /** Detail of a recorded sale as the server returns it, enough to rebuild its ticket. */
 interface SaleDetail {
@@ -89,7 +95,17 @@ interface SessionSale {
  */
 @Component({
   selector: 'app-cash-session-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Receipt, Icon],
+  imports: [
+    FormsModule,
+    DatePipe,
+    MoneyPipe,
+    HasPermissionDirective,
+    Receipt,
+    Icon,
+    SaleReturnDialog,
+    EmptyState,
+    SkeletonRows,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (reprint(); as data) {
@@ -182,7 +198,11 @@ interface SessionSale {
 
       <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section class="min-w-0 space-y-5">
-          @if (session(); as s) {
+          @if (!loaded()) {
+            <div class="card">
+              <app-skeleton-rows [rows]="4" [figures]="2" />
+            </div>
+          } @else if (session(); as s) {
             <div class="card">
               <div class="card-header flex-wrap">
                 <div class="min-w-0">
@@ -392,8 +412,10 @@ interface SessionSale {
                 <h2 class="card-title">Ventes de la session</h2>
                 <span class="badge">{{ sales().length }}</span>
               </div>
-              @if (sales().length > 0) {
-                <div class="overflow-x-auto">
+              @if (salesLoading() && sales().length === 0) {
+                <app-skeleton-rows [rows]="5" [figures]="2" />
+              } @else if (sales().length > 0) {
+                <div class="content-in overflow-x-auto">
                   <table class="data-table whitespace-nowrap">
                     <thead>
                       <tr>
@@ -437,6 +459,16 @@ interface SessionSale {
                                 <button
                                   *appHasPermission="'SALE_CANCEL'"
                                   type="button"
+                                  class="btn btn-ghost btn-sm"
+                                  (click)="returning.set(sale)"
+                                  title="Retour partiel remboursé en espèces"
+                                >
+                                  <app-icon name="refresh" [size]="16" />
+                                  Retour
+                                </button>
+                                <button
+                                  *appHasPermission="'SALE_CANCEL'"
+                                  type="button"
                                   class="btn btn-ghost btn-sm text-danger"
                                   (click)="startCancel(sale)"
                                 >
@@ -454,10 +486,9 @@ interface SessionSale {
                   </table>
                 </div>
               } @else {
-                <div class="empty-state">
-                  <app-icon name="receipt" [size]="22" />
+                <app-empty-state illustration="receipt">
                   <p>Aucune vente</p>
-                </div>
+                </app-empty-state>
               }
             </div>
           } @else {
@@ -760,14 +791,14 @@ interface SessionSale {
                 <div class="alert alert-warning">
                   <app-icon name="lock" [size]="18" />
                   <span>
-                    Montant au-dessus du seuil ou caisse déjà clôturée : un superviseur doit saisir
-                    son e-mail et son code PIN.
+                    Montant au-dessus du seuil, caisse déjà clôturée ou stupéfiant : une seconde
+                    personne habilitée (titulaire ou adjoint) saisit son e-mail et son code PIN.
                   </span>
                 </div>
                 <input
                   class="input"
                   type="email"
-                  placeholder="E-mail du superviseur"
+                  placeholder="E-mail de la seconde personne"
                   [(ngModel)]="supervisorEmail"
                   name="supervisorEmail"
                 />
@@ -795,6 +826,16 @@ interface SessionSale {
         </div>
       }
     </div>
+
+    @if (returning(); as sale) {
+      <app-sale-return-dialog
+        [saleId]="sale.id"
+        [ticket]="sale.ticketNumber"
+        [terminalId]="terminal.terminalId"
+        (closed)="returning.set(null)"
+        (done)="afterReturn($event.refundCents)"
+      />
+    }
   `,
 })
 export class CashSessionPage {
@@ -813,15 +854,32 @@ export class CashSessionPage {
   protected readonly session = signal<CashSessionReport | null>(null);
   protected readonly recent = signal<CashSessionReport[]>([]);
   protected readonly sales = signal<SessionSale[]>([]);
+  /** Placeholders until the open session (or its absence) is known, then while its sales load. */
+  protected readonly loaded = signal(false);
+  protected readonly salesLoading = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly policy = signal<CashPolicy>({
     cashDifferenceThresholdCents: 0,
     cancelApprovalThresholdCents: 0,
   });
   protected readonly cancelling = signal<SessionSale | null>(null);
+  protected readonly returning = signal<SessionSale | null>(null);
+  private readonly fourEyes = inject(FourEyesThresholdsService);
+  private readonly toast = inject(ToastService);
+  /** The server asked for a second signature (narcotic on the ticket, four-eyes threshold). */
+  private readonly approvalForced = signal(false);
   protected readonly needsSupervisor = computed(() => {
     const sale = this.cancelling();
-    if (!sale || this.permissions.has('CASH_APPROVE')) {
+    if (!sale) {
+      return false;
+    }
+    if (
+      this.approvalForced() ||
+      secondPersonNeeded(this.fourEyes.thresholds(), 'CANCELLATION', sale.totalNetCents, false)
+    ) {
+      return true;
+    }
+    if (this.permissions.has('CASH_APPROVE')) {
       return false;
     }
     const threshold = this.policy().cancelApprovalThresholdCents;
@@ -1052,6 +1110,8 @@ export class CashSessionPage {
   }
 
   protected startCancel(sale: SessionSale): void {
+    void this.fourEyes.load();
+    this.approvalForced.set(false);
     this.cancelReason = '';
     this.supervisorEmail = '';
     this.supervisorPin = '';
@@ -1080,9 +1140,29 @@ export class CashSessionPage {
         await this.loadSales(current);
       }
     } catch (error) {
+      if (isFourEyesRefusal(error)) {
+        this.approvalForced.set(true);
+        this.supervisorPin = '';
+      }
       this.error.set(
         (error as { error?: { detail?: string } }).error?.detail ?? 'Annulation refusée',
       );
+    }
+  }
+
+  protected async afterReturn(refundCents: number): Promise<void> {
+    this.returning.set(null);
+    const refund = new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: this.currency.current(),
+    }).format(this.currency.toUnits(refundCents));
+    this.toast.success(`Retour enregistré : ${refund} remboursés en espèces`);
+    const current = this.session();
+    if (current) {
+      this.session.set(
+        await firstValueFrom(this.http.get<CashSessionReport>(`${this.api}/${current.sessionId}`)),
+      );
+      await this.loadSales(current);
     }
   }
 
@@ -1115,10 +1195,12 @@ export class CashSessionPage {
     } catch {
       this.session.set(null);
     }
+    this.loaded.set(true);
     await this.loadRecent();
   }
 
   private async loadSales(report: CashSessionReport): Promise<void> {
+    this.salesLoading.set(true);
     try {
       const to = report.closedAt ?? new Date().toISOString();
       const list = await firstValueFrom(
@@ -1129,6 +1211,8 @@ export class CashSessionPage {
       this.sales.set(list.filter((sale) => sale.terminalId === report.terminalId));
     } catch {
       this.sales.set([]);
+    } finally {
+      this.salesLoading.set(false);
     }
   }
 

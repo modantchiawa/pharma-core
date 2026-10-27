@@ -70,6 +70,11 @@ pharmacore:
     pin: ${DEMO_PIN:1234}
   invoicing:
     certification: ${INVOICE_CERTIFICATION:NONE}
+  # Abonnements : contact de l'éditeur affiché aux pharmacies pour le renouvellement
+  subscription:
+    vendor-name: ${PHARMACORE_VENDOR_NAME:PharmaCore · service abonnements}
+    vendor-email: ${PHARMACORE_VENDOR_EMAIL:abonnements@pharmacore.io}
+    vendor-phone: ${PHARMACORE_VENDOR_PHONE:}
   security:
     # Origines autorisées (motifs acceptés). Par défaut : tout port local, pour le développement.
     # En production, l'URL exacte du site (PUBLIC_URL sur le VPS).

@@ -27,7 +27,7 @@ public class TopologyGuardFilter extends OncePerRequestFilter {
     private static final List<String> HUB_MANAGED_PREFIXES = List.of(
             "/api/v1/sales", "/api/v1/pos", "/api/v1/inventory", "/api/v1/cash", "/api/v1/customers",
             "/api/v1/procurement", "/api/v1/accounting", "/api/v1/users", "/api/v1/roles",
-            "/api/v1/pharmacy", "/api/v1/hub");
+            "/api/v1/pharmacy", "/api/v1/hub", "/api/v1/control");
 
     private final NodeProperties node;
     private final JdbcClient jdbc;

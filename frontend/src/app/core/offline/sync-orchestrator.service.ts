@@ -67,6 +67,7 @@ export class SyncOrchestratorService {
           appVersion: this.env.appVersion,
           pendingSales: this.outbox.pendingCount(),
           lastSyncAt: this.outbox.lastSyncAt()?.toISOString() ?? null,
+          rejectedSales: this.outbox.rejectedCount(),
         }),
       );
     } catch {

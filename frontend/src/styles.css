@@ -47,6 +47,16 @@
   --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.05);
   --shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 1px 2px rgb(15 23 42 / 0.04);
   --shadow-lg: 0 12px 32px -8px rgb(15 23 42 / 0.18), 0 4px 8px -4px rgb(15 23 42 / 0.08);
+  --shadow-hover: 0 8px 20px -8px rgb(15 23 42 / 0.16), 0 2px 4px -2px rgb(15 23 42 / 0.06);
+
+  /* Motion (docs/UX.md « Mouvement et interactions »): three durations, four curves. */
+  --motion-short: 120ms;
+  --motion-medium: 200ms;
+  --motion-long: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
 
   --density: 1;
   --control-h: calc(2.5rem * var(--density));
@@ -87,6 +97,7 @@
   --shadow-sm: none;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 16px 40px -10px rgb(0 0 0 / 0.6);
+  --shadow-hover: 0 10px 24px -10px rgb(0 0 0 / 0.75);
   color-scheme: dark;
 
   /* Tailwind palette used by pages, inverted so that "bg-slate-50 text-slate-900" reads right */
@@ -342,6 +353,28 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
   }
+  /* Clickable cards (KPI filters, tiles): soft lift on hover, give on press. */
+  button.card,
+  a.card,
+  .card-interactive {
+    transition:
+      transform var(--motion-medium) var(--ease-emphasized),
+      box-shadow var(--motion-medium) var(--ease-standard),
+      border-color var(--motion-short) var(--ease-standard);
+  }
+  button.card:hover,
+  a.card:hover,
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-hover);
+  }
+  button.card:active,
+  a.card:active,
+  .card-interactive:active {
+    transform: scale(0.99);
+    transition-duration: 40ms;
+  }
   .card-header {
     display: flex;
     align-items: center;
@@ -372,15 +405,27 @@
     line-height: 1;
     white-space: nowrap;
     transition:
-      background-color 120ms ease,
-      border-color 120ms ease,
-      color 120ms ease,
-      box-shadow 120ms ease,
-      transform 60ms ease;
+      background-color var(--motion-short) var(--ease-standard),
+      border-color var(--motion-short) var(--ease-standard),
+      color var(--motion-short) var(--ease-standard),
+      box-shadow var(--motion-medium) var(--ease-standard),
+      transform var(--motion-short) var(--ease-emphasized);
     user-select: none;
   }
+  /* Press: the control gives under the finger and springs back along the curve. */
   .btn:active:not(:disabled) {
-    transform: translateY(1px);
+    transform: scale(0.98);
+    transition-duration: 40ms;
+  }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--surface),
+      0 0 0 4px var(--brand-ring);
+  }
+  :root[data-contrast='high'] .btn:focus-visible {
+    outline: 3px solid var(--text);
+    outline-offset: 2px;
   }
   .btn-primary {
     background: var(--brand-primary);
@@ -391,6 +436,9 @@
   }
   .btn-primary:hover:not(:disabled) {
     background: color-mix(in oklab, var(--brand-primary) 88%, black);
+    box-shadow:
+      0 4px 12px -4px color-mix(in oklab, var(--brand-primary) 55%, transparent),
+      inset 0 1px 0 rgb(255 255 255 / 0.12);
   }
   .btn-secondary {
     background: var(--surface);
@@ -635,8 +683,14 @@
     font-weight: 600;
     color: var(--text-muted);
     transition:
-      background-color 120ms ease,
-      color 120ms ease;
+      background-color var(--motion-medium) var(--ease-standard),
+      color var(--motion-short) var(--ease-standard),
+      box-shadow var(--motion-medium) var(--ease-standard),
+      transform var(--motion-short) var(--ease-emphasized);
+  }
+  .segmented > button:active,
+  .segmented > a:active {
+    transform: scale(0.97);
   }
   .segmented > [aria-selected='true'],
   .segmented > .active {
@@ -684,11 +738,63 @@
     background: var(--border);
   }
 
+  /* Shimmer: a light band slides over the placeholder (transform only, the bar is not repainted). */
   .skeleton {
+    position: relative;
+    overflow: hidden;
     border-radius: var(--radius-sm);
-    background: linear-gradient(90deg, var(--surface-3), var(--surface-2), var(--surface-3));
-    background-size: 200% 100%;
-    animation: skeleton 1.4s ease-in-out infinite;
+    background: var(--surface-3);
+  }
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--surface) 70%, transparent),
+      transparent
+    );
+    animation: shimmer 1.5s var(--ease-standard) infinite;
+  }
+  /* Cascade on first display: children rise one after the other (45 ms apart, capped at 8). */
+  .stagger > * {
+    animation: rise-in var(--motion-long) var(--ease-decelerate) backwards;
+  }
+  .stagger > :nth-child(2) {
+    animation-delay: 45ms;
+  }
+  .stagger > :nth-child(3) {
+    animation-delay: 90ms;
+  }
+  .stagger > :nth-child(4) {
+    animation-delay: 135ms;
+  }
+  .stagger > :nth-child(5) {
+    animation-delay: 180ms;
+  }
+  .stagger > :nth-child(6) {
+    animation-delay: 225ms;
+  }
+  .stagger > :nth-child(7) {
+    animation-delay: 270ms;
+  }
+  .stagger > :nth-child(n + 8) {
+    animation-delay: 315ms;
+  }
+  /* Content replacing its skeleton fades in where the placeholder was. */
+  .content-in {
+    animation: fade-in var(--motion-medium) var(--ease-standard) backwards;
+  }
+
+  /* List rows entering and leaving (animate.enter / animate.leave). */
+  .row-enter {
+    animation: row-in var(--motion-long) var(--ease-decelerate);
+  }
+  .row-leave {
+    pointer-events: none;
+    animation: row-out var(--motion-medium) var(--ease-accelerate) forwards;
   }
 }
 
@@ -711,12 +817,49 @@
   color: var(--brand-text);
 }
 
-@keyframes skeleton {
-  0% {
-    background-position: 200% 0;
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
   }
-  100% {
-    background-position: -200% 0;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+@keyframes ill-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes row-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
   }
 }
 
@@ -730,8 +873,70 @@
     transform: none;
   }
 }
+/* `backwards`, not `both`: a transform kept after the animation would make the page the containing
+   block of its fixed overlays (dialogs, side panels), which would then center on the whole page. */
 .animate-in {
-  animation: fade-in-up 180ms ease-out both;
+  animation: fade-in-up var(--motion-medium) var(--ease-decelerate) backwards;
+}
+
+/* Page transitions (router withViewTransitions, see app.config.ts): only the content column and
+   the top bar title move, the sidebar and the bar stay put. The names exist only while a
+   transition runs (class set from the router callback), never as a lasting style. */
+:root.page-transition main {
+  view-transition-name: page;
+}
+:root.page-transition .page-heading {
+  view-transition-name: page-title;
+}
+:root.page-transition::view-transition-old(root),
+:root.page-transition::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-group(page),
+::view-transition-group(page-title) {
+  animation-duration: var(--motion-medium);
+}
+::view-transition-old(page) {
+  animation: page-out 90ms var(--ease-standard) both;
+}
+::view-transition-new(page) {
+  animation: page-in var(--motion-medium) var(--ease-decelerate) 60ms both;
+}
+::view-transition-old(page-title) {
+  animation: title-out 90ms var(--ease-standard) both;
+}
+::view-transition-new(page-title) {
+  animation: title-in var(--motion-medium) var(--ease-decelerate) 60ms both;
+}
+@keyframes page-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes title-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes title-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* Theme switch: the new theme spreads in a circle from the button (clip-path animated by the shell). */
+:root.theme-transition::view-transition-old(root),
+:root.theme-transition::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -739,7 +944,13 @@
   ::before,
   ::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }
 

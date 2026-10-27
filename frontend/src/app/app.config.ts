@@ -9,16 +9,18 @@ import {
   provideAppInitializer,
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
-import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideRouter, withComponentInputBinding, withViewTransitions } from '@angular/router';
 import { provideServiceWorker } from '@angular/service-worker';
 import { routes } from './app.routes';
 import { authInterceptor } from './core/auth/auth.interceptor';
+import { licenseInterceptor } from './core/subscription/license.interceptor';
 import { AuthService } from './core/auth/auth.service';
 import { PermissionService } from './core/auth/permission.service';
 import { BrandingService } from './core/branding/branding.service';
 import { SyncOrchestratorService } from './core/offline/sync-orchestrator.service';
 import { NodeInfoService } from './core/api/node-info.service';
 import { DisplayPreferencesService } from './core/ui/display-preferences.service';
+import { onPageTransition } from './core/ui/page-transitions';
 
 // Dates and numbers in French ("mardi 13 octobre", "28,5 %"); amounts go through MoneyPipe.
 registerLocaleData(localeFr);
@@ -48,8 +50,15 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     { provide: LOCALE_ID, useValue: 'fr' },
-    provideRouter(routes, withComponentInputBinding()),
-    provideHttpClient(withInterceptors([authInterceptor])),
+    provideRouter(
+      routes,
+      withComponentInputBinding(),
+      withViewTransitions({
+        skipInitialTransition: true,
+        onViewTransitionCreated: onPageTransition,
+      }),
+    ),
+    provideHttpClient(withInterceptors([authInterceptor, licenseInterceptor])),
     provideAppInitializer(bootstrapSession),
     provideServiceWorker('sw.js', {
       enabled: !isDevMode(),

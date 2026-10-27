@@ -37,10 +37,26 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'pharmacies/:id',
+        title: 'Pharmacie · postes et comptes',
+        loadComponent: () =>
+          import('./features/platform/pharmacy-supervision-page').then(
+            (m) => m.PharmacySupervisionPage,
+          ),
+      },
+      {
         path: 'catalog-import',
         title: 'Référentiel · import',
         data: { platform: true },
         loadComponent: () => import('./features/admin/import-page').then((m) => m.ImportPage),
+      },
+      {
+        path: 'subscriptions',
+        title: 'Abonnements',
+        loadComponent: () =>
+          import('./features/platform/platform-subscriptions-page').then(
+            (m) => m.PlatformSubscriptionsPage,
+          ),
       },
     ],
   },
@@ -54,6 +70,13 @@ export const routes: Routes = [
         path: 'account/password',
         title: 'Mot de passe',
         loadComponent: () => import('./features/auth/password-page').then((m) => m.PasswordPage),
+      },
+      {
+        path: 'account/subscription',
+        title: 'Mon abonnement',
+        canActivate: [permissionGuard('SUBSCRIPTION_VIEW')],
+        loadComponent: () =>
+          import('./features/subscription/subscription-page').then((m) => m.SubscriptionPage),
       },
       {
         path: 'cash',
@@ -102,6 +125,11 @@ export const routes: Routes = [
         canActivate: [permissionGuard('DASHBOARD_VIEW', 'REPORT_VIEW')],
         loadComponent: () =>
           import('./features/dashboard/dashboard-page').then((m) => m.DashboardPage),
+      },
+      {
+        path: 'control',
+        loadChildren: () =>
+          import('./features/control/control.routes').then((m) => m.CONTROL_ROUTES),
       },
       {
         path: 'accounting',
@@ -192,6 +220,13 @@ export const routes: Routes = [
         title: 'Rôles et droits',
         canActivate: [permissionGuard('ROLE_MANAGE')],
         loadComponent: () => import('./features/admin/roles-page').then((m) => m.RolesPage),
+      },
+      {
+        path: 'inventory/products/:productId',
+        title: 'Fiche produit',
+        canActivate: [permissionGuard('STOCK_VIEW')],
+        loadComponent: () =>
+          import('./features/inventory/product-sheet-page').then((m) => m.ProductSheetPage),
       },
     ],
   },

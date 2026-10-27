@@ -1,6 +1,8 @@
 package com.pharmacore.inventory.application;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.pharmacore.control.application.FourEyesService;
+import com.pharmacore.control.domain.FourEyesPolicy;
 import com.pharmacore.inventory.persistence.StockCountEntity;
 import com.pharmacore.inventory.persistence.StockCountLineEntity;
 import com.pharmacore.inventory.persistence.StockCountLineRepository;
@@ -56,11 +58,13 @@ public class StockCountService {
     private final StockMovementRepository movements;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
+    private final FourEyesService fourEyes;
     private final Clock clock;
 
     public StockCountService(StockCountRepository counts, StockCountLineRepository lines, StockRepository stocks,
                              StorageLocationRepository locations, StockLotRepository lots,
-                             StockMovementRepository movements, AuditTrail audit, JdbcClient jdbc, Clock clock) {
+                             StockMovementRepository movements, AuditTrail audit, JdbcClient jdbc,
+                             FourEyesService fourEyes, Clock clock) {
         this.counts = counts;
         this.lines = lines;
         this.stocks = stocks;
@@ -69,6 +73,7 @@ public class StockCountService {
         this.movements = movements;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.fourEyes = fourEyes;
         this.clock = clock;
     }
 
@@ -88,6 +93,19 @@ public class StockCountService {
     /** @param locationId counts only the products stored at this location; {@code null} for the whole stock */
     @Transactional
     public CountView start(String label, UUID locationId) {
+        return start(label, locationId, null);
+    }
+
+    /** A count limited to a few products (the daily rotating micro-count), still blind. */
+    @Transactional
+    public CountView startForProducts(String label, List<UUID> productIds) {
+        if (productIds.isEmpty()) {
+            throw new BusinessRuleException("empty-count", "Aucun produit à inventorier");
+        }
+        return start(label, null, productIds);
+    }
+
+    private CountView start(String label, UUID locationId, List<UUID> productIds) {
         var user = TenantContext.requireTenantUser();
         Instant now = clock.instant();
         // The count keeps the location as it was named when counted
@@ -104,10 +122,13 @@ public class StockCountService {
                         FROM stock_lot l
                         JOIN stock s ON s.id = l.stock_id
                         WHERE s.tenant_id = :tenant AND l.quantity > 0
-                          AND (:location::uuid IS NULL OR s.location_id = :location::uuid)""")
+                          AND (:location::uuid IS NULL OR s.location_id = :location::uuid)
+                          AND (NOT :scoped OR s.product_id = ANY(:products))""")
                 .param("count", count.id())
                 .param("tenant", user.tenant().value())
                 .param("location", locationId)
+                .param("scoped", productIds != null)
+                .param("products", productIds == null ? new UUID[0] : productIds.toArray(UUID[]::new))
                 .update();
         if (frozen == 0) {
             throw new BusinessRuleException("empty-count", "Aucun lot en stock à inventorier pour ce périmètre");
@@ -140,12 +161,21 @@ public class StockCountService {
         return view(count, user);
     }
 
+    /**
+     * Applies the variances. A count that covers a narcotic, or whose variances exceed the
+     * four-eyes threshold in value, is signed by a second person (the "double signature" shown in
+     * the narcotics register).
+     */
     @Transactional
-    public CountView validate(UUID countId, String notes) {
+    public CountView validate(UUID countId, String notes, FourEyesService.Credentials approver) {
         var user = TenantContext.requireTenantUser();
         var count = requireOpen(countId);
         Instant now = clock.instant();
         List<StockCountLineEntity> countLines = lines.findByCount(countId);
+        boolean narcotic = countsNarcotic(countLines);
+        var approval = fourEyes.check(new FourEyesService.Request(FourEyesPolicy.Action.STOCK_COUNT, "STOCK_COUNT",
+                countId, absoluteVarianceValue(countLines), narcotic,
+                notes == null || notes.isBlank() ? "Validation de l'inventaire " + count.label() : notes, approver));
         List<StockCountLineEntity> adjusted = countLines.stream()
                 .filter(l -> l.counted() && l.variance() != 0)
                 .toList();
@@ -184,8 +214,33 @@ public class StockCountService {
                 "counted", Long.toString(countLines.stream().filter(StockCountLineEntity::counted).count()),
                 "adjustedLots", Integer.toString(adjusted.size()),
                 "varianceUnits", Integer.toString(varianceUnits),
-                "varianceValueCents", Long.toString(varianceValue)));
+                "varianceValueCents", Long.toString(varianceValue),
+                "narcotic", Boolean.toString(narcotic),
+                "approvedBy", approval.map(a -> a.approverId().toString()).orElse("")));
         return view(count, user);
+    }
+
+    private boolean countsNarcotic(List<StockCountLineEntity> countLines) {
+        List<UUID> productIds = countLines.stream().filter(StockCountLineEntity::counted)
+                .map(StockCountLineEntity::productId).distinct().toList();
+        return !productIds.isEmpty() && jdbc.sql(
+                        "SELECT count(*) > 0 FROM product WHERE id = ANY(:ids) AND listing = 'STUPEFIANT'")
+                .param("ids", productIds.toArray(UUID[]::new))
+                .query(Boolean.class).single();
+    }
+
+    /** Sum of the line variances at cost, losses and surpluses alike (they must not cancel out). */
+    private long absoluteVarianceValue(List<StockCountLineEntity> countLines) {
+        List<StockCountLineEntity> varying = countLines.stream().filter(l -> l.counted() && l.variance() != 0)
+                .toList();
+        if (varying.isEmpty()) {
+            return 0;
+        }
+        Map<UUID, Long> costByLot = lots.findByIdIn(varying.stream().map(StockCountLineEntity::lotId).toList())
+                .stream().collect(Collectors.toMap(StockLotEntity::id, StockLotEntity::unitCostCents));
+        return varying.stream()
+                .mapToLong(l -> Math.abs((long) l.variance() * costByLot.getOrDefault(l.lotId(), 0L)))
+                .sum();
     }
 
     @Transactional

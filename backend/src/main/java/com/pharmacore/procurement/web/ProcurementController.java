@@ -1,5 +1,6 @@
 package com.pharmacore.procurement.web;
 
+import com.pharmacore.control.application.ReceivingControlService;
 import com.pharmacore.procurement.application.ProcurementService;
 import com.pharmacore.procurement.application.ProcurementService.GenerationView;
 import com.pharmacore.procurement.application.ProcurementService.OrderLineCommand;
@@ -10,11 +11,14 @@ import com.pharmacore.procurement.application.ProcurementService.ProposalSheet;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptCommand;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptLineCommand;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptView;
+import com.pharmacore.procurement.application.ProcurementService.ReceivingView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierProductView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierView;
 import com.pharmacore.procurement.domain.OrderTracking;
 import com.pharmacore.procurement.persistence.PurchaseOrderEntity;
 import com.pharmacore.procurement.persistence.SupplierEntity;
+import com.pharmacore.shared.context.TenantContext;
+import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.tenant.application.BrandingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -52,10 +56,18 @@ class ProcurementController {
 
     private final ProcurementService procurement;
     private final BrandingService branding;
+    private final ReceivingControlService receivingControl;
 
-    ProcurementController(ProcurementService procurement, BrandingService branding) {
+    ProcurementController(ProcurementService procurement, BrandingService branding,
+                          ReceivingControlService receivingControl) {
         this.procurement = procurement;
         this.branding = branding;
+        this.receivingControl = receivingControl;
+    }
+
+    /** Blind receiving: quantities stay with the buyers, so a receiver cannot copy them. */
+    private OrderView visible(OrderView order) {
+        return receivingControl.hideQuantitiesFrom(TenantContext.actor()) ? order.withoutQuantities() : order;
     }
 
     @GetMapping("/suppliers")
@@ -106,7 +118,7 @@ class ProcurementController {
                            @RequestParam(required = false) PurchaseOrderEntity.Status status,
                            @RequestParam(required = false) UUID supplierId,
                            @RequestParam(defaultValue = "50") int limit) {
-        return procurement.orders(scope, status, supplierId, limit);
+        return procurement.orders(scope, status, supplierId, limit).stream().map(this::visible).toList();
     }
 
     @GetMapping("/orders/summary")
@@ -125,12 +137,23 @@ class ProcurementController {
     @GetMapping("/orders/{orderId}")
     @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
     OrderView order(@PathVariable UUID orderId) {
-        return procurement.order(orderId);
+        return visible(procurement.order(orderId));
+    }
+
+    /** The receiving form: what is awaited, without the quantities when the pharmacy receives blind. */
+    @GetMapping("/orders/{orderId}/receiving")
+    @PreAuthorize("hasAnyAuthority('PROCUREMENT_MANAGE', 'STOCK_RECEIVE')")
+    ReceivingView receiving(@PathVariable UUID orderId) {
+        return procurement.receiving(orderId);
     }
 
     @GetMapping(value = "/orders/{orderId}/text", produces = MediaType.TEXT_PLAIN_VALUE)
     @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
     String orderText(@PathVariable UUID orderId) {
+        if (receivingControl.hideQuantitiesFrom(TenantContext.actor())) {
+            throw new BusinessRuleException("blind-receiving",
+                    "Réception à l'aveugle : seuls les acheteurs voient le détail des quantités commandées");
+        }
         return procurement.orderAsText(orderId, branding.current().branding().displayName());
     }
 

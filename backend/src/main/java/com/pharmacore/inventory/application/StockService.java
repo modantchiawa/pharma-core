@@ -1,6 +1,10 @@
 package com.pharmacore.inventory.application;
 
+import com.pharmacore.inventory.domain.ProductImageRules;
+import com.pharmacore.control.application.FourEyesService;
+import com.pharmacore.control.domain.FourEyesPolicy;
 import com.pharmacore.inventory.domain.StorageLocationKind;
+import com.pharmacore.inventory.domain.WriteOffKind;
 import com.pharmacore.inventory.persistence.StockLotEntity;
 import com.pharmacore.inventory.persistence.StockLotRepository;
 import com.pharmacore.inventory.persistence.StockMovementEntity;
@@ -10,6 +14,7 @@ import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
+import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,11 +37,12 @@ public class StockService {
     private final TenantCalendar calendar;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
+    private final FourEyesService fourEyes;
     private final Clock clock;
 
     public StockService(StockLedger ledger, StockRepository stocks, StockLotRepository lots,
                         StockMovementRepository movements, TenantCalendar calendar, AuditTrail audit, JdbcClient jdbc,
-                        Clock clock) {
+                        FourEyesService fourEyes, Clock clock) {
         this.ledger = ledger;
         this.stocks = stocks;
         this.lots = lots;
@@ -44,7 +50,21 @@ public class StockService {
         this.calendar = calendar;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.fourEyes = fourEyes;
         this.clock = clock;
+    }
+
+    /** A declared exit; {@code approvedBy} is the second person when one signed. */
+    public record WriteOff(UUID id, UUID lotId, UUID productId, WriteOffKind kind, int quantity, long valueCents,
+                           UUID approvedBy) {
+    }
+
+    public record LotView(UUID lotId, String lotNumber, LocalDate expiryDate, int quantity, long unitCostCents) {
+    }
+
+    /** Lots of a product; {@code narcotic} and {@code inSafe} tell the dialog that four eyes apply. */
+    public record ProductLots(UUID productId, String designation, String cip13, boolean narcotic, boolean inSafe,
+                              List<LotView> lots) {
     }
 
     @Transactional
@@ -71,21 +91,116 @@ public class StockService {
         return lot.id();
     }
 
+    /**
+     * Corrects a lot to the quantity found on the shelf. Above the pharmacy's threshold (value at
+     * cost of the difference), or for a narcotic, a second person signs with their PIN.
+     */
     @Transactional
-    public void adjustLot(UUID lotId, int countedQuantity, String reason) {
+    public void adjustLot(UUID lotId, int countedQuantity, String reason, FourEyesService.Credentials approver) {
         var lot = lots.findById(lotId).orElseThrow(() -> new NotFoundException("Lot", lotId));
         var stock = stocks.lockById(lot.stockId()).orElseThrow(() -> new NotFoundException("Stock", lot.stockId()));
         int delta = countedQuantity - lot.quantity();
         if (delta == 0) {
             return;
         }
+        long value = (long) delta * lot.unitCostCents();
+        var approval = fourEyes.check(new FourEyesService.Request(FourEyesPolicy.Action.STOCK_ADJUSTMENT, "STOCK_LOT",
+                lotId, value, isNarcotic(stock.productId()), reason, approver));
         Instant now = clock.instant();
         lot.setQuantity(countedQuantity);
         stock.touch(now);
         movements.save(new StockMovementEntity(stock.id(), lotId, StockMovementEntity.Type.ADJUSTMENT, delta,
                 "ADJUSTMENT", lotId, now, TenantContext.requireTenantUser().userId()));
         audit.record("STOCK_ADJUSTED", "STOCK_LOT", lotId, Map.of(
-                "delta", Integer.toString(delta), "counted", Integer.toString(countedQuantity), "reason", reason));
+                "delta", Integer.toString(delta), "counted", Integer.toString(countedQuantity), "reason", reason,
+                "productId", stock.productId().toString(), "valueCents", Long.toString(value),
+                "approvedBy", approval.map(a -> a.approverId().toString()).orElse("")));
+    }
+
+    /**
+     * Declared exit of units that will never be sold: breakage, expiry noticed on the shelf, loss
+     * or theft. Valued at the lot's cost; four eyes above the threshold and for narcotics.
+     */
+    @Transactional
+    public WriteOff writeOff(UUID lotId, WriteOffKind kind, int quantity, String reason,
+                             FourEyesService.Credentials approver) {
+        var lot = lots.findById(lotId).orElseThrow(() -> new NotFoundException("Lot", lotId));
+        var stock = stocks.lockById(lot.stockId()).orElseThrow(() -> new NotFoundException("Stock", lot.stockId()));
+        if (quantity <= 0 || quantity > lot.quantity()) {
+            throw new BusinessRuleException("write-off-quantity",
+                    "Le lot " + lot.lotNumber() + " contient " + lot.quantity() + " unité(s)");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessRuleException("reason-required", "Le motif est obligatoire");
+        }
+        long value = (long) quantity * lot.unitCostCents();
+        UUID id = UUID.randomUUID();
+        var approval = fourEyes.check(new FourEyesService.Request(FourEyesPolicy.Action.STOCK_WRITE_OFF,
+                "STOCK_WRITE_OFF", id, value, isNarcotic(stock.productId()), reason, approver));
+        var user = TenantContext.requireTenantUser();
+        Instant now = clock.instant();
+        lot.setQuantity(lot.quantity() - quantity);
+        stock.touch(now);
+        jdbc.sql("""
+                        INSERT INTO stock_write_off (id, tenant_id, lot_id, product_id, kind, quantity, unit_cost_cents,
+                                                     value_cents, reason, recorded_by, approval_id, occurred_at)
+                        VALUES (:id, :tenant, :lot, :product, :kind, :quantity, :cost, :value, :reason, :by,
+                                :approval, :at)""")
+                .param("id", id)
+                .param("tenant", user.tenant().value())
+                .param("lot", lotId)
+                .param("product", stock.productId())
+                .param("kind", kind.name())
+                .param("quantity", quantity)
+                .param("cost", lot.unitCostCents())
+                .param("value", value)
+                .param("reason", reason.trim())
+                .param("by", user.userId())
+                .param("approval", approval.map(FourEyesService.Approval::id).orElse(null))
+                .param("at", java.sql.Timestamp.from(now))
+                .update();
+        movements.save(new StockMovementEntity(stock.id(), lotId, StockMovementEntity.Type.WRITE_OFF, -quantity,
+                "WRITE_OFF", id, now, user.userId()));
+        audit.record("STOCK_WRITTEN_OFF", "STOCK_LOT", lotId, Map.of(
+                "writeOffId", id.toString(), "kind", kind.name(), "quantity", Integer.toString(quantity),
+                "valueCents", Long.toString(value), "reason", reason.trim(), "productId", stock.productId().toString(),
+                "lotNumber", lot.lotNumber(),
+                "approvedBy", approval.map(a -> a.approverId().toString()).orElse("")));
+        return new WriteOff(id, lotId, stock.productId(), kind, quantity, value,
+                approval.map(FourEyesService.Approval::approverId).orElse(null));
+    }
+
+    /** Lots on the shelf of one product, for the exit and adjustment dialog. */
+    @Transactional(readOnly = true)
+    public ProductLots lotsOf(UUID productId) {
+        var product = jdbc.sql("""
+                        SELECT p.designation, p.cip13, p.listing, loc.kind AS location_kind
+                        FROM product p
+                        LEFT JOIN stock s ON s.product_id = p.id
+                        LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        WHERE p.id = :product""")
+                .param("product", productId)
+                .query((rs, rowNum) -> new ProductLots(productId, rs.getString("designation"), rs.getString("cip13"),
+                        "STUPEFIANT".equals(rs.getString("listing")), "SAFE".equals(rs.getString("location_kind")),
+                        List.of()))
+                .optional()
+                .orElseThrow(() -> new NotFoundException("Product", productId));
+        List<LotView> lotViews = jdbc.sql("""
+                        SELECT l.id, l.lot_number, l.expiry_date, l.quantity, l.unit_cost_cents
+                        FROM stock_lot l JOIN stock s ON s.id = l.stock_id
+                        WHERE s.product_id = :product AND l.quantity > 0
+                        ORDER BY l.expiry_date, l.lot_number""")
+                .param("product", productId)
+                .query((rs, rowNum) -> new LotView(rs.getObject("id", UUID.class), rs.getString("lot_number"),
+                        rs.getDate("expiry_date").toLocalDate(), rs.getInt("quantity"), rs.getLong("unit_cost_cents")))
+                .list();
+        return new ProductLots(productId, product.designation(), product.cip13(), product.narcotic(),
+                product.inSafe(), lotViews);
+    }
+
+    private boolean isNarcotic(UUID productId) {
+        return jdbc.sql("SELECT listing = 'STUPEFIANT' FROM product WHERE id = :id")
+                .param("id", productId).query(Boolean.class).optional().orElse(false);
     }
 
     /** Price update at goods receipt (the wholesaler's invoice carries the new public price). */
@@ -153,10 +268,11 @@ public class StockService {
                                coalesce(l.sellable, 0) AS sellable,
                                l.next_expiry,
                                s.location_id, loc.code AS location_code, loc.name AS location_name,
-                               loc.kind AS location_kind, s.location_detail
+                               loc.kind AS location_kind, s.location_detail, pi.sha256 AS image_sha256
                         FROM stock s
                         JOIN product p ON p.id = s.product_id
                         LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        LEFT JOIN product_image pi ON pi.tenant_id = s.tenant_id AND pi.product_id = s.product_id
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) AS on_hand,
                                    sum(quantity) FILTER (WHERE expiry_date > :today) AS sellable,
@@ -204,9 +320,86 @@ public class StockService {
                             threshold,
                             rs.getInt("reorder_quantity"),
                             nextExpiry == null ? null : nextExpiry.toLocalDate(),
-                            sellable - reserved <= threshold);
+                            sellable - reserved <= threshold,
+                            ProductImageRules.version(rs.getString("image_sha256")));
                 })
                 .list();
+    }
+
+    /**
+     * Everything the product sheet shows in one place: catalog data, this pharmacy's price,
+     * quantities, placement, lots on the shelf and photo. A product never received has no stock
+     * row yet: its quantities are zero and its price is the public one.
+     */
+    @Transactional(readOnly = true)
+    public ProductSheet productSheet(UUID productId) {
+        UUID tenant = TenantContext.requireTenant().value();
+        LocalDate today = calendar.today();
+        List<SheetLot> lots = jdbc.sql("""
+                        SELECT l.id, l.lot_number, l.expiry_date, l.quantity
+                        FROM stock_lot l JOIN stock s ON s.id = l.stock_id
+                        WHERE s.tenant_id = :tenant AND s.product_id = :product AND l.quantity > 0
+                        ORDER BY l.expiry_date, l.lot_number""")
+                .param("tenant", tenant)
+                .param("product", productId)
+                .query((rs, rowNum) -> {
+                    LocalDate expiry = rs.getDate("expiry_date").toLocalDate();
+                    return new SheetLot(rs.getObject("id", UUID.class), rs.getString("lot_number"), expiry,
+                            rs.getInt("quantity"), !expiry.isAfter(today));
+                })
+                .list();
+        int onHand = lots.stream().mapToInt(SheetLot::quantity).sum();
+        int sellable = lots.stream().filter(lot -> !lot.expired()).mapToInt(SheetLot::quantity).sum();
+        return jdbc.sql("""
+                        SELECT p.id, p.cip13, p.ean13, p.designation, p.dci, p.pharmaceutical_form, p.dosage,
+                               p.laboratory, p.listing, p.vat_rate, p.public_price_cents, p.active,
+                               s.id AS stock_id, s.selling_price_cents, s.reorder_threshold, s.reorder_quantity,
+                               s.reserved_quantity, s.location_id, loc.code AS location_code,
+                               loc.name AS location_name, loc.kind AS location_kind, s.location_detail,
+                               pi.sha256 AS image_sha256, pi.size_bytes AS image_size, pi.updated_at AS image_updated_at
+                        FROM product p
+                        LEFT JOIN stock s ON s.product_id = p.id AND s.tenant_id = :tenant
+                        LEFT JOIN storage_location loc ON loc.id = s.location_id
+                        LEFT JOIN product_image pi ON pi.product_id = p.id AND pi.tenant_id = :tenant
+                        WHERE p.id = :product""")
+                .param("tenant", tenant)
+                .param("product", productId)
+                .query((rs, rowNum) -> {
+                    UUID locationId = rs.getObject("location_id", UUID.class);
+                    int reserved = rs.getInt("reserved_quantity");
+                    String sha256 = rs.getString("image_sha256");
+                    java.sql.Timestamp imageUpdatedAt = rs.getTimestamp("image_updated_at");
+                    return new ProductSheet(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("cip13"),
+                            rs.getString("ean13"),
+                            rs.getString("designation"),
+                            rs.getString("dci"),
+                            rs.getString("pharmaceutical_form"),
+                            rs.getString("dosage"),
+                            rs.getString("laboratory"),
+                            rs.getString("listing"),
+                            rs.getBigDecimal("vat_rate"),
+                            (Long) rs.getObject("public_price_cents"),
+                            (Long) rs.getObject("selling_price_cents"),
+                            rs.getBoolean("active"),
+                            rs.getObject("stock_id") != null,
+                            onHand,
+                            Math.max(sellable - reserved, 0),
+                            reserved,
+                            rs.getInt("reorder_threshold"),
+                            rs.getInt("reorder_quantity"),
+                            locationId == null ? null : new StockLocation(locationId, rs.getString("location_code"),
+                                    rs.getString("location_name"),
+                                    StorageLocationKind.valueOf(rs.getString("location_kind")),
+                                    rs.getString("location_detail")),
+                            ProductImageRules.version(sha256),
+                            sha256 == null ? null : (Integer) rs.getObject("image_size"),
+                            sha256 == null ? null : imageUpdatedAt.toInstant(),
+                            lots);
+                })
+                .optional()
+                .orElseThrow(() -> new NotFoundException("Product", productId));
     }
 
     /** Lots still on the shelf that expire within the given horizon (or are already expired). */
@@ -214,10 +407,12 @@ public class StockService {
     public List<ExpiryAlert> expiryAlerts(int withinDays) {
         LocalDate today = calendar.today();
         return jdbc.sql("""
-                        SELECT l.id, p.id AS product_id, p.cip13, p.designation, l.lot_number, l.expiry_date, l.quantity
+                        SELECT l.id, p.id AS product_id, p.cip13, p.designation, l.lot_number, l.expiry_date, l.quantity,
+                               pi.sha256 AS image_sha256
                         FROM stock_lot l
                         JOIN stock s ON s.id = l.stock_id
                         JOIN product p ON p.id = s.product_id
+                        LEFT JOIN product_image pi ON pi.tenant_id = s.tenant_id AND pi.product_id = s.product_id
                         WHERE l.quantity > 0 AND l.expiry_date <= :horizon
                         ORDER BY l.expiry_date, p.designation""")
                 .param("horizon", Date.valueOf(today.plusDays(Math.clamp(withinDays, 0, 730))))
@@ -231,7 +426,8 @@ public class StockService {
                             rs.getString("lot_number"),
                             expiry,
                             rs.getInt("quantity"),
-                            !expiry.isAfter(today));
+                            !expiry.isAfter(today),
+                            ProductImageRules.version(rs.getString("image_sha256")));
                 })
                 .list();
     }
@@ -257,14 +453,31 @@ public class StockService {
     public record StockLocation(UUID id, String code, String name, StorageLocationKind kind, String detail) {
     }
 
+    /** @param imageVersion version of the product photo for the thumbnail URL, {@code null} without photo */
     public record StockOverview(UUID productId, String cip13, String designation, StockLocation location,
                                 Long sellingPriceCents, Long publicPriceCents, int onHand, int available,
                                 int reserved, int shortfall, int reorderThreshold, int reorderQuantity,
-                                LocalDate nextExpiry, boolean belowThreshold) {
+                                LocalDate nextExpiry, boolean belowThreshold, String imageVersion) {
+    }
+
+    /**
+     * @param stocked whether the pharmacy ever received the product
+     * @param imageVersion version of the photo for its URL, {@code null} without photo
+     */
+    public record ProductSheet(UUID productId, String cip13, String ean13, String designation, String dci,
+                               String pharmaceuticalForm, String dosage, String laboratory, String listing,
+                               BigDecimal vatRate, Long publicPriceCents, Long sellingPriceCents,
+                               boolean active, boolean stocked, int onHand, int available, int reserved,
+                               int reorderThreshold, int reorderQuantity, StockLocation location,
+                               String imageVersion, Integer imageSizeBytes, Instant imageUpdatedAt,
+                               List<SheetLot> lots) {
+    }
+
+    public record SheetLot(UUID lotId, String lotNumber, LocalDate expiryDate, int quantity, boolean expired) {
     }
 
     public record ExpiryAlert(UUID lotId, UUID productId, String cip13, String designation, String lotNumber,
-                              LocalDate expiryDate, int quantity, boolean expired) {
+                              LocalDate expiryDate, int quantity, boolean expired, String imageVersion) {
     }
 
     public record ReorderSuggestion(UUID productId, String cip13, String designation, int available,

@@ -30,7 +30,11 @@ public class StockMovementEntity {
         /** Physical count variance applied at validation (signed). */
         COUNT_ADJUSTMENT,
         /** Expired lot taken off the shelf by the daily job (negative). */
-        EXPIRY_WRITE_OFF
+        EXPIRY_WRITE_OFF,
+        /** Breakage, expiry, loss or theft declared by hand (negative, see {@code stock_write_off}). */
+        WRITE_OFF,
+        /** Units brought back by a customer on a partial return (positive). */
+        SALE_RETURN
     }
 
     @Id

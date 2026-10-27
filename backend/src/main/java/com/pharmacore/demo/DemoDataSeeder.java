@@ -17,6 +17,7 @@ import com.pharmacore.insurance.application.InsurerService;
 import com.pharmacore.insurance.domain.InsurerKind;
 import com.pharmacore.insurance.persistence.InsurancePolicyEntity;
 import com.pharmacore.insurance.persistence.InsurerEntity;
+import com.pharmacore.inventory.application.ProductImageService;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.StorageLocationService;
 import com.pharmacore.network.application.NetworkDirectoryService;
@@ -34,6 +35,7 @@ import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.context.TenantId;
 import com.pharmacore.shared.runtime.NodeProperties;
 import com.pharmacore.shared.security.TenantUserLoader;
+import com.pharmacore.subscription.application.PlatformSubscriptionService;
 import com.pharmacore.tenant.application.TenantProvisioningService;
 import com.pharmacore.tenant.persistence.PharmacyConfigEntity.PublicSharing;
 import java.math.BigDecimal;
@@ -142,6 +144,9 @@ class DemoDataSeeder {
     private final GuardScheduleService guards;
     private final SaleRecordingService sales;
     private final CashSessionService cashSessions;
+    private final PlatformSubscriptionService subscriptions;
+    private final ProductImageService productImages;
+    private final DemoInternalControl internalControl;
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
     private final Clock clock;
@@ -152,7 +157,12 @@ class DemoDataSeeder {
                    CustomerService customers, ProcurementService procurement, InsurerService insurers,
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
-                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations) {
+                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations,
+                   PlatformSubscriptionService subscriptions, ProductImageService productImages,
+                   DemoInternalControl internalControl) {
+        this.subscriptions = subscriptions;
+        this.productImages = productImages;
+        this.internalControl = internalControl;
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -210,6 +220,8 @@ class DemoDataSeeder {
             seedPharmacy(PHARMACIES.get(i), new TenantId(tenantIds.get(i)), products, i);
         }
         seedNetwork(platform, tenantIds);
+        TenantContext.run(platform, () -> DemoSubscriptions.seed(provisioning, subscriptions, jdbc, tx, clock,
+                tenantIds.getFirst(), tenantIds.get(1)));
         log.info("Démonstration chargée : {} pharmacies, {} produits, comptes {} / mot de passe {} / PIN {}",
                 PHARMACIES.size(), products.size(), PHARMACIES.stream().map(Pharmacy::ownerEmail).toList(),
                 demo.accountPassword(), demo.pin());
@@ -311,6 +323,7 @@ class DemoDataSeeder {
                 stock.configure(product.id(), product.publicPriceCents(), 10, 40);
             }
             DemoStorageLocations.seed(locations, products, DRUGS);
+            DemoProductImages.seed(productImages, products);
 
             // customers, one with a credit account and an insurance policy
             var hadiza = customers.create(new CustomerEntity.Details("Mme Hadiza Moussa", "+22790" + (300000 + index),
@@ -387,7 +400,14 @@ class DemoDataSeeder {
                     List.of(new SaleDraft.Payment(PaymentMethod.CREDIT, first.publicPriceCents(), null, null, null, null)),
                     null));
             seedOrders(tenant, laborex, copharni, products, today);
+            if (index == 0) {
+                internalControl.seed(tenant, pharmacy.ownerEmail(), pharmacy.cashierEmail(), products, today);
+            }
             cashSessions.openSession(TERMINAL, 50_000);
+            tx.executeWithoutResult(status -> DemoTerminals.seed(jdbc, tenant, pharmacy.slug(), clock.instant()));
+            // the staff opened DEMO-1: every account shows a last login in the console
+            auth.login(pharmacy.slug(), pharmacy.cashierEmail(), demo.accountPassword(), TERMINAL);
+            auth.login(pharmacy.slug(), pharmacy.ownerEmail(), demo.accountPassword(), TERMINAL);
             if (rejected > 0) {
                 log.warn("Démonstration : {} vente(s) de {} refusée(s) par les règles métier", rejected, pharmacy.slug());
             }

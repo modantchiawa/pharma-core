@@ -7,6 +7,7 @@ import { BrandingService } from '../../core/branding/branding.service';
 import { SyncOrchestratorService } from '../../core/offline/sync-orchestrator.service';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { APP_ENVIRONMENT } from '../../core/config';
+import { closedSessionNotice } from '../../core/session/idle';
 import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
 
@@ -126,6 +127,13 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
                 : 'Identifiez-vous pour ouvrir votre session de travail.'
             }}
           </p>
+
+          @if (closedNotice; as notice) {
+            <p class="alert alert-info mt-6" role="status" data-testid="session-closed">
+              <app-icon name="timer" [size]="18" />
+              <span>{{ notice }}</span>
+            </p>
+          }
 
           @if (mode() === 'pin' && knownUsers().length > 0) {
             <form class="mt-8 space-y-5" (ngSubmit)="pinLogin()">
@@ -368,6 +376,11 @@ export class LoginPage {
   protected pin = '';
   private readonly returnUrl = computed(
     () => this.route.snapshot.queryParamMap.get('returnUrl') ?? '/',
+  );
+  /** Why the previous session ended on its own (inactivity, wrong codes on the lock screen). */
+  protected readonly closedNotice = closedSessionNotice(
+    this.route.snapshot.queryParamMap.get('session'),
+    Number(this.route.snapshot.queryParamMap.get('minutes')) || null,
   );
 
   constructor() {

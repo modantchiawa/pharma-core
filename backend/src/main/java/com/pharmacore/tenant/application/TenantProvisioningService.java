@@ -17,6 +17,7 @@ import com.pharmacore.tenant.persistence.TenantEntity;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import com.pharmacore.tenant.persistence.TenantStatus;
 import com.pharmacore.tenant.persistence.TenantTopology;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import java.time.Clock;
 import java.time.Instant;
@@ -47,12 +48,14 @@ public class TenantProvisioningService {
     private final TransactionTemplate tx;
     private final Clock clock;
     private final JdbcClient jdbc;
+    private final ApplicationEventPublisher events;
 
     public TenantProvisioningService(TenantRepository tenants, PharmacyConfigRepository configs,
                                      RoleManagementService roles, UserManagementService users, AuditTrail audit,
                                      TenantUserLoader actorCache, PlatformTransactionManager transactionManager,
-                                     JdbcClient jdbc, Clock clock) {
+                                     JdbcClient jdbc, Clock clock, ApplicationEventPublisher events) {
         this.jdbc = jdbc;
+        this.events = events;
         this.tenants = tenants;
         this.configs = configs;
         this.roles = roles;
@@ -100,26 +103,29 @@ public class TenantProvisioningService {
             return registration.temporaryPassword();
         }));
 
-        return tx.execute(status -> {
+        var summary = tx.execute(status -> {
             var entity = tenants.findById(tenantId).orElseThrow(() -> new NotFoundException("Tenant", tenantId));
             if (entity.status() == TenantStatus.PROVISIONING) {
-                entity.changeStatus(TenantStatus.ACTIVE, clock.instant());
+                entity.changeStatus(TenantStatus.ACTIVE, null, clock.instant());
                 audit.record("TENANT_ACTIVATED", "TENANT", tenantId, Map.of());
             }
             return TenantSummary.of(entity, temporaryPassword);
         });
+        events.publishEvent(new TenantSubscriptionChanged(tenantId));
+        return summary;
     }
 
     public TenantSummary changeStatus(UUID tenantId, TenantStatus newStatus, String reason) {
         var summary = tx.execute(status -> {
             var entity = tenants.findById(tenantId).orElseThrow(() -> new NotFoundException("Tenant", tenantId));
             var previous = entity.status();
-            entity.changeStatus(newStatus, clock.instant());
+            entity.changeStatus(newStatus, reason, clock.instant());
             audit.record("TENANT_STATUS_CHANGED", "TENANT", tenantId, Map.of(
                     "from", previous.name(), "to", newStatus.name(), "reason", reason));
             return TenantSummary.of(entity);
         });
         actorCache.evictAll();
+        events.publishEvent(new TenantSubscriptionChanged(tenantId));
         return summary;
     }
 
@@ -132,6 +138,7 @@ public class TenantProvisioningService {
             return TenantSummary.of(entity);
         });
         actorCache.evictAll();
+        events.publishEvent(new TenantSubscriptionChanged(tenantId));
         return summary;
     }
 

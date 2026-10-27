@@ -26,6 +26,21 @@
       }
     }
   ],
+  "dataGroups": [
+    {
+      "name": "product-images",
+      "urls": [
+        "/api/v1/inventory/products/*/image"
+      ],
+      "version": 1,
+      "cacheConfig": {
+        "strategy": "freshness",
+        "timeout": "3s",
+        "maxSize": 3000,
+        "maxAge": "365d"
+      }
+    }
+  ],
   "navigationUrls": [
     "/**",
     "!/**/*.*",

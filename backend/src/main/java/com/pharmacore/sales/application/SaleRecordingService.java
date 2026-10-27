@@ -211,6 +211,8 @@ public class SaleRecordingService {
                 "terminal", draft.terminalId(),
                 "ticket", draft.ticketNumber(),
                 "netCents", Long.toString(draft.netCents()),
+                "occurredAt", draft.occurredAt().toString(),
+                "cashierId", seller.userId().toString(),
                 "anomalies", anomalies.stream().map(Enum::name).sorted().collect(Collectors.joining(",")),
                 "ordonnancier", String.valueOf(ordonnancier)));
         return new SaleOutcome.Accepted(draft.clientSaleId(), sale.id(), ordonnancier, anomalies);

@@ -3,7 +3,9 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  ViewContainerRef,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -17,9 +19,15 @@ import { PermissionService } from './core/auth/permission.service';
 import { BrandingService } from './core/branding/branding.service';
 import { ConnectivityService } from './core/offline/connectivity.service';
 import { SaleOutboxService } from './core/offline/sale-outbox.service';
+import { IdleService } from './core/session/idle.service';
+import { LockScreen } from './core/session/lock-screen';
+import { WhileUnlocked } from './core/session/while-unlocked';
+import { LicenseBanner } from './core/subscription/license-banner';
+import { LicenseStateService } from './core/subscription/license-state.service';
 import { Density, DisplayPreferencesService } from './core/ui/display-preferences.service';
 import { Icon } from './shared/ui/icon';
 import { IconName } from './shared/ui/icons';
+import { DURATION, EASING, prefersReducedMotion } from './shared/ui/motion';
 
 interface NavItem {
   path: string;
@@ -111,6 +119,13 @@ const PHARMACY_NAV: NavGroup[] = [
         icon: 'accounting',
         permissions: ['ACCOUNTING_VIEW'],
       },
+      {
+        path: '/control',
+        label: 'Contrôle interne',
+        icon: 'activity',
+        permissions: ['CONTROL_VIEW'],
+      },
+      { path: '/control/alerts', label: 'Alertes', icon: 'bell', permissions: ['CONTROL_VIEW'] },
     ],
   },
   {
@@ -158,6 +173,12 @@ const PHARMACY_NAV: NavGroup[] = [
         permissions: ['PRINTER_MANAGE'],
       },
       { path: '/admin/hub', label: 'Serveur local', icon: 'server', permissions: ['HUB_ADMIN'] },
+      {
+        path: '/control/settings',
+        label: 'Règles de contrôle',
+        icon: 'settings',
+        permissions: ['CONTROL_SETTINGS'],
+      },
     ],
   },
 ];
@@ -168,6 +189,7 @@ const PLATFORM_NAV: NavGroup[] = [
     items: [
       { path: '/platform', label: 'Supervision', icon: 'building', permissions: [] },
       { path: '/platform/catalog-import', label: 'Référentiel', icon: 'catalog', permissions: [] },
+      { path: '/platform/subscriptions', label: 'Abonnements', icon: 'license', permissions: [] },
     ],
   },
 ];
@@ -184,14 +206,23 @@ interface PaletteEntry {
 /** Application frame: grouped side navigation, top bar with status, command palette. */
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, FormsModule, Icon],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    FormsModule,
+    Icon,
+    LicenseBanner,
+    LockScreen,
+    WhileUnlocked,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(document:keydown)': 'onKeydown($event)',
     '(document:click)': 'onDocumentClick($event)',
   },
   template: `
-    <div class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink">
+    <div *appWhileUnlocked class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink">
       <!-- Mobile backdrop -->
       @if (mobileOpen()) {
         <div
@@ -345,7 +376,7 @@ interface PaletteEntry {
           >
             <app-icon name="menu" />
           </button>
-          <div class="min-w-0">
+          <div class="page-heading min-w-0">
             @if (current(); as page) {
               <p class="text-xs font-medium text-subtle">{{ page.group }}</p>
               <h1 class="truncate text-base font-semibold leading-tight">{{ page.label }}</h1>
@@ -376,10 +407,24 @@ interface PaletteEntry {
               </span>
             }
 
+            @if (!auth.isPlatformOperator()) {
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon"
+                (click)="idle.lockNow()"
+                [attr.title]="'Verrouiller le poste (' + (isMac ? '⌘' : 'Ctrl') + ' L)'"
+                aria-label="Verrouiller le poste"
+                data-testid="lock-now"
+              >
+                <app-icon name="lock" />
+              </button>
+            }
+            <ng-container #alertsBell />
+
             <button
               type="button"
               class="btn btn-ghost btn-icon"
-              (click)="toggleTheme()"
+              (click)="toggleTheme($event)"
               [attr.title]="
                 display.preferences().darkMode ? 'Mode clair' : 'Mode sombre (garde de nuit)'
               "
@@ -444,6 +489,15 @@ interface PaletteEntry {
                       (change)="toggle('darkMode', $event)"
                     />
                   </label>
+                  <label class="flex items-center justify-between gap-3 py-1.5 text-sm">
+                    <span>Sons discrets <span class="text-subtle">(caisse)</span></span>
+                    <input
+                      type="checkbox"
+                      class="toggle"
+                      [checked]="display.preferences().sounds"
+                      (change)="toggle('sounds', $event)"
+                    />
+                  </label>
                 </div>
               }
             </div>
@@ -477,7 +531,22 @@ interface PaletteEntry {
                   <div class="divider my-1"></div>
                   @if (!auth.isPlatformOperator()) {
                     <a routerLink="/account/password" class="menu-item" (click)="menu.set(null)">
-                      <app-icon name="lock" [size]="16" /> Mot de passe et PIN
+                      <app-icon name="key" [size]="16" /> Mot de passe et PIN
+                    </a>
+                    <button type="button" class="menu-item w-full" (click)="lock()">
+                      <app-icon name="lock" [size]="16" /> Verrouiller le poste
+                      <span class="kbd ml-auto whitespace-nowrap"
+                        >{{ isMac ? '⌘' : 'Ctrl' }} L</span
+                      >
+                    </button>
+                  }
+                  @if (canSeeSubscription()) {
+                    <a
+                      routerLink="/account/subscription"
+                      class="menu-item"
+                      (click)="menu.set(null)"
+                    >
+                      <app-icon name="license" [size]="16" /> Mon abonnement
                     </a>
                   }
                   @if (canEditBranding()) {
@@ -520,17 +589,22 @@ interface PaletteEntry {
           </div>
         }
 
+        @if (license.notice(); as notice) {
+          <app-license-banner [state]="notice" [link]="canSeeSubscription()" />
+        }
+
         <main class="min-h-0 flex-1 overflow-auto"><router-outlet /></main>
       </div>
 
       <!-- Command palette -->
       @if (paletteOpen()) {
         <div
-          class="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 p-4 pt-[12vh] backdrop-blur-sm print:hidden"
+          class="palette-backdrop fixed inset-0 z-50 flex items-start justify-center bg-slate-950/40 p-4 pt-[12vh] backdrop-blur-sm print:hidden"
+          [class.palette-leave]="paletteClosing()"
           (click)="closePalette()"
         >
           <div
-            class="w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-lg)] animate-in"
+            class="palette-panel w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-lg)]"
             (click)="$event.stopPropagation()"
             role="dialog"
             aria-label="Palette de commandes"
@@ -541,26 +615,52 @@ interface PaletteEntry {
                 #paletteInput
                 class="h-14 flex-1 !border-0 bg-transparent text-base !shadow-none outline-none"
                 placeholder="Aller à une page ou lancer une action…"
+                role="combobox"
+                aria-controls="palette-results"
+                aria-expanded="true"
+                [attr.aria-activedescendant]="results().length ? 'palette-' + highlighted() : null"
                 [ngModel]="query()"
                 (ngModelChange)="query.set($event); highlighted.set(0)"
                 (keydown)="onPaletteKey($event)"
               />
               <span class="kbd">Échap</span>
             </div>
-            <ul class="max-h-[50vh] overflow-y-auto p-2" role="listbox">
-              @for (entry of results(); track entry.label; let i = $index) {
+            <ul
+              #paletteList
+              id="palette-results"
+              class="palette-list relative max-h-[50vh] overflow-y-auto p-2"
+              role="listbox"
+              aria-label="Résultats"
+            >
+              @if (results().length > 0) {
                 <li
-                  role="option"
-                  [attr.aria-selected]="i === highlighted()"
-                  class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm"
-                  [class.bg-brand-soft]="i === highlighted()"
-                  [class.text-brand]="i === highlighted()"
-                  (mouseenter)="highlighted.set(i)"
-                  (click)="run(entry)"
-                >
-                  <app-icon [name]="entry.icon" [size]="18" />
-                  <span class="flex-1 font-medium">{{ entry.label }}</span>
-                  <span class="text-xs text-subtle">{{ entry.group }}</span>
+                  class="palette-highlight"
+                  aria-hidden="true"
+                  [style.transform]="'translateY(' + highlightBox().top + 'px)'"
+                  [style.height.px]="highlightBox().height"
+                ></li>
+              }
+              @for (section of sections(); track section.group) {
+                <li role="group" [attr.aria-labelledby]="'palette-group-' + $index">
+                  <p class="palette-group" [id]="'palette-group-' + $index">{{ section.group }}</p>
+                  <ul>
+                    @for (item of section.items; track item.entry.label) {
+                      <li
+                        role="option"
+                        class="palette-option"
+                        [id]="'palette-' + item.index"
+                        [attr.aria-selected]="item.index === highlighted()"
+                        (mouseenter)="highlighted.set(item.index)"
+                        (click)="run(item.entry)"
+                      >
+                        <app-icon [name]="item.entry.icon" [size]="18" />
+                        <span class="flex-1 font-medium">{{ item.entry.label }}</span>
+                        @if (item.index === highlighted()) {
+                          <app-icon name="arrowRight" [size]="14" class="palette-go" />
+                        }
+                      </li>
+                    }
+                  </ul>
                 </li>
               } @empty {
                 <li class="empty-state">
@@ -569,10 +669,21 @@ interface PaletteEntry {
                 </li>
               }
             </ul>
+            <p class="palette-foot" aria-hidden="true">
+              <span><span class="kbd">↑</span><span class="kbd">↓</span> naviguer</span>
+              <span><span class="kbd">Entrée</span> ouvrir</span>
+              <span class="ml-auto">{{ results().length }} résultat(s)</span>
+            </p>
           </div>
         </div>
       }
     </div>
+    <!-- Loaded as soon as the browser is idle: ready before any lock, offline included -->
+    @if (!auth.isPlatformOperator()) {
+      @defer (on idle) {
+        <app-lock-screen />
+      }
+    }
   `,
   styles: `
     :host {
@@ -589,12 +700,16 @@ interface PaletteEntry {
       font-weight: 500;
       color: var(--text-muted);
       transition:
-        background-color 120ms ease,
-        color 120ms ease;
+        background-color var(--motion-short) var(--ease-standard),
+        color var(--motion-short) var(--ease-standard),
+        transform var(--motion-short) var(--ease-emphasized);
     }
     .nav-link:hover {
       background: var(--surface-3);
       color: var(--text);
+    }
+    .nav-link:active {
+      transform: scale(0.98);
     }
     .nav-link.nav-active {
       background: var(--brand-soft);
@@ -694,6 +809,95 @@ interface PaletteEntry {
     .toggle:checked::after {
       transform: translateX(0.95rem);
     }
+    .palette-backdrop {
+      animation: fade-in var(--motion-medium) var(--ease-standard);
+    }
+    .palette-panel {
+      animation: palette-in var(--motion-long) var(--ease-decelerate);
+    }
+    .palette-leave {
+      animation: fade-out var(--motion-short) var(--ease-accelerate) forwards;
+    }
+    .palette-leave .palette-panel {
+      animation: palette-out var(--motion-short) var(--ease-accelerate) forwards;
+    }
+    .palette-highlight {
+      position: absolute;
+      top: 0;
+      left: 0.5rem;
+      right: 0.5rem;
+      border-radius: 0.6rem;
+      background: var(--brand-soft);
+      pointer-events: none;
+      transition: transform var(--motion-medium) var(--ease-emphasized);
+    }
+    .palette-group {
+      position: relative;
+      padding: 0.6rem 0.75rem 0.3rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text-subtle);
+    }
+    .palette-option {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.6rem;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: color var(--motion-short) var(--ease-standard);
+    }
+    .palette-option[aria-selected='true'] {
+      color: var(--brand-text);
+    }
+    .palette-go {
+      animation: go-in var(--motion-medium) var(--ease-decelerate);
+    }
+    .palette-foot {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.55rem 1rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      font-size: 0.72rem;
+      color: var(--text-subtle);
+    }
+    .palette-foot .kbd {
+      margin-right: 0.2rem;
+    }
+    @keyframes palette-in {
+      from {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.97);
+      }
+    }
+    @keyframes palette-out {
+      to {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+      }
+    }
+    @keyframes fade-out {
+      to {
+        opacity: 0;
+      }
+    }
+    @keyframes go-in {
+      from {
+        opacity: 0;
+        transform: translateX(-6px);
+      }
+    }
+    @media (max-width: 639px) {
+      .palette-foot > :not(:last-child) {
+        display: none;
+      }
+    }
   `,
 })
 export class Shell {
@@ -701,24 +905,35 @@ export class Shell {
   protected readonly branding = inject(BrandingService);
   protected readonly connectivity = inject(ConnectivityService);
   protected readonly outbox = inject(SaleOutboxService);
+  protected readonly license = inject(LicenseStateService);
+  protected readonly idle = inject(IdleService);
   private readonly permissions = inject(PermissionService);
   protected readonly display = inject(DisplayPreferencesService);
   private readonly router = inject(Router);
   private readonly paletteInput = viewChild<ElementRef<HTMLInputElement>>('paletteInput');
+  private readonly paletteList = viewChild<ElementRef<HTMLElement>>('paletteList');
   private readonly displayMenu = viewChild<ElementRef<HTMLElement>>('displayMenu');
   private readonly userMenu = viewChild<ElementRef<HTMLElement>>('userMenu');
+  private readonly alertsBell = viewChild('alertsBell', { read: ViewContainerRef });
 
   protected readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   protected readonly canEditBranding = computed(() =>
     this.permissions.hasAny('CONFIG_BRANDING_MANAGE'),
+  );
+  protected readonly canSeeSubscription = computed(
+    () => !this.auth.isPlatformOperator() && this.permissions.hasAny('SUBSCRIPTION_VIEW'),
   );
   protected readonly collapsed = signal(readCollapsed());
   protected readonly mobileOpen = signal(false);
   protected readonly expanded = computed(() => !this.collapsed() || this.mobileOpen());
   protected readonly menu = signal<'display' | 'user' | null>(null);
   protected readonly paletteOpen = signal(false);
+  /** The palette plays its exit before it is removed. */
+  protected readonly paletteClosing = signal(false);
   protected readonly query = signal('');
   protected readonly highlighted = signal(0);
+  /** Position of the highlight sliding behind the selected palette entry. */
+  protected readonly highlightBox = signal({ top: 0, height: 0 });
   private readonly url = signal(this.router.url);
 
   protected readonly densities: { value: Density; label: string }[] = [
@@ -754,6 +969,9 @@ export class Shell {
         }
       }
     }
+    if (!best && path.startsWith('/account/subscription')) {
+      return { label: 'Mon abonnement', group: 'Mon compte' };
+    }
     if (!best && path.startsWith('/account')) {
       return { label: 'Mot de passe et PIN', group: 'Mon compte' };
     }
@@ -787,7 +1005,7 @@ export class Shell {
           : 'Passer en mode sombre',
         group: 'Affichage',
         icon: this.display.preferences().darkMode ? 'sun' : 'moon',
-        run: () => this.toggleTheme(),
+        run: () => this.toggleTheme(null),
       },
       {
         label: this.display.preferences().highContrast
@@ -805,12 +1023,20 @@ export class Shell {
       },
     ];
     if (!this.auth.isPlatformOperator()) {
-      actions.unshift({
-        label: 'Mot de passe et PIN',
-        group: 'Compte',
-        icon: 'lock',
-        run: () => void this.router.navigateByUrl('/account/password'),
-      });
+      actions.unshift(
+        {
+          label: 'Verrouiller le poste',
+          group: 'Compte',
+          icon: 'lock',
+          run: () => this.idle.lockNow(),
+        },
+        {
+          label: 'Mot de passe et PIN',
+          group: 'Compte',
+          icon: 'key',
+          run: () => void this.router.navigateByUrl('/account/password'),
+        },
+      );
     }
     return [...pages, ...actions];
   });
@@ -821,11 +1047,58 @@ export class Shell {
     return q ? all.filter((e) => normalize(`${e.label} ${e.group}`).includes(q)) : all;
   });
 
+  /** Results grouped under their heading, each keeping its rank for the keyboard. */
+  protected readonly sections = computed(() => {
+    const sections: { group: string; items: { entry: PaletteEntry; index: number }[] }[] = [];
+    this.results().forEach((entry, index) => {
+      const last = sections[sections.length - 1];
+      if (last?.group === entry.group) {
+        last.items.push({ entry, index });
+      } else {
+        sections.push({ group: entry.group, items: [{ entry, index }] });
+      }
+    });
+    return sections;
+  });
+
   constructor() {
+    const destroyRef = inject(DestroyRef);
+    if (!this.auth.isPlatformOperator()) {
+      this.license.start();
+      this.idle.start(destroyRef);
+    }
+    // The palette highlight glides to the selected entry, which is kept in view
+    effect(() => {
+      const index = this.highlighted();
+      const list = this.paletteList()?.nativeElement;
+      this.results();
+      if (!list) {
+        return;
+      }
+      requestAnimationFrame(() => {
+        const option = list.querySelector<HTMLElement>(`#palette-${index}`);
+        if (option) {
+          this.highlightBox.set({ top: option.offsetTop, height: option.offsetHeight });
+          option.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    });
+    // The internal control bell (shown to CONTROL_VIEW only) is loaded apart from the first
+    // screen, and created again when the page comes back after an unlock
+    effect(() => {
+      const host = this.alertsBell();
+      if (host) {
+        void import('./features/control/alerts-bell').then(({ AlertsBell }) => {
+          if (this.alertsBell() === host) {
+            host.createComponent(AlertsBell);
+          }
+        });
+      }
+    });
     this.router.events
       .pipe(
         filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-        takeUntilDestroyed(inject(DestroyRef)),
+        takeUntilDestroyed(destroyRef),
       )
       .subscribe((e) => {
         this.url.set(e.urlAfterRedirects);
@@ -854,8 +1127,37 @@ export class Shell {
     this.menu.update((open) => (open === name ? null : name));
   }
 
-  protected toggleTheme(): void {
-    this.display.update({ darkMode: !this.display.preferences().darkMode });
+  /**
+   * Night / day switch. Where view transitions exist, the new theme spreads in a circle from
+   * the control that asked for it (top right when it came from the palette).
+   */
+  protected toggleTheme(event: Event | null): void {
+    const apply = () => this.display.update({ darkMode: !this.display.preferences().darkMode });
+    if (typeof document.startViewTransition !== 'function' || prefersReducedMotion()) {
+      apply();
+      return;
+    }
+    const origin = (event?.currentTarget as HTMLElement | undefined)?.getBoundingClientRect();
+    const x = origin ? origin.left + origin.width / 2 : innerWidth - 120;
+    const y = origin ? origin.top + origin.height / 2 : 32;
+    const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const root = document.documentElement;
+    root.classList.add('theme-transition');
+    const transition = document.startViewTransition(apply);
+    transition.ready
+      .then(() =>
+        root.animate(
+          { clipPath: [`circle(0 at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          {
+            duration: DURATION.reveal,
+            easing: EASING.emphasized,
+            pseudoElement: '::view-transition-new(root)',
+          },
+        ),
+      )
+      .catch(() => undefined);
+    const done = () => root.classList.remove('theme-transition');
+    transition.finished.then(done, done);
   }
 
   protected setDensity(density: Density): void {
@@ -866,7 +1168,11 @@ export class Shell {
     this.display.update({ fontScale });
   }
 
-  protected toggle(key: 'highContrast' | 'darkMode', event: Event): void {
+  protected toggle(key: 'highContrast' | 'darkMode' | 'sounds', event: Event): void {
+    if (key === 'darkMode') {
+      this.toggleTheme(event);
+      return;
+    }
     this.display.update({ [key]: (event.target as HTMLInputElement).checked });
   }
 
@@ -874,16 +1180,31 @@ export class Shell {
     this.menu.set(null);
     this.query.set('');
     this.highlighted.set(0);
+    this.paletteClosing.set(false);
     this.paletteOpen.set(true);
     setTimeout(() => this.paletteInput()?.nativeElement.focus());
   }
 
   protected closePalette(): void {
-    this.paletteOpen.set(false);
+    if (!this.paletteOpen() || this.paletteClosing()) {
+      return;
+    }
+    if (prefersReducedMotion()) {
+      this.paletteOpen.set(false);
+      return;
+    }
+    this.paletteClosing.set(true);
+    setTimeout(() => {
+      if (this.paletteClosing()) {
+        this.paletteOpen.set(false);
+        this.paletteClosing.set(false);
+      }
+    }, DURATION.short);
   }
 
+  /** Leaves at once: the page transition that follows takes over. */
   protected run(entry: PaletteEntry): void {
-    this.closePalette();
+    this.paletteOpen.set(false);
     this.mobileOpen.set(false);
     entry.run();
   }
@@ -905,7 +1226,14 @@ export class Shell {
   }
 
   protected onKeydown(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'l' &&
+      !this.auth.isPlatformOperator()
+    ) {
+      event.preventDefault();
+      this.lock();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       if (this.paletteOpen()) {
         this.closePalette();
@@ -913,7 +1241,7 @@ export class Shell {
         this.openPalette();
       }
     } else if (event.key === 'Escape') {
-      this.paletteOpen.set(false);
+      this.closePalette();
       this.menu.set(null);
       this.mobileOpen.set(false);
     }
@@ -931,6 +1259,12 @@ export class Shell {
     if (container && !container.contains(target)) {
       this.menu.set(null);
     }
+  }
+
+  protected lock(): void {
+    this.menu.set(null);
+    this.paletteOpen.set(false);
+    this.idle.lockNow();
   }
 
   protected async logout(): Promise<void> {

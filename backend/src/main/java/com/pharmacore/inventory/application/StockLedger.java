@@ -108,15 +108,22 @@ public class StockLedger {
     /** Puts previously withdrawn units back into their original lots (sale cancellation). */
     @Transactional(propagation = Propagation.MANDATORY)
     public void restore(UUID productId, List<LotAllocation> allocations, int shortfall, Reference reference) {
+        restore(productId, allocations, shortfall, reference, StockMovementEntity.Type.SALE_CANCELLATION);
+    }
+
+    /** Same as {@link #restore(UUID, List, int, Reference)}, recorded under another movement type (return). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void restore(UUID productId, List<LotAllocation> allocations, int shortfall, Reference reference,
+                        StockMovementEntity.Type movementType) {
         var stock = lock(List.of(productId)).get(productId);
         Map<UUID, StockLotEntity> lotsById = lots.findByIdIn(allocations.stream().map(LotAllocation::lotId).toList())
                 .stream().collect(Collectors.toMap(StockLotEntity::id, Function.identity()));
         Instant now = clock.instant();
         for (LotAllocation allocation : allocations) {
             lotsById.get(allocation.lotId()).restore(allocation.quantity());
-            movements.save(new StockMovementEntity(stock.id(), allocation.lotId(),
-                    StockMovementEntity.Type.SALE_CANCELLATION, allocation.quantity(), reference.type(),
-                    reference.id(), reference.occurredAt(), reference.userId()));
+            movements.save(new StockMovementEntity(stock.id(), allocation.lotId(), movementType,
+                    allocation.quantity(), reference.type(), reference.id(), reference.occurredAt(),
+                    reference.userId()));
         }
         if (shortfall > 0) {
             stock.reduceShortfall(Math.min(shortfall, stock.shortfallQuantity()), now);

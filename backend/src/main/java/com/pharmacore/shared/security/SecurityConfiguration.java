@@ -1,6 +1,11 @@
 package com.pharmacore.shared.security;
 
+import com.pharmacore.identity.application.LoginSessionService;
+import com.pharmacore.identity.domain.LockedRequestPolicy;
+import com.pharmacore.identity.web.SessionLockFilter;
 import com.pharmacore.shared.runtime.NodeProperties;
+import com.pharmacore.subscription.application.LicenseStateService;
+import com.pharmacore.subscription.web.LicenseEnforcementFilter;
 import jakarta.servlet.DispatcherType;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +23,7 @@ import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWrite
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
@@ -25,7 +31,8 @@ class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http, BearerTokenAuthenticator authenticator, NodeProperties node,
-                                    JdbcClient jdbc) throws Exception {
+                                    JdbcClient jdbc, LicenseStateService licenses, LoginSessionService loginSessions,
+                                    ObjectMapper json) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> { })
@@ -39,7 +46,7 @@ class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/public/hub/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/pin",
-                                "/api/auth/logout", "/api/auth/platform-login").permitAll()
+                                "/api/auth/logout", "/api/auth/unlock", "/api/auth/platform-login").permitAll()
                         // STOMP authenticates the CONNECT frame itself (see StompAuthenticationInterceptor)
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/platform/**").hasAuthority(BearerTokenAuthenticator.PLATFORM_ADMIN_AUTHORITY)
@@ -47,7 +54,9 @@ class SecurityConfiguration {
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.authenticationManagerResolver(request -> authenticator))
                 .addFilterAfter(new TenantContextFilter(), BearerTokenAuthenticationFilter.class)
-                .addFilterAfter(new TopologyGuardFilter(node, jdbc), TenantContextFilter.class)
+                .addFilterAfter(new SessionLockFilter(loginSessions, json), TenantContextFilter.class)
+                .addFilterAfter(new TopologyGuardFilter(node, jdbc), SessionLockFilter.class)
+                .addFilterAfter(new LicenseEnforcementFilter(licenses, json), TopologyGuardFilter.class)
                 .build();
     }
 
@@ -75,7 +84,8 @@ class SecurityConfiguration {
         // port the dev server picked; exact origins (production) behave as before.
         cors.setAllowedOriginPatterns(properties.allowedOrigins());
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key", TenantContextFilter.CORRELATION_HEADER));
+        cors.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key", TenantContextFilter.CORRELATION_HEADER,
+                LockedRequestPolicy.BACKGROUND_HEADER));
         cors.setExposedHeaders(List.of(TenantContextFilter.CORRELATION_HEADER, "ETag"));
         cors.setMaxAge(3600L);
         var source = new UrlBasedCorsConfigurationSource();

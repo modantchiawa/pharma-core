@@ -26,6 +26,7 @@ class ApiExceptionHandler {
     ProblemDetail businessRule(BusinessRuleException e) {
         var problem = problem(HttpStatus.UNPROCESSABLE_CONTENT, e.code(), e.getMessage());
         problem.setProperty("code", e.code());
+        e.properties().forEach(problem::setProperty);
         return problem;
     }
 

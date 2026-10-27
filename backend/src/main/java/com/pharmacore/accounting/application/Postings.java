@@ -9,7 +9,9 @@ import com.pharmacore.sales.persistence.CashMovementEntity;
 import com.pharmacore.sales.persistence.SaleEntity;
 import com.pharmacore.sales.persistence.SaleLineEntity;
 import com.pharmacore.sales.persistence.SalePaymentEntity;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -90,6 +92,25 @@ public final class Postings {
                     .credit(Accounts.BANK, movement.amountCents(), "Retrait bancaire")
                     .build();
         };
+    }
+
+    /** One returned line: refunded amount (VAT included) and its VAT rate. */
+    public record ReturnedLine(long refundCents, BigDecimal vatRate) {
+    }
+
+    /** Partial return refunded in cash: revenue and VAT go back, the cash leaves the drawer. */
+    public static EntryDraft saleReturn(String ticketNumber, List<ReturnedLine> lines, LocalDate date) {
+        var entry = EntryDraft.builder(Journal.VT, date, "Retour vente " + ticketNumber);
+        long refund = 0;
+        long vat = 0;
+        for (ReturnedLine line : lines) {
+            refund += line.refundCents();
+            vat += VatSplit.ofInclusive(line.refundCents(), line.vatRate()).vatCents();
+        }
+        entry.debit(Accounts.SALES_DRUGS, refund - vat, "Retour ventes HT");
+        entry.debit(Accounts.VAT_COLLECTED, vat, "TVA sur retour");
+        entry.credit(Accounts.CASH, refund, "Remboursement en espèces");
+        return entry.build();
     }
 
     /** Counted minus expected at closing: an excess is income, a shortage an expense. */

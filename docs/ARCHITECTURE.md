@@ -72,7 +72,7 @@ aucune résolution de conflit à inventer.
 
 | Propriétaire | Tables |
 |---|---|
-| **Cloud** | `product` (catalogue national), `tenant` (abonnement), `pharmacy_network`, `network_membership`, `inter_pharmacy_transfer`, `guard_schedule`, `conversation`, `chat_message` |
+| **Cloud** | `product` (catalogue national), `tenant` (abonnement), `subscription_plan`, `subscription_payment`, `tenant_license`, `pharmacy_network`, `network_membership`, `inter_pharmacy_transfer`, `guard_schedule`, `conversation`, `chat_message` |
 | **Hub** | tout le reste : configuration, utilisateurs et rôles, stocks et lots, ventes, caisse, clients, fournisseurs, commandes, réceptions, comptabilité, clés de signature |
 | **Les deux, par origine** | `audit_event` : chaque côté chaîne ses propres événements (`origin = HUB|CLOUD`) et pousse les siens |
 
@@ -154,8 +154,7 @@ sequenceDiagram
   (30 jours), **PIN** pour basculer de caissier, verrouillage 15 min après 5 échecs, jetons
   d'accès 15 min + rafraîchissement 14 h avec rotation. Les échecs sont journalisés dans l'audit
   (transaction séparée, donc conservés même si la tentative est rejetée).
-* **Abonnement** : le hub lit l'état d'abonnement répliqué et continue de servir pendant un
-  délai de grâce (30 jours) s'il ne peut joindre le cloud.
+* **Abonnement** : le hub applique la licence signée par le cloud, sans réseau (voir §4.5).
 
 ---
 
@@ -217,6 +216,88 @@ Migrations `V12` et `V13`.
 
 Migration `V14`.
 
+### 4.4 Supervision des postes de caisse et des comptes
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Postes et comptes** | `SyncSupervision`, `TerminalSyncState` (domaine pur), `TerminalSupervisionService`, `PlatformSupervisionController` (`/api/platform/tenants/sync-health`, `/{id}/supervision`), `TerminalSupervisionController` (`/api/v1/pos/terminals`, `HUB_ADMIN` ou `AUDIT_VIEW`), composant `app-terminal-board` partagé par la console et la page « Serveur local » | Chaque poste envoie un signal toutes les 60 s (ventes en attente, rejets, dernier rejeu) dans `terminal_heartbeat`. État calculé : **hors ligne** (`STALE`) sans signal depuis plus de `TERMINAL_STALE_AFTER` = 5 min, sinon **en attente** (`PENDING`) s'il reste des ventes dans son journal, sinon **jamais synchronisé** (`NEVER`) s'il n'a jamais rejoué de vente, sinon **synchronisé**. L'ancienneté du dernier rejeu n'entre pas en compte : un poste qui ne vend pas n'a rien à envoyer. Hub **injoignable** sans contact depuis plus de `HUB_UNREACHABLE_AFTER` = 5 min (un tour toutes les 30 s, avec au moins un `pull`). En mode hub, les postes parlent au hub qui réplique `terminal_heartbeat` vers le cloud : la console calcule les états **à l'instant du dernier contact du hub** (`observedAt`, « vu par le cloud il y a … ») et non à l'heure du cloud. Comptes : rôles, actif, verrouillé, mot de passe provisoire, PIN défini ou non, dernière connexion lue dans l'audit (`LOGIN`, `PIN_LOGIN`) ; aucun secret exposé. « Oublier » un poste supprime sa ligne de signal, refusé s'il est en contact (`terminal-active`) ; l'oubli groupé épargne les postes qui détiennent des ventes ; refusé depuis le cloud pour une pharmacie en mode hub (`hub-managed`), où il se fait sur le hub et se réplique. Audit `TERMINAL_FORGOTTEN`, `TERMINALS_FORGOTTEN` |
+
+Migration `V16` : colonne facultative `terminal_heartbeat.rejected_sales` (NULL pour les postes d'une version antérieure) et index partiel des connexions dans `audit_event`.
+
+### 4.5 Abonnements et licence hors ligne
+
+L'éditeur encaisse les abonnements hors de l'application (mobile money, virement, espèces,
+chèque) et les enregistre dans la console (`/platform/subscriptions`). Le blocage d'une pharmacie
+doit tenir même si son serveur local ne revient jamais en ligne : le hub applique une **licence
+signée par le cloud**, qu'il vérifie seul.
+
+| Élément | Composants | Règles clés |
+|---|---|---|
+| **Formules et règlements** | `subscription_plan` (référentiel, prix mensuel en francs CFA, postes), `subscription_payment` (écriture seule), `PlatformSubscriptionService` | Un règlement prolonge `tenant.subscription_expires_at` (= payé jusqu'au) à partir de sa fin, ou d'aujourd'hui si elle est passée (`SubscriptionPeriod`, mois calendaires dans le fuseau de la pharmacie) ; changement de formule ; suspension motivée et datée (`tenant.suspended_at`) puis réactivation ; chaque action est auditée et réémet la licence |
+| **Licence** | `LicenseCodec`, `LicenseKeys` (domaine pur), `LicenseKeyRing`, `LicenseIssuer`, table `tenant_license` | Jeton compact `PCL1.<kid>.<revendications>.<signature>` signé en **Ed25519** par une clé dédiée du cloud (fichier `license-<kid>.p8` du dossier des clés, clé publique dans `license_key`) ; revendications : pharmacie, identifiant, formule, postes, statut, payé jusqu'au, fin de grâce, date de suspension, émission, **validité = émission + 15 jours**, **numéro de série croissant** ; réémise à chaque règlement, changement de formule, suspension ou réactivation, et dès qu'elle a plus d'une heure quand un hub la demande |
+| **Épinglage et rafraîchissement** | `PairingService` (réponse d'appairage), `HubLicenseService`, `HubLicenseSync`, `POST /api/sync/license`, `GET /api/sync/license-keys` | À l'appairage (HTTPS, confiance au premier appairage) le hub épingle les clés publiques de licence et reçoit sa première licence ; à chaque cycle de synchronisation (et sur `POST /api/v1/subscription/refresh`) il demande une licence fraîche : la fenêtre de 15 jours glisse tant qu'il est en ligne et à jour. Une nouvelle clé (rotation : `POST /api/platform/subscriptions/license-keys/rotation`) n'est épinglée que si une clé déjà épinglée l'**endosse** : un faux cloud ne peut pas imposer la sienne. Un hub appairé avant les licences épingle la première liste reçue et dispose d'une fenêtre de 15 jours pour la recevoir |
+| **Anti-fraude du hub** | `HubLicenseRules` (domaine pur) | Signature vérifiée avec une clé épinglée, pharmacie du hub, jamais de numéro de série inférieur à celui détenu ; **filigrane d'horloge** persistant (plus grande heure vue) : un retour en arrière de plus de 10 minutes bloque (« horloge du poste incohérente ») ; une licence fraîche réancre le filigrane quand l'horloge locale concorde avec celle du cloud (sortie d'erreur après correction de l'heure) |
+| **État et application** | `LicenseEvaluator` (domaine pur), `LicenseStateService`, `LicenseEnforcementFilter`, `BlockedRequestPolicy` | États `ACTIVE`, `WARNING` (fin de période payée à J-7, fenêtre hors ligne à J-5), `GRACE` (3 jours après la période payée : « Abonnement expiré — régularisez avant le … »), `BLOCKED` (`SUSPENDED`, `EXPIRED`, `OFFLINE_TOO_LONG`, `CLOCK_TAMPERED`, `NO_LICENSE`). Cloud : calculé depuis sa base (cache 30 s vidé à chaque événement, donc immédiat) ; hub : depuis la licence détenue et le filigrane. Bloqué : toute modification d'un membre de la pharmacie reçoit **423** et un problème en français ; restent ouverts la lecture (registres, ordonnancier, rapports, exports), la connexion, le mot de passe et le PIN, la synchronisation, le rafraîchissement de licence, le signal de vie des postes et la réimpression. L'opérateur éditeur, les hubs et les processus système ne sont jamais bloqués |
+| **Ventes hors ligne rejouées** | `SaleSyncService` | **Décision** : une vente faite sur un poste hors ligne **avant** le blocage (`occurredAt` antérieur à la suspension, à la fin de grâce ou à la limite hors ligne) est enregistrée : la marchandise est sortie et l'argent encaissé quand la pharmacie en avait le droit. Une vente postérieure, ou toute vente quand le blocage n'est pas datable (horloge, absence de licence), reçoit `RETRY` : elle reste dans le journal du poste et passe à la régularisation, jamais perdue, jamais enregistrée pendant le blocage |
+| **Postes** | `LicenseStateService` (PWA), `license.ts`, bandeau du shell, caisse | L'état est interrogé toutes les 5 minutes et mis en cache par pharmacie ; hors ligne, le poste fait avancer l'état avec son horloge (avertissement, grâce, blocage aux dates annoncées, état de plus de 15 jours = blocage) et la caisse refuse de valider une vente bloquée |
+
+Limites assumées : la protection est logicielle. Un binaire modifié, ou un administrateur de la
+base du hub qui remplace la clé épinglée, le jeton et le filigrane dans `node_setting`, contourne
+le blocage ; l'horloge d'un poste PWA isolé de son serveur n'est contrôlée que par rapport à sa
+dernière réponse. Le cloud multi-instances applique une suspension au plus 30 s plus tard sur les
+autres instances (cache local). La clé privée de licence est un secret du cloud : la perdre impose
+de réappairer les hubs (aucune nouvelle clé ne peut plus être endossée).
+
+Migration `V15`, permission `SUBSCRIPTION_VIEW` (titulaire).
+
+### 4.6 Miniatures des produits et postes inactifs
+
+| Domaine | Composants | Règles clés |
+|---|---|---|
+| **Miniatures** | `ProductImageRules` (domaine pur), `ImageTypes` (partagé avec le logo), `ProductImageService`, `ProductImageController` (`/api/v1/inventory/products/{id}/image`), table `product_image` ; PWA : `prepareProductPhoto` (`logo-file.ts`), `ProductImageService`, `<app-product-thumb>` | Une photo par produit et par pharmacie, recadrée au carré et réduite à 256 px (WebP 80 %, JPEG à défaut) **dans le navigateur** ; le serveur lit le type dans les octets (PNG, JPEG, WebP ; SVG refusé), 256 Ko au plus. Modification : `STOCK_PRICE_MANAGE` (comme le prix et les seuils), lecture : tout membre. Version = 16 premiers caractères du SHA-256, exposée en `imageVersion` dans le flux POS, la recherche, les équivalents, la liste des stocks, les alertes de péremption, les lignes de commande et la fiche produit : l'URL `…/image?v=<version>` change avec la photo ; le navigateur la garde mais la **revalide** avant chaque usage (`private, no-cache`, ETag = SHA-256, 304 sans les octets) : une session verrouillée reçoit 423, jamais la photo en cache. Le point d'accès est authentifié : la PWA télécharge l'image par le client HTTP (jeton) et l'affiche par URL objet, au moment où la miniature entre à l'écran (un seul `IntersectionObserver`). Groupe de données `product-images` du service worker (stratégie `freshness`, délai 3 s, 3 000 images, 1 an) : servi seulement quand le serveur ne répond pas, il permet à la caisse hors ligne d'afficher les miniatures déjà vues, les autres gardent l'initiale. Suppression = ligne vidée (et non effacée) : répliquée comme une mise à jour, elle réémet le produit vers le cache des caisses (`updated_at` dans le curseur du flux POS). Réplication : `bytea` sérialisé en hexadécimal par `to_jsonb`, relu par `jsonb_populate_record` (environ 2× la taille de l'image dans le journal). Audit `PRODUCT_IMAGE_UPDATED`, `PRODUCT_IMAGE_REMOVED` |
+| **Verrouillage et déconnexion** | `IdlePolicy`, `SessionEvent` (domaine pur), `SessionPolicyService`, `SessionPolicyController` (`/api/v1/pharmacy/session-policy`, `/api/v1/me/session-events`), colonnes `pharmacy_config.idle_lock_minutes` / `idle_logout_minutes` ; PWA : `idle.ts` (règles pures), `IdleService`, `LockScreen`, `UnlockVerifier` | Délais de la pharmacie (verrouillage 5 min, 0 = jamais, au plus 120 ; déconnexion 30 min, de 5 min à 12 h, après le verrouillage), modifiables avec `ROLE_MANAGE` (page Rôles et droits), audités `SESSION_POLICY_UPDATED`, envoyés avec chaque jeton (`sessionPolicy` de la connexion, du PIN et du rafraîchissement) et gardés sur le poste. Activité = pointeur, clavier (douchette comprise), toucher, molette, défilement ; partagée entre onglets (`BroadcastChannel`, repli sur l'événement `storage`). Avertissement 30 s avant (anneau, « Je suis là »), puis écran verrouillé **appliqué par le serveur** (ligne suivante). Déverrouillage par PIN ou mot de passe du titulaire de la session, vérifié par le serveur ; « Changer d'utilisateur » par PIN (vraie connexion, la session verrouillée est fermée). Déconnexion au délai (compté depuis la dernière activité, verrouillé ou non) ou au 5ᵉ code erroné : jetons révoqués et effacés, retour à la connexion avec « Session fermée après X min d'inactivité ». Une vente en cours de validation ou une impression navigateur suspend les délais du poste |
+| **Verrou appliqué par le serveur** | `SessionLockRules`, `LockedRequestPolicy`, `LoginSessionState` (domaine pur), `LoginSessionService`, `SessionLockFilter`, `LocalAuthService.unlock` (`POST /api/auth/unlock`), `POST /api/v1/me/session/lock`, `POST /api/v1/me/session/activity`, `LockedSessionGuard` (STOMP), table `login_session` ; PWA : `authInterceptor`, `SessionSignals`, `background-requests.ts`, `WhileUnlocked` | Chaque connexion (mot de passe ou PIN) ouvre une **session de connexion** sur le serveur que le poste appelle (le hub en mode hub, joignable sur le réseau local sans Internet, sinon le cloud) ; ses jetons de rafraîchissement successifs y sont rattachés et chaque jeton d'accès porte son identifiant (`sid`). Le filtre examine chaque requête d'un membre de la pharmacie : session **verrouillée** (par le poste, ou par le serveur lui-même passé le délai de verrouillage + 90 s) → **423** `session-locked` ; délai de déconnexion (+ 90 s) dépassé → session fermée, jetons révoqués, **401** `session-expired`. Seuls passent, verrouillé : le verrouillage, le journal de session et le signal de vie du poste ; l'authentification (déverrouillage, déconnexion, changement d'utilisateur) et les pages publiques n'ont pas de session. Les 90 s couvrent le ping d'activité (au plus 1/min) et l'écriture différée : un utilisateur qui travaille n'est jamais verrouillé trop tôt. **Activité** = toute requête non marquée `X-PharmaCore-Background` (l'intercepteur marque signal de vie, rejeu des ventes, flux du catalogue, état de licence, compteur d'alertes, tableau des postes, état de synchronisation, verrouillage et journal) et le ping `session/activity` envoyé au plus une fois par minute quand l'utilisateur agit sans appeler l'API ; un ping sur une session verrouillée reçoit 423 : rien ne la réveille sans le code. **Déverrouillage** : PIN ou mot de passe **du titulaire de la session**, compté avec le compteur existant (le 5ᵉ échec verrouille le compte 15 min et ferme la session), succès = session déverrouillée et jeton de rafraîchissement renouvelé. Un rafraîchissement pendant le verrou rend un jeton marqué `session_locked` (le poste garde son signal de vie, la supervision ne le croit pas hors ligne) qui n'atteint, sur tout nœud, que la liste blanche ; débloqué, ce jeton reçoit 401 `token-outdated` et le poste en reprend un complet. **État** : cache mémoire par session relu en base toutes les 5 s, activité écrite au plus toutes les 30 s, verrouillage, déverrouillage et fermeture écrits aussitôt ; la base fait foi entre instances du cloud (au plus 5 s d'écart). Table locale au nœud comme `auth_session`, **non synchronisée** : un jeton n'est vérifié que par le nœud qui l'a émis, et répliquer l'activité de chaque poste n'aurait d'usage d'aucun côté ; purge des sessions fermées depuis 7 jours. **Temps réel** : la connexion STOMP d'une session verrouillée reste ouverte mais ne reçoit plus aucun message (alertes du contrôle interne, messagerie) et ne peut rien envoyer ; tout reprend au déverrouillage, la cloche relit alors le nombre d'alertes. **Poste** : verrouillé, l'onglet oublie son jeton d'accès et le shell **retire la page du DOM** (`*appWhileUnlocked`) : derrière la carte, un fond neutre (couleurs de la marque floutées), aucune donnée ; le panier vit dans `CartStore` (service racine) et revient au déverrouillage. Toute réponse 423 `session-locked` (serveur verrouillé avant le poste, horloge, autre onglet) affiche l'écran verrouillé, toute 401 `session-expired` ramène à la connexion. Le cache des miniatures du service worker n'est servi que serveur injoignable. Audit `SESSION_LOCKED` (`trigger` `MANUAL_LOCK`, `IDLE_LOCK` ou `SERVER_LOCK`, `decidedBy` `TERMINAL` ou `SERVER`), `SESSION_UNLOCKED`, `SESSION_UNLOCK_FAILED` (essais restants), `SESSION_IDLE_LOGOUT`, `SESSION_PIN_LOGOUT`. L'opérateur éditeur, les hubs et les processus système n'ont pas de session de poste |
+
+**Changer d'utilisateur.** Le panier reste au comptoir pour la personne qui prend la suite : les
+produits sont devant le client, les règles (plafond de remise, droits de délivrance, crédit) se
+réappliquent avec les droits du nouvel utilisateur et la vente est enregistrée à son nom. Les
+**règlements déjà saisis sont effacés** : l'argent annoncé par le caissier précédent n'est pas
+attribué au suivant sans qu'il l'ait reçu.
+
+**Ce que garantit le verrou.** Tant que le serveur n'a pas vérifié le PIN ou le mot de passe, un
+poste verrouillé ne lit ni ne modifie aucune donnée de la pharmacie, même avec les outils de
+développement : supprimer le calque ou l'attribut `inert` ne montre rien (la page n'est plus dans le
+DOM), le jeton d'accès a été effacé de l'onglet, un jeton recopié avant le verrou, rejoué sur
+n'importe quel point d'accès, reçoit 423, et le jeton de rafraîchissement trouvé dans le stockage ne
+donne qu'un jeton marqué « verrouillé » limité au signal de vie. Effacer l'état local et recharger
+ramène l'écran verrouillé : la réponse du serveur fait foi. Le contrôle tient au serveur, pas au
+poste : même si la page est modifiée ou que la requête de verrouillage n'arrive jamais, le serveur
+verrouille seul à l'échéance (délai + 90 s) et ferme la session au délai de déconnexion.
+
+**Hors ligne : la limite résiduelle.** Ce qui reste du ressort du poste tient à son
+fonctionnement sans serveur. Quand le serveur de la pharmacie ne répond pas (poste PWA sans hub ni
+cloud joignable), l'écran verrouillé compare le code saisi aux empreintes PBKDF2 (SHA-256,
+150 000 itérations, sel aléatoire) du PIN et du mot de passe déjà saisis avec succès sur ce poste par
+**ce** même utilisateur, gardées 14 h au plus (durée de la session de rafraîchissement) et effacées à
+la déconnexion ; le changement d'utilisateur exige le serveur. Ce déverrouillage local ne vaut pas
+sur le serveur : dès qu'il répond, la session y est toujours verrouillée et le poste redemande le
+code. Par ailleurs, ce que la PWA garde pour vendre hors ligne est sur le poste, verrouillé ou non,
+et lisible par une personne qui a la main sur le navigateur (onglet Application des outils de
+développement) : le catalogue de la caisse avec prix, stocks et emplacements (IndexedDB), les ventes
+en attente de rejeu, les miniatures déjà vues (cache du service worker), le profil et la marque mis
+en cache, et le panier en mémoire. Rien d'autre n'y est (ni clients, ni ordonnancier, ni rapports,
+ni comptabilité, ni comptes) et rien de tout cela ne permet d'obtenir ou de modifier quoi que ce soit
+sur le serveur. Les ventes faites hors ligne restent dans le journal du poste et sont rejouées
+normalement ; pendant un verrou, le rejeu attend le déverrouillage (423, reprise avec le recul
+habituel). En mode hub, les fonctions réseau appelées sur le cloud avec un jeton du hub ne
+connaissent pas l'état du verrou : le poste efface ce jeton au verrouillage, et il expire au plus
+15 min après son émission sans pouvoir être renouvelé autrement que marqué « verrouillé » (refusé
+partout hors liste blanche).
+Enfin, verrouiller détruit la page : une saisie non enregistrée sur une autre page que le comptoir
+est perdue, comme à un rechargement.
+
+Migrations `V18`, `V19` (`login_session`, colonne `auth_session.login_session_id`).
+
 ---
 
 ## 5. Frontend : local-first sur chaque poste
@@ -243,7 +324,8 @@ Migration `V14`.
 | `PHARMACORE_MODE` (`pharmacore.node.mode`) | `HUB` ou `CLOUD` |
 | `PHARMACORE_KEYS_DIR` | Dossier de la clé privée de signature |
 | `PHARMACORE_CLOUD_URL` | Cloud joint par le hub |
-| `pharmacore.node.sync-interval`, `subscription-grace` | Cadence de synchronisation, délai de grâce d'abonnement |
+| `pharmacore.node.sync-interval` | Cadence de synchronisation (et de rafraîchissement de la licence) |
+| `pharmacore.subscription.*` (`PHARMACORE_VENDOR_NAME`, `_EMAIL`, `_PHONE`) | Contact de l'éditeur affiché aux pharmacies ; délais (avertissement 7 j, grâce 3 j, fenêtre hors ligne 15 j, avertissement 5 j, tolérance d'horloge 10 min) |
 | `INVOICE_CERTIFICATION` | `NONE` (défaut) ou le nom de l'adaptateur de certification |
 | `DB_*`, `OIDC_PLATFORM_ISSUER`, `ALLOWED_ORIGINS` | Voir v1 |
 

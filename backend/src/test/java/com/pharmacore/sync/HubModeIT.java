@@ -142,6 +142,7 @@ class HubModeIT {
                 .exchange((request, response) -> response.getStatusCode());
         assertThat(wrongPin).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
+
         // The background bootstrap completes and the hub reports itself paired and in sync
         String finalToken = accessToken;
         Map<String, Object> syncStatus = null;
@@ -155,6 +156,20 @@ class HubModeIT {
         }
         assertThat(syncStatus).containsEntry("paired", true).containsEntry("cloudReachable", true);
         assertThat(syncStatus.get("lastError")).isNull();
+
+        // The hub applies the terminal lock itself, reachable on the LAN without Internet
+        client.post().uri("/api/v1/me/session/lock").header(HttpHeaders.AUTHORIZATION, "Bearer " + finalToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"reason\":\"MANUAL\",\"terminalId\":\"T-HUB\",\"idleMinutes\":0}")
+                .retrieve().toBodilessEntity();
+        var lockedRead = client.get().uri("/api/v1/hub/sync").header(HttpHeaders.AUTHORIZATION, "Bearer " + finalToken)
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(lockedRead).isEqualTo(HttpStatus.LOCKED);
+        var heartbeat = client.post().uri("/api/v1/pos/heartbeat").header(HttpHeaders.AUTHORIZATION, "Bearer " + finalToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"terminalId\":\"T-HUB\",\"appVersion\":\"test\",\"pendingSales\":0}")
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(heartbeat).isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     private static String suffix() {

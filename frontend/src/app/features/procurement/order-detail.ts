@@ -22,6 +22,7 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { placeOf } from '../../shared/storage-location';
 import { LocationChip } from '../../shared/ui/location-chip';
 import { Icon } from '../../shared/ui/icon';
+import { ProductThumb } from '../../shared/ui/product-thumb';
 import { OrderReceive } from './order-receive';
 import { PurchaseOrderPrint } from './purchase-order-print';
 import {
@@ -53,6 +54,7 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
     OrderReceive,
     PurchaseOrderPrint,
     LocationChip,
+    ProductThumb,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'escape()' },
@@ -108,6 +110,14 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
               </section>
             }
             @default {
+              @if (o.quantitiesHidden) {
+                <div class="alert alert-info" data-testid="quantities-hidden">
+                  <app-icon name="eyeOff" [size]="16" />
+                  <span>
+                    Réception à l'aveugle : les quantités commandées sont réservées aux acheteurs.
+                  </span>
+                </div>
+              }
               <!-- actions according to the status -->
               @if (o.status === 'DRAFT' || open()) {
                 <div
@@ -385,7 +395,13 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
                 <ul class="divide-y divide-line rounded-[var(--radius)] border border-line">
                   @for (line of o.lines; track line.productId) {
                     <li class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
-                      <div class="min-w-0 flex-1 basis-48">
+                      <app-product-thumb
+                        [productId]="line.productId"
+                        [version]="line.imageVersion"
+                        [name]="line.designation"
+                        [size]="36"
+                      />
+                      <div class="min-w-0 flex-1 basis-40">
                         <p class="truncate text-sm font-medium">{{ line.designation }}</p>
                         <p class="text-xs text-subtle tabular-nums">
                           {{ line.cip13 }} · {{ line.unitCostCents | money }} HT

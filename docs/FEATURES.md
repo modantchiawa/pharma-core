@@ -56,6 +56,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Réception de livraison lot par lot, mise à jour des prix, suivi des reliquats | Oui | ✅ depuis la commande, pré-remplie, scan GS1 |
 | Inventaire (comptage, écarts, valorisation) | Oui | ✅ session d'inventaire **à l'aveugle** par scan ou saisie, attendu masqué au compteur, validation par un pharmacien, écarts audités |
 | **Emplacements de rangement** (rayons, tiroirs, réfrigérateur 2-8 °C, coffre des stupéfiants, réserve, comptoir) : produit affiché avec son emplacement au comptoir, même hors ligne, rangement groupé, inventaire par emplacement, étiquettes de rayon A4 | Partiel (texte libre) | ✅ |
+| **Miniatures des produits** : photo de la boîte prise au téléphone (recadrée et réduite sur le poste), affichée au comptoir, dans les stocks et les commandes, hors ligne comprise | Rare | ✅ |
 | **Contrôle d'intégrité** nocturne du stock (lots recalculés depuis les mouvements, réservations), sortie automatique des lots périmés avec valeur au coût | Rare | ✅ |
 | Lecture des codes **GS1 DataMatrix** (lot, péremption) au comptoir, à la réception et à l'inventaire | Partiel | ✅ |
 | Transferts entre pharmacies d'un même groupe | Parfois | ✅ réservations réseau ; transfert intra-groupe : phase 2 |
@@ -78,9 +79,11 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 
 | Fonction | Attendu | PharmaCore |
 |---|---|---|
-| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 43 permissions, 5 rôles prédéfinis modifiables |
+| Utilisateurs, rôles, matrice de permissions personnalisable | Oui | ✅ 48 permissions, 5 rôles prédéfinis modifiables |
 | Connexion mot de passe + **bascule caissier par PIN**, sans Internet | Oui | ✅ |
+| **Verrouillage du poste inactif** (écran flouté, page et panier conservés, reprise par PIN), déconnexion après un délai réglé par la pharmacie, Ctrl+L | Partiel | ✅ synchronisé entre onglets, hors ligne compris |
 | Journal d'audit inaltérable | Rare | ✅ chaîne SHA-256 |
+| **Contrôle interne anti-fraude** : recomptage tournant à l'aveugle tiré selon le risque, double validation (seconde personne et PIN) des sorties, retours et annulations encaissées, réception à l'aveugle et séparation des tâches, indicateurs par employé avec signalement expliqué, registre des stupéfiants, alertes en direct et webhook signé | Rare | ✅ Gestion › Contrôle interne |
 | **Sauvegardes** automatiques locales, USB et cloud | Oui | ✅ tâche planifiée + réplique cloud continue |
 | Supervision éditeur multi-pharmacies | — | ✅ |
 | Personnalisation : logo, couleurs, mentions, ticket ; densité, contraste, taille de texte, mode sombre par poste | Partiel | ✅ |
