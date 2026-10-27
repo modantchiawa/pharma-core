@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   computed,
   effect,
@@ -44,6 +45,23 @@ import { LocationChip } from '../../shared/ui/location-chip';
 import { placeOf } from '../../shared/storage-location';
 import { ProductThumb } from '../../shared/ui/product-thumb';
 import { IdleService } from '../../core/session/idle.service';
+import { SoundService } from '../../core/ui/sound.service';
+import { AnimatedNumber } from '../../shared/ui/animated-number';
+import { EmptyState } from '../../shared/ui/empty-state';
+import { withExits } from '../../shared/ui/exit-list';
+import { MotionFeedback } from '../../shared/ui/motion-feedback';
+
+/** What the success banner of the last recorded sale shows. */
+interface SaleDone {
+  ticketNumber: string;
+  netCents: number;
+  changeDueCents: number;
+}
+
+/** The banner leaves on the next scan, or after this delay (longer when change is due). */
+const SALE_DONE_MS = 4000;
+const SALE_DONE_WITH_CHANGE_MS = 7000;
+const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -51,7 +69,17 @@ import { IdleService } from '../../core/session/idle.service';
  */
 @Component({
   selector: 'app-pos-page',
-  imports: [FormsModule, MoneyPipe, Receipt, Icon, LocationChip, ProductThumb],
+  imports: [
+    FormsModule,
+    MoneyPipe,
+    Receipt,
+    Icon,
+    LocationChip,
+    ProductThumb,
+    AnimatedNumber,
+    EmptyState,
+    MotionFeedback,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
   template: `
@@ -154,7 +182,12 @@ import { IdleService } from '../../core/session/idle.service';
               <app-icon name="cart" [size]="18" class="text-muted" />
               <h2 class="card-title">Panier</h2>
               @if (cart.itemCount() > 0) {
-                <span class="badge badge-brand">{{ cart.itemCount() }} article(s)</span>
+                <span
+                  class="pop-enter badge badge-brand"
+                  [appFeedback]="cart.itemCount()"
+                  feedbackKind="pop"
+                  >{{ cart.itemCount() }} article(s)</span
+                >
               }
             </div>
             @if (cart.lines().length > 0) {
@@ -164,7 +197,7 @@ import { IdleService } from '../../core/session/idle.service';
             }
           </div>
           <div class="min-h-0 flex-1 overflow-auto">
-            @if (cart.lines().length > 0) {
+            @if (lines().length > 0) {
               <table class="data-table">
                 <thead class="sticky top-0 z-10">
                   <tr>
@@ -176,8 +209,15 @@ import { IdleService } from '../../core/session/idle.service';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (line of cart.lines(); track line.productId) {
-                    <tr>
+                  @for (entry of lines(); track entry.item.productId) {
+                    @let line = entry.item;
+                    <tr
+                      class="row-enter flash-surface"
+                      [class.row-leave]="entry.leaving"
+                      [attr.aria-hidden]="entry.leaving ? 'true' : null"
+                      [appFeedback]="line.quantity"
+                      [feedbackOnInit]="true"
+                    >
                       <td class="relative !pl-[3.75rem]">
                         <app-product-thumb
                           class="!absolute top-1/2 left-4 -translate-y-1/2"
@@ -213,6 +253,8 @@ import { IdleService } from '../../core/session/idle.service';
                           <input
                             type="number"
                             min="0"
+                            [appFeedback]="line.quantity"
+                            feedbackKind="pulse"
                             [ngModel]="line.quantity"
                             (ngModelChange)="cart.setQuantity(line.productId, $event)"
                             [attr.aria-label]="'Quantité ' + line.designation"
@@ -262,8 +304,7 @@ import { IdleService } from '../../core/session/idle.service';
                 </tbody>
               </table>
             } @else {
-              <div class="empty-state h-full justify-center">
-                <app-icon name="barcode" [size]="24" />
+              <app-empty-state illustration="cart" class="h-full justify-center">
                 <p class="text-base font-medium text-ink">Panier vide : scannez un produit</p>
                 <p class="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs">
                   <span><span class="kbd">F2</span> rechercher</span>
@@ -271,7 +312,7 @@ import { IdleService } from '../../core/session/idle.service';
                   <span><span class="kbd">F5</span> mobile money</span>
                   <span><span class="kbd">F9</span> valider</span>
                 </p>
-              </div>
+              </app-empty-state>
             }
           </div>
         </div>
@@ -281,7 +322,7 @@ import { IdleService } from '../../core/session/idle.service';
         <div class="total px-5 py-4">
           <p class="text-xs font-semibold tracking-wide text-muted uppercase">Total à payer</p>
           <p class="mt-1 text-4xl font-bold tracking-tight text-brand">
-            {{ cart.netCents() | money }}
+            <app-animated-number [value]="cart.netCents()" [live]="true" />
           </p>
           <p class="mt-1 text-sm text-muted">
             {{ cart.itemCount() }} article(s)
@@ -289,6 +330,37 @@ import { IdleService } from '../../core/session/idle.service';
               · dont remises {{ cart.discountCents() | money }}
             }
           </p>
+          @for (banner of saleBanner(); track banner.item.ticketNumber) {
+            @let done = banner.item;
+            <div
+              class="sale-done"
+              [class.sale-done-leave]="banner.leaving"
+              aria-hidden="true"
+              data-testid="pos-sale-done"
+              (click)="saleDone.set(null)"
+            >
+              <span class="sale-check">
+                <svg viewBox="0 0 52 52" width="52" height="52">
+                  <circle class="sale-check-disc" cx="26" cy="26" r="24" />
+                  <circle class="sale-check-ring" cx="26" cy="26" r="24" pathLength="1" />
+                  <path class="sale-check-mark" d="M15.5 27l7 7 14-15" pathLength="1" />
+                </svg>
+                @for (angle of burst; track angle) {
+                  <i class="sale-spark" [style.--a]="angle + 'deg'"></i>
+                }
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="sale-done-title">Vente {{ done.ticketNumber }} enregistrée</span>
+                @if (done.changeDueCents > 0) {
+                  <span class="sale-done-label">Rendu monnaie</span>
+                  <span class="sale-done-amount">{{ done.changeDueCents | money }}</span>
+                } @else {
+                  <span class="sale-done-label">Encaissé</span>
+                  <span class="sale-done-amount">{{ done.netCents | money }}</span>
+                }
+              </span>
+            </div>
+          }
         </div>
 
         <div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
@@ -529,14 +601,16 @@ import { IdleService } from '../../core/session/idle.service';
         <div class="space-y-3 border-t bg-surface-2 p-4">
           <p class="flex items-baseline justify-between font-semibold">
             <span>Reste à payer</span>
-            <span class="num text-lg">{{ cart.remainingCents() | money }}</span>
+            <span class="num text-lg"><app-animated-number [value]="cart.remainingCents()" /></span>
           </p>
           @if (cart.changeDueCents() > 0) {
             <p
-              class="flex items-baseline justify-between rounded-[var(--radius-sm)] bg-[var(--success-soft)] px-3 py-2 font-bold text-success"
+              class="pop-enter flex items-baseline justify-between rounded-[var(--radius-sm)] bg-[var(--success-soft)] px-3 py-2 font-bold text-success"
             >
               <span>Rendu monnaie</span>
-              <span class="num text-xl">{{ cart.changeDueCents() | money }}</span>
+              <span class="num text-xl"
+                ><app-animated-number [value]="cart.changeDueCents()" [live]="true"
+              /></span>
             </p>
           }
           @if (saleRefusal(); as refusal) {
@@ -601,6 +675,21 @@ import { IdleService } from '../../core/session/idle.service';
     }
   `,
   styles: `
+    /* Cart line washed with the brand color when added or changed (MotionFeedback "flash"):
+       each cell carries the wash behind its content, only its opacity is animated. */
+    tr.flash-surface > td {
+      position: relative;
+      isolation: isolate;
+    }
+    tr.flash-surface > td::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: color-mix(in oklab, var(--brand-primary) 16%, var(--surface));
+      opacity: 0;
+      pointer-events: none;
+    }
     .scan > input {
       height: 3.5rem;
       padding-left: 3.25rem;
@@ -626,8 +715,134 @@ import { IdleService } from '../../core/session/idle.service';
       background: var(--brand-soft);
     }
     .total {
+      position: relative;
+      overflow: hidden;
       background: linear-gradient(180deg, var(--brand-softer), var(--surface));
       border-bottom: 1px solid var(--border);
+    }
+    .sale-done {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0 1.25rem;
+      background: linear-gradient(
+        120deg,
+        var(--success-soft),
+        color-mix(in oklab, var(--success-soft) 60%, var(--surface))
+      );
+      color: var(--success);
+      cursor: pointer;
+      animation: sale-in var(--motion-long) var(--ease-decelerate);
+    }
+    .sale-done.sale-done-leave {
+      animation: sale-out var(--motion-medium) var(--ease-accelerate) forwards;
+    }
+    .sale-check {
+      position: relative;
+      flex-shrink: 0;
+      width: 52px;
+      height: 52px;
+    }
+    .sale-check svg {
+      display: block;
+      overflow: visible;
+    }
+    .sale-check-disc {
+      fill: var(--surface);
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: disc-in 420ms var(--ease-emphasized) backwards;
+    }
+    .sale-check-ring,
+    .sale-check-mark {
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 1;
+    }
+    .sale-check-ring {
+      stroke-width: 2.5;
+      transform: rotate(-90deg);
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: draw 420ms var(--ease-decelerate) 60ms backwards;
+    }
+    .sale-check-mark {
+      stroke-width: 3.5;
+      animation: draw 260ms var(--ease-emphasized) 300ms backwards;
+    }
+    .sale-spark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 5px;
+      height: 5px;
+      margin: -2.5px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0;
+      animation: spark 620ms var(--ease-decelerate) 380ms;
+    }
+    .sale-spark:nth-of-type(even) {
+      background: var(--brand-primary);
+    }
+    .sale-done-title {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      color: color-mix(in oklab, var(--success) 80%, var(--text));
+    }
+    .sale-done-label {
+      display: block;
+      margin-top: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.85;
+    }
+    .sale-done-amount {
+      display: block;
+      font-size: 2rem;
+      line-height: 1.1;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      animation: rise-in var(--motion-long) var(--ease-decelerate) 220ms backwards;
+    }
+    .pop-enter {
+      animation: pop-in var(--motion-medium) var(--ease-emphasized);
+    }
+    @keyframes sale-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+    }
+    @keyframes sale-out {
+      to {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+    }
+    @keyframes disc-in {
+      from {
+        transform: scale(0.4);
+      }
+    }
+    @keyframes spark {
+      0% {
+        opacity: 1;
+        transform: rotate(var(--a)) translateY(-20px) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: rotate(var(--a)) translateY(-38px) scale(0.4);
+      }
     }
     .panel {
       border: 1px solid var(--border);
@@ -771,8 +986,26 @@ export class PosPage {
   );
   private readonly cashierName = computed(() => this.permissions.profile()?.displayName ?? '');
   private readonly idle = inject(IdleService);
+  private readonly sound = inject(SoundService);
+  /** Success banner of the sale just recorded, over the total. */
+  protected readonly saleDone = signal<SaleDone | null>(null);
+  protected readonly saleBanner = withExits(
+    () => {
+      const done = this.saleDone();
+      return done ? [done] : [];
+    },
+    (done) => done.ticketNumber,
+  );
+  /** Cart lines as displayed: a removed line plays its exit before it goes. */
+  protected readonly lines = withExits(
+    () => this.cart.lines(),
+    (line) => line.productId,
+  );
+  protected readonly burst = BURST;
+  private saleDoneTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.saleDoneTimer));
     void this.checkCashSession();
     // The basket outlives the page (removed while the terminal is locked): the covers and
     // prescriptions of its customer are read again, the chosen cover kept as it was
@@ -916,6 +1149,7 @@ export class PosPage {
       this.pick(product);
     } else {
       this.message.set(`Aucun produit pour « ${term} »`);
+      this.sound.play('refusal');
     }
   }
 
@@ -923,8 +1157,11 @@ export class PosPage {
     try {
       this.cart.add(product);
       this.message.set(null);
+      this.saleDone.set(null);
+      this.sound.play('scan');
     } catch (error) {
       this.message.set((error as Error).message);
+      this.sound.play('refusal');
     }
     this.term = '';
     this.results.set([]);
@@ -1045,6 +1282,20 @@ export class PosPage {
     this.printing.printPage(paper);
   }
 
+  /**
+   * Success banner over the total: drawn check, change due in large. It never takes the focus
+   * (the scan field keeps it) and leaves on the next scan; the toast carries the announcement.
+   */
+  private celebrate(done: SaleDone): void {
+    clearTimeout(this.saleDoneTimer);
+    this.saleDone.set(done);
+    this.sound.play('sale');
+    this.saleDoneTimer = setTimeout(
+      () => this.saleDone.set(null),
+      done.changeDueCents > 0 ? SALE_DONE_WITH_CHANGE_MS : SALE_DONE_MS,
+    );
+  }
+
   /** Commits the sale locally first (zero data loss), prints, then lets the outbox sync it. */
   protected async checkout(): Promise<void> {
     if (!this.cart.canCheckout() || this.busy()) {
@@ -1119,6 +1370,11 @@ export class PosPage {
       };
       this.receipt.set(data);
       this.cart.clear();
+      this.celebrate({
+        ticketNumber,
+        netCents: data.netCents,
+        changeDueCents: data.changeDueCents,
+      });
       this.toasts.success(
         data.changeDueCents > 0
           ? `Vente ${ticketNumber} enregistrée · rendu ${this.money.transform(data.changeDueCents)}`

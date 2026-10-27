@@ -8,12 +8,14 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Icon } from '../../shared/ui/icon';
+import { SkeletonRows } from '../../shared/ui/skeleton-rows';
 
 /** Customer files, credit accounts ("ardoises") and settlements. */
 @Component({
   selector: 'app-customers-page',
-  imports: [FormsModule, MoneyPipe, HasPermissionDirective, Icon],
+  imports: [FormsModule, MoneyPipe, HasPermissionDirective, Icon, EmptyState, SkeletonRows],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -56,8 +58,10 @@ import { Icon } from '../../shared/ui/icon';
               </button>
             </div>
           </div>
-          @if (list().length > 0) {
-            <div class="overflow-x-auto">
+          @if (!loaded()) {
+            <app-skeleton-rows [rows]="6" [figures]="3" [thumb]="true" />
+          } @else if (list().length > 0) {
+            <div class="content-in overflow-x-auto">
               <table class="data-table whitespace-nowrap">
                 <thead>
                   <tr>
@@ -107,10 +111,18 @@ import { Icon } from '../../shared/ui/icon';
               </table>
             </div>
           } @else {
-            <div class="empty-state">
-              <app-icon name="customers" [size]="22" />
+            <app-empty-state illustration="people">
               <p>Aucun client</p>
-            </div>
+              <button
+                *appHasPermission="'CUSTOMER_MANAGE'"
+                type="button"
+                class="btn btn-secondary btn-sm mt-1"
+                (click)="reset()"
+              >
+                <app-icon name="plus" [size]="14" />
+                Nouveau client
+              </button>
+            </app-empty-state>
           }
         </section>
 
@@ -259,6 +271,7 @@ export class CustomersPage {
 
   protected term = '';
   protected readonly list = signal<Customer[]>([]);
+  protected readonly loaded = signal(false);
   protected readonly selected = signal<Customer | null>(null);
   protected readonly status = signal<string | null>(null);
   protected readonly providers = MOBILE_MONEY_PROVIDERS;
@@ -284,7 +297,11 @@ export class CustomersPage {
   }
 
   protected async debtors(): Promise<void> {
-    this.list.set(await firstValueFrom(this.http.get<Customer[]>(`${this.api}/debtors`)));
+    try {
+      this.list.set(await firstValueFrom(this.http.get<Customer[]>(`${this.api}/debtors`)));
+    } finally {
+      this.loaded.set(true);
+    }
   }
 
   protected reset(): void {
