@@ -730,8 +730,10 @@
     transform: none;
   }
 }
+/* `backwards`, not `both`: a transform kept after the animation would make the page the containing
+   block of its fixed overlays (dialogs, side panels), which would then center on the whole page. */
 .animate-in {
-  animation: fade-in-up 180ms ease-out both;
+  animation: fade-in-up 180ms ease-out backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
