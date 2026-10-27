@@ -1,13 +1,13 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { firstValueFrom, timeout } from 'rxjs';
 import { SessionEventKind } from '../api/models';
 import { AuthService } from '../auth/auth.service';
 import { APP_ENVIRONMENT } from '../config';
 import { TerminalService } from '../offline/terminal.service';
 import { MAX_UNLOCK_FAILURES, idleMinutes, idleState, pingDue } from './idle';
 import { SessionPolicyService } from './session-policy.service';
+import type { SessionServer } from './session-server';
 import { SessionSignals } from './session-signals';
 import {
   SESSION_KEYS,
@@ -21,8 +21,6 @@ import {
 const LOCAL_THROTTLE_MS = 1_000;
 const SHARED_THROTTLE_MS = 5_000;
 const TICK_MS = 1_000;
-/** A journal entry must not hold the logout up when the server is slow or gone. */
-const AUDIT_TIMEOUT_MS = 1_500;
 const CHANNEL = 'pharmacore.session';
 const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll'];
 
@@ -67,6 +65,7 @@ export class IdleService {
   private channel: BroadcastChannel | null = null;
   private stopListening: (() => void) | null = null;
   private closing = false;
+  private serverCalls: Promise<SessionServer> | null = null;
 
   readonly policy = this.policies.policy;
   readonly locked = computed(() => this.lockState() !== null);
@@ -207,9 +206,9 @@ export class IdleService {
       return;
     }
     this.lastPing = at;
-    firstValueFrom(this.http.post(`${this.apiUrl}/v1/me/session/activity`, {})).catch(
-      () => undefined,
-    );
+    this.server()
+      .then((server) => server.activity())
+      .catch(() => undefined);
   }
 
   private touch(at: number, share: boolean): void {
@@ -256,14 +255,11 @@ export class IdleService {
   /** Tells the server, then forgets the access token (even when the server cannot be reached). */
   private async lockOnServer(manual: boolean): Promise<void> {
     try {
-      await firstValueFrom(
-        this.http
-          .post(`${this.apiUrl}/v1/me/session/lock`, {
-            reason: manual ? 'MANUAL' : 'IDLE',
-            terminalId: this.terminal.terminalId,
-            idleMinutes: idleMinutes(Date.now(), this.lastActivity()),
-          })
-          .pipe(timeout(AUDIT_TIMEOUT_MS)),
+      const server = await this.server();
+      await server.lock(
+        manual,
+        this.terminal.terminalId,
+        idleMinutes(Date.now(), this.lastActivity()),
       );
     } catch {
       // Offline: locked here; the server locks by itself at its own deadline
@@ -362,17 +358,27 @@ export class IdleService {
 
   private async journal(event: SessionEventKind): Promise<void> {
     try {
-      await firstValueFrom(
-        this.http
-          .post(`${this.apiUrl}/v1/me/session-events`, {
-            event,
-            terminalId: this.terminal.terminalId,
-            idleMinutes: idleMinutes(Date.now(), this.lastActivity()),
-          })
-          .pipe(timeout(AUDIT_TIMEOUT_MS)),
+      const server = await this.server();
+      await server.journal(
+        event,
+        this.terminal.terminalId,
+        idleMinutes(Date.now(), this.lastActivity()),
       );
     } catch {
       // Offline: the logout happens anyway, only its journal entry is lost
     }
+  }
+
+  /** The calls to the server are loaded on first use, outside the first screen. */
+  private server(): Promise<SessionServer> {
+    this.serverCalls ??= import('./session-server').then(
+      (m) => new m.SessionServer(this.http, this.apiUrl),
+      (error: unknown) => {
+        // Not loaded (server unreachable before the service worker cached it): tried again next time
+        this.serverCalls = null;
+        throw error;
+      },
+    );
+    return this.serverCalls;
   }
 }

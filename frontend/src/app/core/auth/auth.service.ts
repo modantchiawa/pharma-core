@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
+import type { User, UserManager } from 'oidc-client-ts';
 import { firstValueFrom } from 'rxjs';
 import { Me, SessionPolicy } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
@@ -64,7 +64,7 @@ export class AuthService {
     sessionStorage.getItem(PLATFORM_TOKEN_KEY),
   );
   private readonly terminalToken = signal(localStorage.getItem(TERMINAL_TOKEN_KEY));
-  private platformManager: UserManager | null = null;
+  private platformManager: Promise<UserManager> | null = null;
   private refreshing: Promise<string | null> | null = null;
 
   readonly realm = this.realmState.asReadonly();
@@ -102,7 +102,7 @@ export class AuthService {
       if (this.platformToken()) {
         return;
       }
-      this.platformUser.set(await this.manager().getUser());
+      this.platformUser.set(await (await this.manager()).getUser());
     } else if (!this.isAuthenticated() && localStorage.getItem(REFRESH_KEY)) {
       await this.refresh();
     }
@@ -219,7 +219,7 @@ export class AuthService {
         this.realmState.set('pharmacy');
         return;
       }
-      await this.manager().signoutRedirect();
+      await (await this.manager()).signoutRedirect();
       return;
     }
     const refreshToken = localStorage.getItem(REFRESH_KEY);
@@ -263,7 +263,7 @@ export class AuthService {
   async loginPlatform(returnUrl = '/platform'): Promise<void> {
     sessionStorage.setItem(REALM_KEY, 'platform');
     this.realmState.set('platform');
-    await this.manager().signinRedirect({ state: returnUrl });
+    await (await this.manager()).signinRedirect({ state: returnUrl });
   }
 
   /** Demonstration mode: the supervision console opens with a shared password. */
@@ -280,7 +280,7 @@ export class AuthService {
   }
 
   async completePlatformLogin(): Promise<string> {
-    const user = await this.manager().signinRedirectCallback();
+    const user = await (await this.manager()).signinRedirectCallback();
     this.platformUser.set(user);
     return typeof user.state === 'string' ? user.state : '/platform';
   }
@@ -340,7 +340,7 @@ export class AuthService {
       return this.isAuthenticated() ? this.platformToken() : null;
     }
     try {
-      const user = await this.manager().signinSilent();
+      const user = await (await this.manager()).signinSilent();
       this.platformUser.set(user);
       return user?.access_token ?? null;
     } catch {
@@ -354,22 +354,26 @@ export class AuthService {
     localStorage.setItem('pharmacore.knownUsers', JSON.stringify(users.slice(0, 8)));
   }
 
-  private manager(): UserManager {
-    if (!this.platformManager) {
-      const config = this.env.oidc.platform;
-      this.platformManager = new UserManager({
-        authority: config.authority,
-        client_id: config.clientId,
-        redirect_uri: `${location.origin}/auth/callback`,
-        post_logout_redirect_uri: location.origin,
-        response_type: 'code',
-        scope: this.env.oidc.scope,
-        automaticSilentRenew: true,
-        userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-      });
-      this.platformManager.events.addUserLoaded((user) => this.platformUser.set(user));
-      this.platformManager.events.addUserUnloaded(() => this.platformUser.set(null));
-    }
+  /** The OpenID Connect client of the editor console, loaded on demand (pharmacy staff never need it). */
+  private manager(): Promise<UserManager> {
+    this.platformManager ??= import('oidc-client-ts').then(
+      ({ UserManager, WebStorageStateStore }) => {
+        const config = this.env.oidc.platform;
+        const manager = new UserManager({
+          authority: config.authority,
+          client_id: config.clientId,
+          redirect_uri: `${location.origin}/auth/callback`,
+          post_logout_redirect_uri: location.origin,
+          response_type: 'code',
+          scope: this.env.oidc.scope,
+          automaticSilentRenew: true,
+          userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+        });
+        manager.events.addUserLoaded((user) => this.platformUser.set(user));
+        manager.events.addUserUnloaded(() => this.platformUser.set(null));
+        return manager;
+      },
+    );
     return this.platformManager;
   }
 }
