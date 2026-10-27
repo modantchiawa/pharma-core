@@ -1,7 +1,10 @@
 package com.pharmacore.procurement.web;
 
 import com.pharmacore.procurement.application.ProcurementService;
+import com.pharmacore.procurement.application.ProcurementService.GenerationView;
 import com.pharmacore.procurement.application.ProcurementService.OrderLineCommand;
+import com.pharmacore.procurement.application.ProcurementService.OrderReceiptView;
+import com.pharmacore.procurement.application.ProcurementService.OrderSummary;
 import com.pharmacore.procurement.application.ProcurementService.OrderView;
 import com.pharmacore.procurement.application.ProcurementService.ProposalSheet;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptCommand;
@@ -9,6 +12,7 @@ import com.pharmacore.procurement.application.ProcurementService.ReceiptLineComm
 import com.pharmacore.procurement.application.ProcurementService.ReceiptView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierProductView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierView;
+import com.pharmacore.procurement.domain.OrderTracking;
 import com.pharmacore.procurement.persistence.PurchaseOrderEntity;
 import com.pharmacore.procurement.persistence.SupplierEntity;
 import com.pharmacore.tenant.application.BrandingService;
@@ -26,7 +30,9 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -93,11 +99,27 @@ class ProcurementController {
         return procurement.proposal(supplierId);
     }
 
+    /** Tracking list: {@code scope} DRAFTS, OPEN, OVERDUE, CLOSED or ALL; {@code status} narrows to one status. */
     @GetMapping("/orders")
     @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
-    List<OrderView> orders(@RequestParam(required = false) PurchaseOrderEntity.Status status,
+    List<OrderView> orders(@RequestParam(defaultValue = "ALL") OrderTracking.Scope scope,
+                           @RequestParam(required = false) PurchaseOrderEntity.Status status,
+                           @RequestParam(required = false) UUID supplierId,
                            @RequestParam(defaultValue = "50") int limit) {
-        return procurement.orders(status, limit);
+        return procurement.orders(scope, status, supplierId, limit);
+    }
+
+    @GetMapping("/orders/summary")
+    @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
+    OrderSummary orderSummary() {
+        return procurement.summary();
+    }
+
+    /** One draft per supplier from the current proposal; an existing draft is replaced, not duplicated. */
+    @PostMapping("/orders/generate")
+    @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
+    GenerationView generate(@Valid @RequestBody GenerateRequest request) {
+        return procurement.generate(request.supplierId(), request.overridesByProduct());
     }
 
     @GetMapping("/orders/{orderId}")
@@ -135,6 +157,25 @@ class ProcurementController {
     @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
     OrderView cancel(@PathVariable UUID orderId) {
         return procurement.cancel(orderId);
+    }
+
+    @PutMapping("/orders/{orderId}/expected-date")
+    @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
+    OrderView reschedule(@PathVariable UUID orderId, @Valid @RequestBody ExpectedDateRequest request) {
+        return procurement.reschedule(orderId, request.expectedAt());
+    }
+
+    /** Closes an open order whose remainder will not be delivered. */
+    @PostMapping("/orders/{orderId}/closure")
+    @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
+    OrderView close(@PathVariable UUID orderId, @Valid @RequestBody(required = false) ClosureRequest request) {
+        return procurement.closeShort(orderId, request == null ? null : request.reason());
+    }
+
+    @GetMapping("/orders/{orderId}/receipts")
+    @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
+    List<OrderReceiptView> orderReceipts(@PathVariable UUID orderId) {
+        return procurement.orderReceipts(orderId);
     }
 
     @PostMapping("/receipts")
@@ -186,6 +227,26 @@ class ProcurementController {
                             @PositiveOrZero Long unitCostCents,
                             Integer suggestedQuantity,
                             @Size(max = 255) String reason) {
+    }
+
+    record GenerateRequest(UUID supplierId,
+                           @Size(max = 1000) List<@Valid QuantityOverride> overrides) {
+
+        Map<UUID, Integer> overridesByProduct() {
+            return overrides == null ? Map.of() : overrides.stream()
+                    .collect(Collectors.toMap(QuantityOverride::productId, QuantityOverride::quantity, (a, b) -> b));
+        }
+    }
+
+    /** Quantity to order instead of the suggestion; 0 leaves the product out. */
+    record QuantityOverride(@NotNull UUID productId,
+                            @PositiveOrZero @Max(100_000) int quantity) {
+    }
+
+    record ExpectedDateRequest(@NotNull LocalDate expectedAt) {
+    }
+
+    record ClosureRequest(@Size(max = 255) String reason) {
     }
 
     record ReceiptRequest(@NotNull UUID supplierId,

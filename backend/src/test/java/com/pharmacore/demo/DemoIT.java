@@ -59,6 +59,22 @@ class DemoIT extends IntegrationTest {
         call(get("/api/v1/procurement/suppliers"), owner, null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
+        // purchase orders at every stage of the follow-up, one of them late
+        call(get("/api/v1/procurement/orders/summary"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.drafts").value(1))
+                .andExpect(jsonPath("$.open").value(3))
+                .andExpect(jsonPath("$.overdue").value(1))
+                .andExpect(jsonPath("$.expectedToday").value(1));
+        call(get("/api/v1/procurement/orders?scope=CLOSED"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("RECEIVED"));
+        String proposal = call(get("/api/v1/procurement/proposal"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) JsonPath.read(proposal, "$.lines[?(@.supplierId != null)]")).isNotEmpty();
+        assertThat((List<?>) JsonPath.read(proposal, "$.lines[?(@.supplierId == null)]")).hasSize(1);
         call(get("/api/v1/insurers"), owner, null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].details.name").value("NIA Assurances"));

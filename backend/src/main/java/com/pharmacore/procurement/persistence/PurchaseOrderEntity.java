@@ -15,7 +15,9 @@ import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.hibernate.annotations.TenantId;
 
@@ -91,11 +93,33 @@ public class PurchaseOrderEntity {
         this.notes = notes;
     }
 
+    /**
+     * Replaces the draft's lines. A product already on the order keeps its line (updated in
+     * place): deleting and re-inserting it in the same flush would collide on (order, product).
+     */
     public void replaceLines(List<PurchaseOrderLineEntity> newLines) {
         requireDraft();
-        lines.clear();
-        lines.addAll(newLines);
+        Map<UUID, PurchaseOrderLineEntity> current = new HashMap<>();
+        lines.forEach(line -> current.put(line.productId(), line));
+        List<PurchaseOrderLineEntity> kept = new ArrayList<>();
+        List<PurchaseOrderLineEntity> added = new ArrayList<>();
+        for (PurchaseOrderLineEntity line : newLines) {
+            PurchaseOrderLineEntity existing = current.get(line.productId());
+            if (existing != null) {
+                existing.revise(line);
+                kept.add(existing);
+            } else {
+                added.add(line);
+            }
+        }
+        lines.retainAll(kept);
+        lines.addAll(added);
         recomputeTotal();
+    }
+
+    public void updateNotes(String notes) {
+        requireDraft();
+        this.notes = notes;
     }
 
     public void send(Instant now, LocalDate expectedAt) {
@@ -130,9 +154,35 @@ public class PurchaseOrderEntity {
         }
     }
 
-    public void forceClose(Instant now) {
+    /** The supplier announced another delivery day. */
+    public void reschedule(LocalDate newExpectedAt, LocalDate today) {
+        requireOpen();
+        if (newExpectedAt.isBefore(today)) {
+            throw new BusinessRuleException("expected-in-past", "La nouvelle date de livraison ne peut pas être passée");
+        }
+        this.expectedAt = newExpectedAt;
+    }
+
+    /**
+     * Closes an order whose remainder will never be delivered: it counts as received with what
+     * actually came, the missing units stay visible on its lines. Returns the units given up.
+     */
+    public int closeShort(Instant now) {
+        requireOpen();
+        if (lines.stream().allMatch(line -> line.quantityReceived() == 0)) {
+            throw new BusinessRuleException("nothing-received",
+                    "Rien n'a encore été reçu sur cette commande : annulez-la plutôt que de la solder");
+        }
+        int remaining = lines.stream().mapToInt(PurchaseOrderLineEntity::remaining).sum();
         this.status = Status.RECEIVED;
         this.closedAt = now;
+        return remaining;
+    }
+
+    private void requireOpen() {
+        if (status != Status.SENT && status != Status.PARTIALLY_RECEIVED) {
+            throw new BusinessRuleException("not-open", "La commande n'est pas en attente de livraison");
+        }
     }
 
     private void requireDraft() {
@@ -171,6 +221,10 @@ public class PurchaseOrderEntity {
 
     public LocalDate expectedAt() {
         return expectedAt;
+    }
+
+    public Instant closedAt() {
+        return closedAt;
     }
 
     public String notes() {
