@@ -17,7 +17,9 @@ import { CurrencyService } from '../../core/ui/currency.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { placeOf, ProductPlace } from '../../shared/storage-location';
 import { Icon } from '../../shared/ui/icon';
+import { LocationChip } from '../../shared/ui/location-chip';
 import {
   applyGs1,
   errorDetail,
@@ -34,7 +36,7 @@ import {
  */
 @Component({
   selector: 'app-order-receive',
-  imports: [FormsModule, MoneyPipe, Icon],
+  imports: [FormsModule, MoneyPipe, Icon, LocationChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="space-y-4" (ngSubmit)="submit()" aria-label="Réception de la livraison">
@@ -82,7 +84,14 @@ import {
                 <p class="font-medium">{{ line.designation }}</p>
                 <p class="text-xs text-subtle tabular-nums">{{ line.cip13 }}</p>
               </div>
-              <span class="badge">Reste {{ line.remaining }}</span>
+              <div class="flex flex-wrap items-center gap-1.5">
+                @if (places().get(line.productId); as place) {
+                  <span class="flex items-center gap-1 text-xs text-muted">
+                    À ranger <app-location-chip [place]="place" />
+                  </span>
+                }
+                <span class="badge">Reste {{ line.remaining }}</span>
+              </div>
             </div>
             <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <label class="block">
@@ -198,6 +207,17 @@ export class OrderReceive implements OnInit {
   protected invoiceDate = this.today;
   protected scan = '';
 
+  /** Where each delivered product goes, for whoever puts the boxes away. */
+  protected readonly places = computed(() => {
+    const places = new Map<string, ProductPlace>();
+    for (const line of this.order().lines) {
+      const place = placeOf(line);
+      if (place) {
+        places.set(line.productId, place);
+      }
+    }
+    return places;
+  });
   protected readonly units = computed(() => {
     this.revision();
     return this.lines().reduce((sum, l) => sum + (l.quantity > 0 ? Number(l.quantity) : 0), 0);

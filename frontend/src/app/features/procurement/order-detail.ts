@@ -19,6 +19,8 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { placeOf } from '../../shared/storage-location';
+import { LocationChip } from '../../shared/ui/location-chip';
 import { Icon } from '../../shared/ui/icon';
 import { OrderReceive } from './order-receive';
 import { PurchaseOrderPrint } from './purchase-order-print';
@@ -50,6 +52,7 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
     HasPermissionDirective,
     OrderReceive,
     PurchaseOrderPrint,
+    LocationChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'escape()' },
@@ -387,6 +390,9 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
                         <p class="text-xs text-subtle tabular-nums">
                           {{ line.cip13 }} · {{ line.unitCostCents | money }} HT
                         </p>
+                        @if (placeOf(line); as place) {
+                          <app-location-chip [place]="place" class="mt-1" />
+                        }
                       </div>
                       @if (mode() === 'edit') {
                         <input
@@ -576,6 +582,7 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
   `,
 })
 export class OrderDetail {
+  protected readonly placeOf = placeOf;
   private readonly http = inject(HttpClient);
   private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/procurement`;
   private readonly toast = inject(ToastService);

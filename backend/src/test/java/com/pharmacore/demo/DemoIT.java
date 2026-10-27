@@ -70,6 +70,13 @@ class DemoIT extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("RECEIVED"));
+        // every demo product is put away: order lines tell where to shelve the delivery
+        String open = call(get("/api/v1/procurement/orders?scope=OPEN"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) JsonPath.read(open, "$[*].lines[*]")).isNotEmpty();
+        assertThat((List<?>) JsonPath.read(open, "$[*].lines[?(@.locationCode == null)]")).isEmpty();
+        assertThat((List<?>) JsonPath.read(open, "$[*].lines[*].locationName")).doesNotContainNull();
         String proposal = call(get("/api/v1/procurement/proposal"), owner, null)
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();

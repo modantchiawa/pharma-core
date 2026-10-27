@@ -276,6 +276,11 @@ export interface PurchaseOrderLine {
   packSize: number;
   suggestedQuantity: number | null;
   reason: string | null;
+  /** Where the delivered boxes are put away; null when the product has no location. */
+  locationCode: string | null;
+  locationName: string | null;
+  locationKind: StorageLocationKind | null;
+  locationDetail: string | null;
 }
 
 export interface SupplierContact {

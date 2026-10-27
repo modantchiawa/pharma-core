@@ -259,9 +259,11 @@ public class ProcurementService {
                             List<OrderLineView> lines) {
     }
 
+    /** One order line; the location says where the delivered boxes are put away (null when not assigned). */
     public record OrderLineView(int lineNo, UUID productId, String designation, String cip13, int quantityOrdered,
                                 int quantityReceived, long unitCostCents, int packSize, Integer suggestedQuantity,
-                                String reason) {
+                                String reason, String locationCode, String locationName, String locationKind,
+                                String locationDetail) {
     }
 
     /** Key figures of the tracking screen, as of {@code today} in the pharmacy's calendar. */
@@ -638,8 +640,12 @@ public class ProcurementService {
         Map<UUID, List<OrderLineView>> lines = new HashMap<>();
         jdbc.sql("""
                         SELECT l.purchase_order_id, l.line_no, l.product_id, p.designation, p.cip13, l.quantity_ordered,
-                               l.quantity_received, l.unit_cost_cents, l.pack_size, l.suggested_quantity, l.reason
+                               l.quantity_received, l.unit_cost_cents, l.pack_size, l.suggested_quantity, l.reason,
+                               sl.code AS location_code, sl.name AS location_name, sl.kind AS location_kind,
+                               CASE WHEN sl.id IS NOT NULL THEN st.location_detail END AS location_detail
                         FROM purchase_order_line l JOIN product p ON p.id = l.product_id
+                        LEFT JOIN stock st ON st.tenant_id = l.tenant_id AND st.product_id = l.product_id
+                        LEFT JOIN storage_location sl ON sl.id = st.location_id
                         WHERE l.tenant_id = :tenant AND l.purchase_order_id = ANY(:ids)
                         ORDER BY l.purchase_order_id, l.line_no""")
                 .param("tenant", tenant)
@@ -649,7 +655,9 @@ public class ProcurementService {
                         .add(new OrderLineView(rs.getInt("line_no"), rs.getObject("product_id", UUID.class),
                                 rs.getString("designation"), rs.getString("cip13"), rs.getInt("quantity_ordered"),
                                 rs.getInt("quantity_received"), rs.getLong("unit_cost_cents"), rs.getInt("pack_size"),
-                                (Integer) rs.getObject("suggested_quantity"), rs.getString("reason"))));
+                                (Integer) rs.getObject("suggested_quantity"), rs.getString("reason"),
+                                rs.getString("location_code"), rs.getString("location_name"),
+                                rs.getString("location_kind"), rs.getString("location_detail"))));
         LocalDate today = calendar.today();
         Map<UUID, OrderView> byId = new HashMap<>();
         jdbc.sql("""
