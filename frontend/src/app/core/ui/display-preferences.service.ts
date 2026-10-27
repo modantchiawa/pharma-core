@@ -8,6 +8,8 @@ export interface DisplayPreferences {
   highContrast: boolean;
   fontScale: 1 | 1.15 | 1.3;
   darkMode: boolean;
+  /** Very quiet cues at the counter (item scanned, sale recorded). */
+  sounds: boolean;
 }
 
 const KEY = 'pharmacore.display';
@@ -16,6 +18,7 @@ const DEFAULTS: DisplayPreferences = {
   highContrast: false,
   fontScale: 1,
   darkMode: false,
+  sounds: false,
 };
 
 /**
@@ -31,19 +34,22 @@ export class DisplayPreferencesService {
   readonly preferences = this.state.asReadonly();
 
   constructor() {
-    effect(() => {
-      const p = this.state();
-      const root = this.document.documentElement;
-      root.dataset['density'] = p.density.toLowerCase();
-      root.dataset['contrast'] = p.highContrast ? 'high' : 'normal';
-      root.dataset['theme'] = p.darkMode ? 'dark' : 'light';
-      root.style.setProperty('--font-scale', String(p.fontScale));
-    });
+    effect(() => this.apply(this.state()));
   }
 
+  /** Applied at once too, so that a theme switch can be captured by a view transition. */
   update(changes: Partial<DisplayPreferences>): void {
     this.state.update((current) => ({ ...current, ...changes }));
+    this.apply(this.state());
     localStorage.setItem(KEY, JSON.stringify(this.state()));
+  }
+
+  private apply(p: DisplayPreferences): void {
+    const root = this.document.documentElement;
+    root.dataset['density'] = p.density.toLowerCase();
+    root.dataset['contrast'] = p.highContrast ? 'high' : 'normal';
+    root.dataset['theme'] = p.darkMode ? 'dark' : 'light';
+    root.style.setProperty('--font-scale', String(p.fontScale));
   }
 }
 

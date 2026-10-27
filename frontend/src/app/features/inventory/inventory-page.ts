@@ -21,6 +21,9 @@ import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
 import { LocationChip } from '../../shared/ui/location-chip';
 import { ProductThumb } from '../../shared/ui/product-thumb';
+import { AnimatedNumber } from '../../shared/ui/animated-number';
+import { EmptyState } from '../../shared/ui/empty-state';
+import { SkeletonRows } from '../../shared/ui/skeleton-rows';
 import { DailyCountCard } from '../control/daily-count-card';
 import { StockExitDialog } from './stock-exit-dialog';
 
@@ -86,6 +89,9 @@ interface CatalogHit {
     ProductThumb,
     DailyCountCard,
     StockExitDialog,
+    AnimatedNumber,
+    EmptyState,
+    SkeletonRows,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -116,7 +122,9 @@ interface CatalogHit {
               <span class="kpi-icon"><app-icon name="banknote" [size]="16" /></span>
               Valeur du stock
             </div>
-            <div class="kpi-value">{{ stockValue() | money }}</div>
+            <div class="kpi-value">
+              <app-animated-number [value]="stockValue()" [minDuration]="500" [maxDuration]="900" />
+            </div>
             <div class="kpi-foot">Au prix de vente · {{ stocks().length }} références</div>
           </div>
           <div class="card kpi">
@@ -127,7 +135,7 @@ interface CatalogHit {
               Sous le seuil
             </div>
             <div class="kpi-value" [class.text-warning]="belowThresholdCount() > 0">
-              {{ belowThresholdCount() }}
+              <app-animated-number [value]="belowThresholdCount()" format="integer" />
             </div>
             <div class="kpi-foot">Références à réapprovisionner</div>
           </div>
@@ -137,7 +145,7 @@ interface CatalogHit {
               Ruptures
             </div>
             <div class="kpi-value" [class.text-danger]="outOfStockCount() > 0">
-              {{ outOfStockCount() }}
+              <app-animated-number [value]="outOfStockCount()" format="integer" />
             </div>
             <div class="kpi-foot">Aucune unité disponible</div>
           </div>
@@ -146,7 +154,9 @@ interface CatalogHit {
               <span class="kpi-icon kpi-icon-info"><app-icon name="calendar" [size]="16" /></span>
               Péremption sous 90 j
             </div>
-            <div class="kpi-value">{{ expiringCount() }}</div>
+            <div class="kpi-value">
+              <app-animated-number [value]="expiringCount()" format="integer" />
+            </div>
             <div class="kpi-foot">Prochain lot à écouler en priorité</div>
           </div>
         </div>
@@ -333,209 +343,224 @@ interface CatalogHit {
                   </button>
                 </div>
               }
-              <div class="overflow-x-auto">
-                <table class="data-table">
-                  <thead class="whitespace-nowrap">
-                    <tr>
-                      @if (canPlace()) {
-                        <th class="w-10">
-                          <input
-                            type="checkbox"
-                            aria-label="Tout sélectionner"
-                            [checked]="allSelected()"
-                            (change)="toggleAll()"
-                          />
-                        </th>
-                      }
-                      <th>Produit</th>
-                      <th>Emplacement</th>
-                      <th class="num text-right">Prix</th>
-                      <th class="num text-right">Disponible</th>
-                      <th class="num text-right">Réservé</th>
-                      <th>Écart hors-ligne</th>
-                      <th>Prochaine péremption</th>
-                      <th>Statut</th>
-                      @if (canAdjust()) {
-                        <th><span class="sr-only">Actions</span></th>
-                      }
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (s of stocks(); track s.productId) {
-                      <tr [class.row-selected]="selected().has(s.productId)">
+              @if (!stocksLoaded()) {
+                <app-skeleton-rows [rows]="8" [figures]="4" [thumb]="true" />
+              } @else {
+                <div class="content-in overflow-x-auto">
+                  <table class="data-table">
+                    <thead class="whitespace-nowrap">
+                      <tr>
                         @if (canPlace()) {
-                          <td>
+                          <th class="w-10">
                             <input
                               type="checkbox"
-                              [attr.aria-label]="'Sélectionner ' + s.designation"
-                              [checked]="selected().has(s.productId)"
-                              (change)="toggle(s.productId)"
+                              aria-label="Tout sélectionner"
+                              [checked]="allSelected()"
+                              (change)="toggleAll()"
                             />
-                          </td>
+                          </th>
                         }
-                        <td class="min-w-56">
-                          <a
-                            class="product-link flex items-center gap-3"
-                            [routerLink]="['/inventory/products', s.productId]"
-                            [attr.aria-label]="'Fiche produit ' + s.designation"
-                          >
-                            <app-product-thumb
-                              [productId]="s.productId"
-                              [version]="s.imageVersion"
-                              [name]="s.designation"
-                              [size]="36"
-                            />
-                            <span class="min-w-0">
-                              <span class="product-name block font-medium">{{
-                                s.designation
-                              }}</span>
-                              <span class="block text-xs text-subtle tabular-nums">{{
-                                s.cip13
-                              }}</span>
-                            </span>
-                          </a>
-                        </td>
-                        <td class="min-w-40">
-                          @if (editing() === s.productId) {
-                            <form
-                              class="flex min-w-80 items-center gap-1.5"
-                              (ngSubmit)="savePlacement(s)"
-                            >
-                              <select
-                                class="select h-9 min-w-0 flex-1"
-                                name="location"
-                                [attr.aria-label]="'Emplacement de ' + s.designation"
-                                [(ngModel)]="draft.locationId"
-                              >
-                                <option value="">Aucun</option>
-                                @for (l of locations(); track l.id) {
-                                  <option [value]="l.id">{{ l.code }} · {{ l.name }}</option>
-                                }
-                              </select>
+                        <th>Produit</th>
+                        <th>Emplacement</th>
+                        <th class="num text-right">Prix</th>
+                        <th class="num text-right">Disponible</th>
+                        <th class="num text-right">Réservé</th>
+                        <th>Écart hors-ligne</th>
+                        <th>Prochaine péremption</th>
+                        <th>Statut</th>
+                        @if (canAdjust()) {
+                          <th><span class="sr-only">Actions</span></th>
+                        }
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (s of stocks(); track s.productId) {
+                        <tr [class.row-selected]="selected().has(s.productId)">
+                          @if (canPlace()) {
+                            <td>
                               <input
-                                class="input h-9 w-28"
-                                name="detail"
-                                placeholder="case, bac…"
-                                maxlength="40"
-                                [attr.aria-label]="'Détail pour ' + s.designation"
-                                [disabled]="!draft.locationId"
-                                [(ngModel)]="draft.detail"
+                                type="checkbox"
+                                [attr.aria-label]="'Sélectionner ' + s.designation"
+                                [checked]="selected().has(s.productId)"
+                                (change)="toggle(s.productId)"
                               />
-                              <button
-                                type="submit"
-                                class="btn btn-primary btn-icon btn-sm"
-                                aria-label="Enregistrer l'emplacement"
-                                [disabled]="busy()"
+                            </td>
+                          }
+                          <td class="min-w-56">
+                            <a
+                              class="product-link flex items-center gap-3"
+                              [routerLink]="['/inventory/products', s.productId]"
+                              [attr.aria-label]="'Fiche produit ' + s.designation"
+                            >
+                              <app-product-thumb
+                                [productId]="s.productId"
+                                [version]="s.imageVersion"
+                                [name]="s.designation"
+                                [size]="36"
+                              />
+                              <span class="min-w-0">
+                                <span class="product-name block font-medium">{{
+                                  s.designation
+                                }}</span>
+                                <span class="block text-xs text-subtle tabular-nums">{{
+                                  s.cip13
+                                }}</span>
+                              </span>
+                            </a>
+                          </td>
+                          <td class="min-w-40">
+                            @if (editing() === s.productId) {
+                              <form
+                                class="flex min-w-80 items-center gap-1.5"
+                                (ngSubmit)="savePlacement(s)"
                               >
-                                <app-icon name="check" [size]="14" />
-                              </button>
-                              <button
-                                type="button"
-                                class="btn btn-ghost btn-icon btn-sm"
-                                aria-label="Annuler"
-                                (click)="editing.set(null)"
-                              >
-                                <app-icon name="x" [size]="14" />
-                              </button>
-                            </form>
-                          } @else {
-                            <div class="flex items-center gap-1">
-                              @if (s.location; as place) {
-                                <app-location-chip [place]="place" />
-                              } @else {
-                                <span class="text-subtle">—</span>
-                              }
-                              @if (canPlace()) {
+                                <select
+                                  class="select h-9 min-w-0 flex-1"
+                                  name="location"
+                                  [attr.aria-label]="'Emplacement de ' + s.designation"
+                                  [(ngModel)]="draft.locationId"
+                                >
+                                  <option value="">Aucun</option>
+                                  @for (l of locations(); track l.id) {
+                                    <option [value]="l.id">{{ l.code }} · {{ l.name }}</option>
+                                  }
+                                </select>
+                                <input
+                                  class="input h-9 w-28"
+                                  name="detail"
+                                  placeholder="case, bac…"
+                                  maxlength="40"
+                                  [attr.aria-label]="'Détail pour ' + s.designation"
+                                  [disabled]="!draft.locationId"
+                                  [(ngModel)]="draft.detail"
+                                />
+                                <button
+                                  type="submit"
+                                  class="btn btn-primary btn-icon btn-sm"
+                                  aria-label="Enregistrer l'emplacement"
+                                  [disabled]="busy()"
+                                >
+                                  <app-icon name="check" [size]="14" />
+                                </button>
                                 <button
                                   type="button"
-                                  class="btn btn-ghost btn-icon btn-sm text-muted"
-                                  [attr.aria-label]="'Changer l’emplacement de ' + s.designation"
-                                  (click)="edit(s)"
+                                  class="btn btn-ghost btn-icon btn-sm"
+                                  aria-label="Annuler"
+                                  (click)="editing.set(null)"
                                 >
-                                  <app-icon name="pencil" [size]="14" />
+                                  <app-icon name="x" [size]="14" />
                                 </button>
-                              }
-                            </div>
-                          }
-                        </td>
-                        <td class="num whitespace-nowrap">
-                          {{ s.sellingPriceCents ?? s.publicPriceCents | money }}
-                        </td>
-                        <td class="num whitespace-nowrap">
-                          <span class="font-semibold">{{ s.available }}</span>
-                          <span class="text-subtle"> / {{ s.onHand }}</span>
-                        </td>
-                        <td class="num">{{ s.reserved }}</td>
-                        <td class="whitespace-nowrap">
-                          @if (s.shortfall > 0) {
-                            <span class="badge badge-danger">{{ s.shortfall }}</span>
-                            <button
-                              *appHasPermission="'STOCK_ADJUST'"
-                              type="button"
-                              class="btn btn-ghost btn-sm ml-1"
-                              (click)="resolve(s)"
-                            >
-                              Régulariser
-                            </button>
-                          } @else {
-                            <span class="text-subtle">—</span>
-                          }
-                        </td>
-                        <td class="whitespace-nowrap">
-                          @if (s.nextExpiry) {
-                            <span [class.text-warning]="expiresSoon(s.nextExpiry)">
-                              {{ s.nextExpiry | date: 'dd/MM/yyyy' }}
-                            </span>
-                          } @else {
-                            <span class="text-subtle">—</span>
-                          }
-                        </td>
-                        <td>
-                          @if (s.available <= 0) {
-                            <span class="badge badge-danger"><span class="dot"></span>Rupture</span>
-                          } @else if (s.belowThreshold) {
-                            <span class="badge badge-warning"
-                              ><span class="dot"></span>Stock bas</span
-                            >
-                          } @else if (s.nextExpiry && expiresSoon(s.nextExpiry)) {
-                            <span class="badge badge-info"
-                              ><span class="dot"></span>Péremption proche</span
-                            >
-                          } @else {
-                            <span class="badge badge-success"
-                              ><span class="dot"></span>En stock</span
-                            >
-                          }
-                        </td>
-                        @if (canAdjust()) {
-                          <td class="text-right">
-                            @if (s.onHand > 0) {
-                              <button
-                                type="button"
-                                class="btn btn-ghost btn-sm"
-                                [attr.aria-label]="'Sortie ou correction de ' + s.designation"
-                                (click)="exiting.set(s)"
-                              >
-                                <app-icon name="minus" [size]="14" />
-                                Sortie
-                              </button>
+                              </form>
+                            } @else {
+                              <div class="flex items-center gap-1">
+                                @if (s.location; as place) {
+                                  <app-location-chip [place]="place" />
+                                } @else {
+                                  <span class="text-subtle">—</span>
+                                }
+                                @if (canPlace()) {
+                                  <button
+                                    type="button"
+                                    class="btn btn-ghost btn-icon btn-sm text-muted"
+                                    [attr.aria-label]="'Changer l’emplacement de ' + s.designation"
+                                    (click)="edit(s)"
+                                  >
+                                    <app-icon name="pencil" [size]="14" />
+                                  </button>
+                                }
+                              </div>
                             }
                           </td>
-                        }
-                      </tr>
-                    } @empty {
-                      <tr>
-                        <td [attr.colspan]="(canPlace() ? 9 : 8) + (canAdjust() ? 1 : 0)">
-                          <div class="empty-state">
-                            <app-icon name="stock" [size]="22" />
-                            <p>Aucun produit ne correspond à cette recherche.</p>
-                          </div>
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
+                          <td class="num whitespace-nowrap">
+                            {{ s.sellingPriceCents ?? s.publicPriceCents | money }}
+                          </td>
+                          <td class="num whitespace-nowrap">
+                            <span class="font-semibold">{{ s.available }}</span>
+                            <span class="text-subtle"> / {{ s.onHand }}</span>
+                          </td>
+                          <td class="num">{{ s.reserved }}</td>
+                          <td class="whitespace-nowrap">
+                            @if (s.shortfall > 0) {
+                              <span class="badge badge-danger">{{ s.shortfall }}</span>
+                              <button
+                                *appHasPermission="'STOCK_ADJUST'"
+                                type="button"
+                                class="btn btn-ghost btn-sm ml-1"
+                                (click)="resolve(s)"
+                              >
+                                Régulariser
+                              </button>
+                            } @else {
+                              <span class="text-subtle">—</span>
+                            }
+                          </td>
+                          <td class="whitespace-nowrap">
+                            @if (s.nextExpiry) {
+                              <span [class.text-warning]="expiresSoon(s.nextExpiry)">
+                                {{ s.nextExpiry | date: 'dd/MM/yyyy' }}
+                              </span>
+                            } @else {
+                              <span class="text-subtle">—</span>
+                            }
+                          </td>
+                          <td>
+                            @if (s.available <= 0) {
+                              <span class="badge badge-danger"
+                                ><span class="dot"></span>Rupture</span
+                              >
+                            } @else if (s.belowThreshold) {
+                              <span class="badge badge-warning"
+                                ><span class="dot"></span>Stock bas</span
+                              >
+                            } @else if (s.nextExpiry && expiresSoon(s.nextExpiry)) {
+                              <span class="badge badge-info"
+                                ><span class="dot"></span>Péremption proche</span
+                              >
+                            } @else {
+                              <span class="badge badge-success"
+                                ><span class="dot"></span>En stock</span
+                              >
+                            }
+                          </td>
+                          @if (canAdjust()) {
+                            <td class="text-right">
+                              @if (s.onHand > 0) {
+                                <button
+                                  type="button"
+                                  class="btn btn-ghost btn-sm"
+                                  [attr.aria-label]="'Sortie ou correction de ' + s.designation"
+                                  (click)="exiting.set(s)"
+                                >
+                                  <app-icon name="minus" [size]="14" />
+                                  Sortie
+                                </button>
+                              }
+                            </td>
+                          }
+                        </tr>
+                      } @empty {
+                        <tr>
+                          <td [attr.colspan]="(canPlace() ? 9 : 8) + (canAdjust() ? 1 : 0)">
+                            <app-empty-state [illustration]="filtered() ? 'search' : 'box'">
+                              <p>Aucun produit ne correspond à cette recherche.</p>
+                              @if (filtered()) {
+                                <button
+                                  type="button"
+                                  class="btn btn-secondary btn-sm mt-1"
+                                  (click)="clearFilters()"
+                                >
+                                  <app-icon name="x" [size]="14" />
+                                  Effacer les filtres
+                                </button>
+                              }
+                            </app-empty-state>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
             </section>
           }
           @case ('expiry') {
@@ -588,10 +613,9 @@ interface CatalogHit {
                     } @empty {
                       <tr>
                         <td colspan="5">
-                          <div class="empty-state">
-                            <app-icon name="checkCircle" [size]="22" />
+                          <app-empty-state illustration="calendar">
                             <p>Aucun lot ne périme dans les 90 prochains jours.</p>
-                          </div>
+                          </app-empty-state>
                         </td>
                       </tr>
                     }
@@ -836,6 +860,8 @@ export class InventoryPage {
   ];
   protected readonly tab = signal<Tab>('stocks');
   protected readonly stocks = signal<StockOverview[]>([]);
+  /** False until the first answer: the list shows placeholder rows, not "no product". */
+  protected readonly stocksLoaded = signal(false);
   protected readonly stockValue = computed(() =>
     this.stocks().reduce(
       (sum, s) => sum + s.onHand * (s.sellingPriceCents ?? s.publicPriceCents ?? 0),
@@ -916,11 +942,26 @@ export class InventoryPage {
     } else if (this.locationFilter !== 'ALL') {
       params = params.set('locationId', this.locationFilter);
     }
-    this.stocks.set(
-      await firstValueFrom(this.http.get<StockOverview[]>(`${this.api}/stocks`, { params })),
-    );
+    try {
+      this.stocks.set(
+        await firstValueFrom(this.http.get<StockOverview[]>(`${this.api}/stocks`, { params })),
+      );
+    } finally {
+      this.stocksLoaded.set(true);
+    }
     const visible = new Set(this.stocks().map((s) => s.productId));
     this.selected.update((current) => new Set([...current].filter((id) => visible.has(id))));
+  }
+
+  protected filtered(): boolean {
+    return this.query.trim() !== '' || this.belowOnly || this.locationFilter !== 'ALL';
+  }
+
+  protected clearFilters(): void {
+    this.query = '';
+    this.belowOnly = false;
+    this.locationFilter = 'ALL';
+    void this.loadStocks();
   }
 
   private async loadLocations(): Promise<void> {

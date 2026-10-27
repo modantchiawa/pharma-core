@@ -18,6 +18,7 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { ControlAlertsService } from '../../core/control/control-alerts.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { Icon } from '../../shared/ui/icon';
+import { MotionFeedback, play } from '../../shared/ui/motion-feedback';
 import { ALERT_ICONS, severityBadge, shortWhen } from './control-format';
 
 /**
@@ -26,7 +27,7 @@ import { ALERT_ICONS, severityBadge, shortWhen } from './control-format';
  */
 @Component({
   selector: 'app-alerts-bell',
-  imports: [RouterLink, Icon],
+  imports: [RouterLink, Icon, MotionFeedback],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:click)': 'onDocumentClick($event)' },
   template: `
@@ -42,11 +43,14 @@ import { ALERT_ICONS, severityBadge, shortWhen } from './control-format';
           [attr.aria-expanded]="open()"
           (click)="toggle()"
         >
-          <app-icon name="bell" />
+          <app-icon name="bell" class="bell-icon" />
           @if (alerts.unread() > 0) {
-            <span class="count tabular-nums">{{
-              alerts.unread() > 99 ? '99+' : alerts.unread()
-            }}</span>
+            <span
+              class="count-enter count tabular-nums"
+              [appFeedback]="alerts.unread()"
+              feedbackKind="pop"
+              >{{ alerts.unread() > 99 ? '99+' : alerts.unread() }}</span
+            >
           }
         </button>
         @if (open()) {
@@ -61,7 +65,7 @@ import { ALERT_ICONS, severityBadge, shortWhen } from './control-format';
             </div>
             <ul class="max-h-[60vh] overflow-y-auto border-t border-line">
               @for (alert of latest(); track alert.id) {
-                <li class="item" [class.unread]="!alert.acknowledgedAt">
+                <li class="row-enter item" [class.unread]="!alert.acknowledgedAt">
                   <span class="icon" [class]="severityBadge(alert)">
                     <app-icon [name]="icons[alert.kind]" [size]="15" />
                   </span>
@@ -92,6 +96,12 @@ import { ALERT_ICONS, severityBadge, shortWhen } from './control-format';
     }
   `,
   styles: `
+    .bell-icon {
+      transform-origin: 50% 8%;
+    }
+    .count-enter {
+      animation: pop-in var(--motion-medium) var(--ease-emphasized);
+    }
     .count {
       position: absolute;
       top: 0.15rem;
@@ -178,6 +188,10 @@ export class AlertsBell {
     this.alerts.arrivals.pipe(takeUntilDestroyed()).subscribe((alert) => {
       this.latest.update((list) => [alert, ...list].slice(0, 8));
       this.toast.info(alert.title);
+      const bell = this.host.nativeElement.querySelector('.bell-icon');
+      if (bell) {
+        play(bell, 'ring');
+      }
     });
     inject(DestroyRef).onDestroy(() => this.alerts.stop());
   }
