@@ -274,7 +274,7 @@ public class ProcurementService {
                     0, notes, overdue, shortClosed, 0, 0, 0, 0, supplier,
                     lines.stream().map(l -> new OrderLineView(l.lineNo(), l.productId(), l.designation(), l.cip13(),
                             0, 0, l.unitCostCents(), l.packSize(), null, null, l.locationCode(), l.locationName(),
-                            l.locationKind(), l.locationDetail())).toList(), true);
+                            l.locationKind(), l.locationDetail(), l.imageVersion())).toList(), true);
         }
     }
 
