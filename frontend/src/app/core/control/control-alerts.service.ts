@@ -31,10 +31,17 @@ export class ControlAlertsService {
   /** Alerts as they arrive, for the pages that show the feed. */
   readonly arrivals = this.incoming.asObservable();
 
-  /** Starts listening for the signed-in pharmacy; a no-op without CONTROL_VIEW. */
+  /**
+   * Starts listening for the signed-in pharmacy; a no-op without CONTROL_VIEW. Called again when
+   * the bell comes back after an unlock, it re-reads the count of the alerts held meanwhile.
+   */
   start(): void {
     const tenant = this.permissions.profile()?.tenantId;
-    if (!tenant || !this.permissions.has('CONTROL_VIEW') || this.started) {
+    if (!tenant || !this.permissions.has('CONTROL_VIEW')) {
+      return;
+    }
+    if (this.started) {
+      void this.refresh();
       return;
     }
     this.started = true;

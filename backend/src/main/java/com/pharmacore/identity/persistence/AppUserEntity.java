@@ -114,6 +114,11 @@ public class AppUserEntity {
         this.lockedUntil = null;
     }
 
+    /** Failures counted since the last success or lockout. */
+    public int failedAttempts() {
+        return failedAttempts;
+    }
+
     public String passwordHash() {
         return passwordHash;
     }

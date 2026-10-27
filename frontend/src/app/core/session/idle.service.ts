@@ -1,13 +1,14 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { firstValueFrom, timeout } from 'rxjs';
 import { SessionEventKind } from '../api/models';
 import { AuthService } from '../auth/auth.service';
 import { APP_ENVIRONMENT } from '../config';
 import { TerminalService } from '../offline/terminal.service';
-import { MAX_UNLOCK_FAILURES, idleMinutes, idleState } from './idle';
+import { MAX_UNLOCK_FAILURES, idleMinutes, idleState, pingDue } from './idle';
 import { SessionPolicyService } from './session-policy.service';
+import type { SessionServer } from './session-server';
+import { SessionSignals } from './session-signals';
 import {
   SESSION_KEYS,
   readLastActivity,
@@ -20,8 +21,6 @@ import {
 const LOCAL_THROTTLE_MS = 1_000;
 const SHARED_THROTTLE_MS = 5_000;
 const TICK_MS = 1_000;
-/** A journal entry must not hold the logout up when the server is slow or gone. */
-const AUDIT_TIMEOUT_MS = 1_500;
 const CHANNEL = 'pharmacore.session';
 const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll'];
 
@@ -39,12 +38,18 @@ export type LogoutReason = 'idle' | 'pin' | 'manual';
  * share it through a BroadcastChannel (and the storage event where it is missing), so working in
  * one tab keeps the others open, and a lock or logout applies to all of them. A sale being
  * committed or a page being printed holds the timers: they never interrupt it.
+ *
+ * The server holds the real lock: this service tells it at once when the terminal locks, reports
+ * the user's activity at most once a minute when no request does, and follows its verdict (a 423
+ * locks the tab, a 401 `session-expired` closes it). Locked, the tab forgets its access token and
+ * the shell removes the page.
  */
 @Injectable({ providedIn: 'root' })
 export class IdleService {
   private readonly auth = inject(AuthService);
   private readonly policies = inject(SessionPolicyService);
   private readonly terminal = inject(TerminalService);
+  private readonly signals = inject(SessionSignals);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly apiUrl = inject(APP_ENVIRONMENT).apiUrl;
@@ -56,9 +61,11 @@ export class IdleService {
   private holds = 0;
   private lastLocal = 0;
   private lastShared = 0;
+  private lastPing = 0;
   private channel: BroadcastChannel | null = null;
   private stopListening: (() => void) | null = null;
   private closing = false;
+  private serverCalls: Promise<SessionServer> | null = null;
 
   readonly policy = this.policies.policy;
   readonly locked = computed(() => this.lockState() !== null);
@@ -77,6 +84,9 @@ export class IdleService {
     }
     this.lastActivity.set(readLastActivity() ?? Date.now());
     this.lockState.set(readLock());
+    if (this.locked()) {
+      this.auth.dropAccess();
+    }
     const onActivity = () => this.activity();
     const options: AddEventListenerOptions = { passive: true, capture: true };
     ACTIVITY_EVENTS.forEach((type) => window.addEventListener(type, onActivity, options));
@@ -92,6 +102,10 @@ export class IdleService {
       this.channel = new BroadcastChannel(CHANNEL);
       this.channel.onmessage = (event: MessageEvent<SessionMessage>) => this.receive(event.data);
     }
+    const lockedByServer = this.signals.lockedByServer.subscribe(() => this.serverLocked());
+    const closedByServer = this.signals.closedByServer.subscribe(
+      () => void this.closedByServer('idle'),
+    );
     const timer = setInterval(() => this.tick(), TICK_MS);
     this.stopListening = () => {
       ACTIVITY_EVENTS.forEach((type) => window.removeEventListener(type, onActivity, options));
@@ -99,6 +113,8 @@ export class IdleService {
       window.removeEventListener('afterprint', onAfterPrint);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisible);
+      lockedByServer.unsubscribe();
+      closedByServer.unsubscribe();
       clearInterval(timer);
       this.channel?.close();
       this.channel = null;
@@ -153,6 +169,26 @@ export class IdleService {
     }
   }
 
+  /** The server counts the wrong codes of the session's owner: its count is shown. */
+  attemptsReported(attemptsLeft: number): void {
+    this.failureCount.set(
+      MAX_UNLOCK_FAILURES - Math.max(0, Math.min(MAX_UNLOCK_FAILURES, attemptsLeft)),
+    );
+  }
+
+  /**
+   * The server closed the session (logout delay, fifth wrong code): back to the sign-in screen in
+   * every tab, without journaling what the server already has.
+   */
+  async closedByServer(reason: 'idle' | 'pin'): Promise<void> {
+    if (this.closing) {
+      return;
+    }
+    this.closing = true;
+    this.post({ type: 'logout', reason, minutes: 0 });
+    await this.closeHere(reason, 0);
+  }
+
   private activity(): void {
     if (this.locked()) {
       return;
@@ -160,7 +196,19 @@ export class IdleService {
     const at = Date.now();
     if (at - this.lastLocal >= LOCAL_THROTTLE_MS) {
       this.touch(at, false);
+      this.ping(at);
     }
+  }
+
+  /** Activity without API calls (typing, scrolling) reaches the server at least once a minute. */
+  private ping(at: number): void {
+    if (this.closing || !pingDue(at, this.lastPing, this.signals.lastActivityRequest)) {
+      return;
+    }
+    this.lastPing = at;
+    this.server()
+      .then((server) => server.activity())
+      .catch(() => undefined);
   }
 
   private touch(at: number, share: boolean): void {
@@ -201,7 +249,37 @@ export class IdleService {
     this.failureCount.set(0);
     writeLock(lock);
     this.post({ type: 'lock', ...lock });
-    void this.journal(manual ? 'MANUAL_LOCK' : 'IDLE_LOCK');
+    void this.lockOnServer(manual);
+  }
+
+  /** Tells the server, then forgets the access token (even when the server cannot be reached). */
+  private async lockOnServer(manual: boolean): Promise<void> {
+    try {
+      const server = await this.server();
+      await server.lock(
+        manual,
+        this.terminal.terminalId,
+        idleMinutes(Date.now(), this.lastActivity()),
+      );
+    } catch {
+      // Offline: locked here; the server locks by itself at its own deadline
+    } finally {
+      if (this.locked()) {
+        this.auth.dropAccess();
+      }
+    }
+  }
+
+  /** The server locked the session first (its deadline, another tab, the clock of this one). */
+  private serverLocked(): void {
+    if (!this.locked()) {
+      const lock = { since: Date.now(), manual: false };
+      this.lockState.set(lock);
+      this.failureCount.set(0);
+      writeLock(lock);
+      this.post({ type: 'lock', ...lock });
+    }
+    this.auth.dropAccess();
   }
 
   /** "Se déconnecter" on the lock screen: every tab of the terminal goes back to the sign-in. */
@@ -243,11 +321,14 @@ export class IdleService {
         break;
       case 'lock':
         this.lockState.set({ since: message.since, manual: message.manual });
+        this.auth.dropAccess();
         break;
       case 'unlock':
         this.lockState.set(null);
         this.failureCount.set(0);
         this.lastActivity.set(message.at);
+        // This tab's token was issued while locked: the next request refreshes a full one
+        this.auth.dropAccess();
         break;
       case 'logout':
         if (!this.closing) {
@@ -267,6 +348,7 @@ export class IdleService {
       }
     } else if (event.key === SESSION_KEYS.lock) {
       this.lockState.set(readLock());
+      this.auth.dropAccess();
     }
   }
 
@@ -276,17 +358,27 @@ export class IdleService {
 
   private async journal(event: SessionEventKind): Promise<void> {
     try {
-      await firstValueFrom(
-        this.http
-          .post(`${this.apiUrl}/v1/me/session-events`, {
-            event,
-            terminalId: this.terminal.terminalId,
-            idleMinutes: idleMinutes(Date.now(), this.lastActivity()),
-          })
-          .pipe(timeout(AUDIT_TIMEOUT_MS)),
+      const server = await this.server();
+      await server.journal(
+        event,
+        this.terminal.terminalId,
+        idleMinutes(Date.now(), this.lastActivity()),
       );
     } catch {
-      // Offline: the lock happens anyway, only its journal entry is lost
+      // Offline: the logout happens anyway, only its journal entry is lost
     }
+  }
+
+  /** The calls to the server are loaded on first use, outside the first screen. */
+  private server(): Promise<SessionServer> {
+    this.serverCalls ??= import('./session-server').then(
+      (m) => new m.SessionServer(this.http, this.apiUrl),
+      (error: unknown) => {
+        // Not loaded (server unreachable before the service worker cached it): tried again next time
+        this.serverCalls = null;
+        throw error;
+      },
+    );
+    return this.serverCalls;
   }
 }

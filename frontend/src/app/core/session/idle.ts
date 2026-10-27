@@ -11,6 +11,11 @@ export const IDLE_LIMITS = { maxLock: 120, minLogout: 5, maxLogout: 720 } as con
 export const WARNING_MS = 30_000;
 /** Wrong PINs on the lock screen before the session is closed. */
 export const MAX_UNLOCK_FAILURES = 5;
+/**
+ * The user's activity reaches the server at least this often while they work without calling the
+ * API (typing, scrolling): the server's own deadlines allow for it (SessionLockRules.GRACE).
+ */
+export const ACTIVITY_PING_MS = 60_000;
 
 const MINUTE_MS = 60_000;
 
@@ -147,4 +152,12 @@ export function closedSessionNotice(reason: string | null, minutes: number | nul
     return `Session fermée après ${MAX_UNLOCK_FAILURES} codes erronés sur l’écran verrouillé`;
   }
   return null;
+}
+
+/**
+ * Whether the user's activity must be reported to the server now: at most once a minute, and
+ * not when a request the server counts as activity went out within that minute.
+ */
+export function pingDue(now: number, lastPing: number, lastActivityRequest: number): boolean {
+  return now - Math.max(lastPing, lastActivityRequest) >= ACTIVITY_PING_MS;
 }

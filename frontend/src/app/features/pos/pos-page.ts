@@ -80,7 +80,6 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
     EmptyState,
     MotionFeedback,
   ],
-  providers: [CartStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
   template: `
@@ -1008,27 +1007,27 @@ export class PosPage {
   constructor() {
     inject(DestroyRef).onDestroy(() => clearTimeout(this.saleDoneTimer));
     void this.checkCashSession();
+    // The basket outlives the page (removed while the terminal is locked): the covers and
+    // prescriptions of its customer are read again, the chosen cover kept as it was
+    const customer = this.cart.customer();
+    if (customer) {
+      void this.loadCustomerFiles(customer, false);
+    }
     // Another user switched in from the lock screen: the basket stays at the counter, but the
     // amounts the previous cashier typed are dropped and taken again by whoever cashes the sale.
-    let cashier = this.permissions.profile()?.userId;
     effect(() => {
-      const current = this.permissions.profile()?.userId;
-      if (current && cashier && current !== cashier) {
+      const notice = this.cart.handover();
+      if (notice) {
         untracked(() => {
-          if (this.cart.payments().length > 0) {
-            this.cart.payments.set([]);
-            this.amount = '';
-            this.message.set(
-              `Panier conservé pour ${this.cashierName()} : ressaisissez les règlements`,
-            );
-          }
+          this.amount = '';
+          this.message.set(notice);
+          this.cart.handover.set(null);
         });
       }
-      cashier = current ?? cashier;
     });
   }
 
-  private async loadCustomerFiles(customer: Customer): Promise<void> {
+  private async loadCustomerFiles(customer: Customer, applySingleCover = true): Promise<void> {
     try {
       const [policies, prescriptions] = await Promise.all([
         firstValueFrom(
@@ -1044,7 +1043,7 @@ export class PosPage {
       ]);
       this.policies.set(policies);
       this.prescriptionsOnFile.set(prescriptions.filter((p) => p.renewalsRemaining > 0));
-      if (policies.length === 1) {
+      if (policies.length === 1 && applySingleCover) {
         this.cart.applyPolicy(policies[0]);
       }
     } catch {

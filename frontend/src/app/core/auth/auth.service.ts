@@ -1,11 +1,18 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
+import type { User, UserManager } from 'oidc-client-ts';
 import { firstValueFrom } from 'rxjs';
 import { Me, SessionPolicy } from '../api/models';
 import { APP_ENVIRONMENT } from '../config';
 import { SessionPolicyService } from '../session/session-policy.service';
-import { readCurrentUser, sessionEnded, sessionStarted } from '../session/session-store';
+import { SessionSignals } from '../session/session-signals';
+import {
+  readCurrentUser,
+  readLock,
+  sessionEnded,
+  sessionStarted,
+  writeLock,
+} from '../session/session-store';
 import type { SecretKind } from '../session/unlock-verifier';
 import { PermissionService } from './permission.service';
 
@@ -27,6 +34,8 @@ interface TokenResponse {
   profile: Me;
   /** The pharmacy's inactivity delays, absent from a server of an earlier version. */
   sessionPolicy?: SessionPolicy;
+  /** The session is locked on the server: this token only carries the terminal's heartbeat. */
+  sessionLocked?: boolean;
 }
 
 /**
@@ -43,6 +52,7 @@ export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly permissions = inject(PermissionService);
   private readonly sessionPolicy = inject(SessionPolicyService);
+  private readonly signals = inject(SessionSignals);
   private readonly realmState = signal<Realm>(
     (sessionStorage.getItem(REALM_KEY) as Realm) ?? 'pharmacy',
   );
@@ -53,7 +63,8 @@ export class AuthService {
   private readonly platformToken = signal<string | null>(
     sessionStorage.getItem(PLATFORM_TOKEN_KEY),
   );
-  private platformManager: UserManager | null = null;
+  private readonly terminalToken = signal(localStorage.getItem(TERMINAL_TOKEN_KEY));
+  private platformManager: Promise<UserManager> | null = null;
   private refreshing: Promise<string | null> | null = null;
 
   readonly realm = this.realmState.asReadonly();
@@ -79,8 +90,11 @@ export class AuthService {
     const exp = this.claims()?.['exp'];
     return typeof exp === 'number' && exp * 1000 > Date.now();
   });
-  /** Users who can switch in with a PIN on this terminal (last successful logins). */
-  readonly terminalBound = computed(() => !!localStorage.getItem(TERMINAL_TOKEN_KEY));
+  /**
+   * Users who can switch in with a PIN on this terminal (last successful logins); follows the
+   * first password login, so the lock screen of that session already offers the PIN.
+   */
+  readonly terminalBound = computed(() => !!this.terminalToken());
   readonly user = this.platformUser.asReadonly();
 
   async init(): Promise<void> {
@@ -88,7 +102,7 @@ export class AuthService {
       if (this.platformToken()) {
         return;
       }
-      this.platformUser.set(await this.manager().getUser());
+      this.platformUser.set(await (await this.manager()).getUser());
     } else if (!this.isAuthenticated() && localStorage.getItem(REFRESH_KEY)) {
       await this.refresh();
     }
@@ -115,6 +129,7 @@ export class AuthService {
     }
     if (response.terminalToken) {
       localStorage.setItem(TERMINAL_TOKEN_KEY, response.terminalToken);
+      this.terminalToken.set(response.terminalToken);
     }
     this.rememberKnownUser(email, response.profile.displayName);
     return this.started(response, email, 'password', password);
@@ -156,6 +171,36 @@ export class AuthService {
     return me;
   }
 
+  /**
+   * Unlocks this terminal's own session: the server checks the PIN or password of the signed-in
+   * user, unlocks the session and rotates its tokens (a refresh running meanwhile is awaited, so
+   * that both do not spend the same refresh token).
+   */
+  async unlock(kind: SecretKind, secret: string): Promise<Me> {
+    await this.refreshing;
+    const response = await firstValueFrom(
+      this.http.post<TokenResponse>(`${this.env.apiUrl}/auth/unlock`, {
+        refreshToken: localStorage.getItem(REFRESH_KEY) ?? '',
+        method: kind === 'pin' ? 'PIN' : 'PASSWORD',
+        secret,
+      }),
+    );
+    return this.started(response, this.currentEmail() ?? '', kind, secret);
+  }
+
+  /**
+   * The terminal is locked: this tab forgets its access token, so that nothing left in the page
+   * or its storage can call the API. Background requests get a token marked as locked by a
+   * refresh, which the server only lets through to the heartbeat.
+   */
+  dropAccess(): void {
+    if (this.realmState() !== 'pharmacy') {
+      return;
+    }
+    sessionStorage.removeItem(ACCESS_KEY);
+    this.accessState.set(null);
+  }
+
   /** Called by the HTTP layer on 401 and at startup; concurrent callers share one refresh. */
   refresh(): Promise<string | null> {
     if (this.realmState() === 'platform') {
@@ -174,7 +219,7 @@ export class AuthService {
         this.realmState.set('pharmacy');
         return;
       }
-      await this.manager().signoutRedirect();
+      await (await this.manager()).signoutRedirect();
       return;
     }
     const refreshToken = localStorage.getItem(REFRESH_KEY);
@@ -218,7 +263,7 @@ export class AuthService {
   async loginPlatform(returnUrl = '/platform'): Promise<void> {
     sessionStorage.setItem(REALM_KEY, 'platform');
     this.realmState.set('platform');
-    await this.manager().signinRedirect({ state: returnUrl });
+    await (await this.manager()).signinRedirect({ state: returnUrl });
   }
 
   /** Demonstration mode: the supervision console opens with a shared password. */
@@ -235,7 +280,7 @@ export class AuthService {
   }
 
   async completePlatformLogin(): Promise<string> {
-    const user = await this.manager().signinRedirectCallback();
+    const user = await (await this.manager()).signinRedirectCallback();
     this.platformUser.set(user);
     return typeof user.state === 'string' ? user.state : '/platform';
   }
@@ -261,6 +306,13 @@ export class AuthService {
     this.mustChange.set(response.mustChangePassword);
     this.permissions.setProfile(response.profile);
     this.sessionPolicy.set(response.sessionPolicy);
+    if (response.sessionLocked) {
+      // Locked on the server (reload, another tab, deadline): the lock screen comes back
+      if (!readLock()) {
+        writeLock({ since: Date.now(), manual: false });
+      }
+      this.signals.serverLocked();
+    }
     return response.profile;
   }
 
@@ -288,7 +340,7 @@ export class AuthService {
       return this.isAuthenticated() ? this.platformToken() : null;
     }
     try {
-      const user = await this.manager().signinSilent();
+      const user = await (await this.manager()).signinSilent();
       this.platformUser.set(user);
       return user?.access_token ?? null;
     } catch {
@@ -302,22 +354,26 @@ export class AuthService {
     localStorage.setItem('pharmacore.knownUsers', JSON.stringify(users.slice(0, 8)));
   }
 
-  private manager(): UserManager {
-    if (!this.platformManager) {
-      const config = this.env.oidc.platform;
-      this.platformManager = new UserManager({
-        authority: config.authority,
-        client_id: config.clientId,
-        redirect_uri: `${location.origin}/auth/callback`,
-        post_logout_redirect_uri: location.origin,
-        response_type: 'code',
-        scope: this.env.oidc.scope,
-        automaticSilentRenew: true,
-        userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-      });
-      this.platformManager.events.addUserLoaded((user) => this.platformUser.set(user));
-      this.platformManager.events.addUserUnloaded(() => this.platformUser.set(null));
-    }
+  /** The OpenID Connect client of the editor console, loaded on demand (pharmacy staff never need it). */
+  private manager(): Promise<UserManager> {
+    this.platformManager ??= import('oidc-client-ts').then(
+      ({ UserManager, WebStorageStateStore }) => {
+        const config = this.env.oidc.platform;
+        const manager = new UserManager({
+          authority: config.authority,
+          client_id: config.clientId,
+          redirect_uri: `${location.origin}/auth/callback`,
+          post_logout_redirect_uri: location.origin,
+          response_type: 'code',
+          scope: this.env.oidc.scope,
+          automaticSilentRenew: true,
+          userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+        });
+        manager.events.addUserLoaded((user) => this.platformUser.set(user));
+        manager.events.addUserUnloaded(() => this.platformUser.set(null));
+        return manager;
+      },
+    );
     return this.platformManager;
   }
 }

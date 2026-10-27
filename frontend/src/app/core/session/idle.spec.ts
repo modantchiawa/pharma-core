@@ -7,6 +7,7 @@ import {
   idleMinutes,
   idleState,
   minutesBeforeLogout,
+  pingDue,
   sanitizePolicy,
   sessionPolicyProblem,
   warningProgress,
@@ -134,5 +135,18 @@ describe('closedSessionNotice', () => {
     expect(closedSessionNotice('idle', 30)).toBe('Session fermée après 30 min d’inactivité');
     expect(closedSessionNotice('pin', null)).toContain('5 codes erronés');
     expect(closedSessionNotice(null, null)).toBeNull();
+  });
+});
+
+describe('pingDue', () => {
+  it('reports activity to the server at most once a minute', () => {
+    expect(pingDue(T0, 0, 0)).toBe(true);
+    expect(pingDue(T0 + 59_999, T0, 0)).toBe(false);
+    expect(pingDue(T0 + MIN, T0, 0)).toBe(true);
+  });
+
+  it('waits when a request the server counts as activity just went out', () => {
+    expect(pingDue(T0 + 2 * MIN, T0, T0 + 90_000)).toBe(false);
+    expect(pingDue(T0 + 3 * MIN, T0, T0 + 90_000)).toBe(true);
   });
 });

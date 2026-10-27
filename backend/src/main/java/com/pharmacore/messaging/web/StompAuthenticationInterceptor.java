@@ -25,7 +25,8 @@ import org.springframework.stereotype.Component;
  * authorizes every SUBSCRIBE and SEND: a pharmacy can only listen to conversations it can see
  * (RLS) and to its own notification topics, the internal control alerts being reserved to
  * holders of {@code CONTROL_VIEW}. Expired tokens are refused on every frame, forcing
- * the client to reconnect with a fresh token.
+ * the client to reconnect with a fresh token. A locked terminal keeps its connection but sends
+ * nothing and receives nothing ({@link LockedSessionGuard}) until it is unlocked.
  */
 @Component
 class StompAuthenticationInterceptor implements ChannelInterceptor {
@@ -39,10 +40,13 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
 
     private final BearerTokenAuthenticator authenticator;
     private final ChatService chat;
+    private final LockedSessionGuard lockedSessions;
 
-    StompAuthenticationInterceptor(BearerTokenAuthenticator authenticator, ChatService chat) {
+    StompAuthenticationInterceptor(BearerTokenAuthenticator authenticator, ChatService chat,
+                                   LockedSessionGuard lockedSessions) {
         this.authenticator = authenticator;
         this.chat = chat;
+        this.lockedSessions = lockedSessions;
     }
 
     @Override
@@ -53,7 +57,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
         }
         StompCommand command = accessor.getCommand();
         if (command == StompCommand.CONNECT) {
-            accessor.setUser(connect(accessor));
+            var token = connect(accessor);
+            lockedSessions.connected(accessor.getSessionId(), token);
+            accessor.setUser(token);
             return message;
         }
         if (command == StompCommand.DISCONNECT || command == StompCommand.UNSUBSCRIBE) {
@@ -65,6 +71,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
             case SEND -> {
                 requirePermission(token, CHAT_PERMISSION);
                 authorizeSend(accessor.getDestination());
+                if (!lockedSessions.open(accessor.getSessionId())) {
+                    throw new AccessDeniedException("Session locked");
+                }
             }
             default -> {
                 // ACK, NACK, BEGIN, COMMIT, ABORT carry no destination to authorize

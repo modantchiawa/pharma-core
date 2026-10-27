@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import {
   Customer,
   DrugListing,
@@ -48,8 +48,12 @@ const DISPENSING_PERMISSION: Record<DrugListing, string | null> = {
  * Signal store of the current basket. It applies the same rules as the server (discount
  * ceiling, dispensing rights, prescription, payment balance) so the cashier is warned before
  * the sale is committed, including offline where the server cannot refuse anything.
+ *
+ * It outlives the counter page: a locked terminal removes the page from the screen, the basket
+ * waits here for whoever unlocks. Another user switching in keeps the basket but not the
+ * payments typed by the previous one; signing out empties it.
  */
-@Injectable()
+@Injectable({ providedIn: 'root' })
 export class CartStore {
   private readonly permissions = inject(PermissionService);
 
@@ -61,6 +65,27 @@ export class CartStore {
   readonly policy = signal<InsurancePolicy | null>(null);
   /** Renewable prescription on file the dispensing counts against. */
   readonly prescriptionOnFile = signal<Prescription | null>(null);
+  /** What to tell the cashier who switched in, once: their predecessor's payments were dropped. */
+  readonly handover = signal<string | null>(null);
+
+  constructor() {
+    let cashier = untracked(() => this.permissions.profile()?.userId ?? null);
+    effect(() => {
+      const profile = this.permissions.profile();
+      const current = profile?.userId ?? null;
+      untracked(() => {
+        if (current === null && cashier !== null) {
+          this.clear();
+        } else if (current && cashier && current !== cashier && this.payments().length > 0) {
+          this.payments.set([]);
+          this.handover.set(
+            `Panier conservé pour ${profile?.displayName ?? ''} : ressaisissez les règlements`,
+          );
+        }
+        cashier = current;
+      });
+    });
+  }
 
   readonly grossCents = computed(() =>
     this.lines().reduce((sum, l) => sum + l.unitPriceCents * l.quantity, 0),

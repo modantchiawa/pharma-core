@@ -4,7 +4,6 @@ import {
   DestroyRef,
   ElementRef,
   ViewContainerRef,
-  afterNextRender,
   computed,
   effect,
   inject,
@@ -22,6 +21,7 @@ import { ConnectivityService } from './core/offline/connectivity.service';
 import { SaleOutboxService } from './core/offline/sale-outbox.service';
 import { IdleService } from './core/session/idle.service';
 import { LockScreen } from './core/session/lock-screen';
+import { WhileUnlocked } from './core/session/while-unlocked';
 import { LicenseBanner } from './core/subscription/license-banner';
 import { LicenseStateService } from './core/subscription/license-state.service';
 import { Density, DisplayPreferencesService } from './core/ui/display-preferences.service';
@@ -214,6 +214,7 @@ interface PaletteEntry {
     Icon,
     LicenseBanner,
     LockScreen,
+    WhileUnlocked,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -221,10 +222,7 @@ interface PaletteEntry {
     '(document:click)': 'onDocumentClick($event)',
   },
   template: `
-    <div
-      class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink"
-      [attr.inert]="idle.locked() ? '' : null"
-    >
+    <div *appWhileUnlocked class="flex h-screen overflow-hidden bg-[var(--app-bg)] text-ink">
       <!-- Mobile backdrop -->
       @if (mobileOpen()) {
         <div
@@ -1085,10 +1083,17 @@ export class Shell {
         }
       });
     });
-    // The internal control bell (shown to CONTROL_VIEW only) is loaded apart from the first screen
-    afterNextRender(async () => {
-      const { AlertsBell } = await import('./features/control/alerts-bell');
-      this.alertsBell()?.createComponent(AlertsBell);
+    // The internal control bell (shown to CONTROL_VIEW only) is loaded apart from the first
+    // screen, and created again when the page comes back after an unlock
+    effect(() => {
+      const host = this.alertsBell();
+      if (host) {
+        void import('./features/control/alerts-bell').then(({ AlertsBell }) => {
+          if (this.alertsBell() === host) {
+            host.createComponent(AlertsBell);
+          }
+        });
+      }
     });
     this.router.events
       .pipe(

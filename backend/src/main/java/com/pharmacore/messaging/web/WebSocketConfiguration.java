@@ -14,12 +14,14 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
 
     private final StompAuthenticationInterceptor authentication;
+    private final LockedSessionGuard lockedSessions;
     private final SecurityProperties security;
     private final MessagingProperties messaging;
 
-    WebSocketConfiguration(StompAuthenticationInterceptor authentication, SecurityProperties security,
-                           MessagingProperties messaging) {
+    WebSocketConfiguration(StompAuthenticationInterceptor authentication, LockedSessionGuard lockedSessions,
+                           SecurityProperties security, MessagingProperties messaging) {
         this.authentication = authentication;
+        this.lockedSessions = lockedSessions;
         this.security = security;
         this.messaging = messaging;
     }
@@ -53,5 +55,10 @@ class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(authentication);
         registration.executor(new VirtualThreadTaskExecutor("stomp-in-"));
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(lockedSessions);
     }
 }
