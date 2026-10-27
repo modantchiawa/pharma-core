@@ -81,6 +81,21 @@ class DemoIT extends IntegrationTest {
         call(get("/api/v1/cash/sessions/open?terminalId=DEMO-1"), owner, null)
                 .andExpect(status().isOk());
 
+        // every product is put away; the fridge and the narcotics safe hold the matching products
+        call(get("/api/v1/inventory/stocks?unassigned=true"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        String locations = call(get("/api/v1/inventory/locations"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((List<?>) JsonPath.read(locations, "$[*]")).hasSizeGreaterThanOrEqualTo(8);
+        String fridge = JsonPath.<List<String>>read(locations, "$[?(@.kind == 'FRIDGE')].id").getFirst();
+        call(get("/api/v1/inventory/stocks?locationId=" + fridge), owner, null)
+                .andExpect(jsonPath("$[0].designation").value("INSULATARD 100UI/ML FL 10ML"));
+        String safe = JsonPath.<List<String>>read(locations, "$[?(@.kind == 'SAFE')].id").getFirst();
+        call(get("/api/v1/inventory/stocks?locationId=" + safe), owner, null)
+                .andExpect(jsonPath("$[0].designation").value("TRAMADOL 50MG GEL B/20"));
+
         // public directory: availability of paracetamol in Niamey and tonight's guard
         String availability = mvc.perform(get("/api/public/directory/availability?q=paracetamol&city=Niamey"))
                 .andExpect(status().isOk())

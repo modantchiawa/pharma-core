@@ -10,6 +10,7 @@ import com.pharmacore.inventory.persistence.StockLotRepository;
 import com.pharmacore.inventory.persistence.StockMovementEntity;
 import com.pharmacore.inventory.persistence.StockMovementRepository;
 import com.pharmacore.inventory.persistence.StockRepository;
+import com.pharmacore.inventory.persistence.StorageLocationRepository;
 import com.pharmacore.shared.audit.AuditTrail;
 import com.pharmacore.shared.context.Actor;
 import com.pharmacore.shared.context.TenantContext;
@@ -50,6 +51,7 @@ public class StockCountService {
     private final StockCountRepository counts;
     private final StockCountLineRepository lines;
     private final StockRepository stocks;
+    private final StorageLocationRepository locations;
     private final StockLotRepository lots;
     private final StockMovementRepository movements;
     private final AuditTrail audit;
@@ -57,11 +59,12 @@ public class StockCountService {
     private final Clock clock;
 
     public StockCountService(StockCountRepository counts, StockCountLineRepository lines, StockRepository stocks,
-                             StockLotRepository lots, StockMovementRepository movements, AuditTrail audit,
-                             JdbcClient jdbc, Clock clock) {
+                             StorageLocationRepository locations, StockLotRepository lots,
+                             StockMovementRepository movements, AuditTrail audit, JdbcClient jdbc, Clock clock) {
         this.counts = counts;
         this.lines = lines;
         this.stocks = stocks;
+        this.locations = locations;
         this.lots = lots;
         this.movements = movements;
         this.audit = audit;
@@ -82,12 +85,17 @@ public class StockCountService {
                             Long varianceValueCents, List<LineView> lines) {
     }
 
+    /** @param locationId counts only the products stored at this location; {@code null} for the whole stock */
     @Transactional
-    public CountView start(String label, String location) {
+    public CountView start(String label, UUID locationId) {
         var user = TenantContext.requireTenantUser();
         Instant now = clock.instant();
+        // The count keeps the location as it was named when counted
+        String location = locationId == null ? null : locations.findById(locationId)
+                .map(l -> l.label().substring(0, Math.min(l.label().length(), 50)))
+                .orElseThrow(() -> new NotFoundException("Storage location", locationId));
         // Flushed at once: the lines below reference it through SQL
-        var count = counts.saveAndFlush(new StockCountEntity(label.trim(), blankToNull(location), user.userId(), now));
+        var count = counts.saveAndFlush(new StockCountEntity(label.trim(), location, user.userId(), now));
         int frozen = jdbc.sql("""
                         INSERT INTO stock_count_line (id, tenant_id, count_id, stock_id, lot_id, product_id, lot_number,
                                                       expiry_date, expected_quantity)
@@ -96,10 +104,10 @@ public class StockCountService {
                         FROM stock_lot l
                         JOIN stock s ON s.id = l.stock_id
                         WHERE s.tenant_id = :tenant AND l.quantity > 0
-                          AND (:location::text IS NULL OR s.location = :location::text)""")
+                          AND (:location::uuid IS NULL OR s.location_id = :location::uuid)""")
                 .param("count", count.id())
                 .param("tenant", user.tenant().value())
-                .param("location", blankToNull(location))
+                .param("location", locationId)
                 .update();
         if (frozen == 0) {
             throw new BusinessRuleException("empty-count", "Aucun lot en stock à inventorier pour ce périmètre");

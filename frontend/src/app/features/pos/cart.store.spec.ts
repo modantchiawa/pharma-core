@@ -95,6 +95,27 @@ describe('CartStore', () => {
     ]);
   });
 
+  it('keeps where the box is stored under the line, also for entries cached without it', () => {
+    const cart = TestBed.inject(CartStore);
+    cart.add(
+      product({
+        locationCode: 'A3',
+        locationName: 'Rayon A · étagère 3',
+        locationKind: 'SHELF',
+        locationDetail: 'case 12',
+      }),
+    );
+    cart.add(product({ productId: 'p-2' }));
+
+    expect(cart.lines()[0].place).toEqual({
+      code: 'A3',
+      name: 'Rayon A · étagère 3',
+      kind: 'SHELF',
+      detail: 'case 12',
+    });
+    expect(cart.lines()[1].place).toBeNull();
+  });
+
   it('warns when the local stock is lower than the quantity sold', () => {
     const cart = TestBed.inject(CartStore);
     cart.add(product({ availableQuantity: 1 }), 3);

@@ -11,6 +11,7 @@ import com.pharmacore.importing.domain.ImportKind;
 import com.pharmacore.importing.domain.TabularFile;
 import com.pharmacore.importing.domain.ValueParsers;
 import com.pharmacore.inventory.application.StockService;
+import com.pharmacore.inventory.application.StorageLocationService;
 import com.pharmacore.procurement.application.ProcurementService;
 import com.pharmacore.procurement.persistence.SupplierEntity;
 import com.pharmacore.shared.context.TenantContext;
@@ -41,15 +42,17 @@ class RowLoaders {
 
     private final CatalogService catalog;
     private final StockService stock;
+    private final StorageLocationService locations;
     private final CustomerService customers;
     private final ProcurementService procurement;
     private final JdbcClient jdbc;
     private final CatalogWriter catalogWriter;
 
-    RowLoaders(CatalogService catalog, StockService stock, CustomerService customers, ProcurementService procurement,
-               JdbcClient jdbc, CatalogWriter catalogWriter) {
+    RowLoaders(CatalogService catalog, StockService stock, StorageLocationService locations, CustomerService customers,
+               ProcurementService procurement, JdbcClient jdbc, CatalogWriter catalogWriter) {
         this.catalog = catalog;
         this.stock = stock;
+        this.locations = locations;
         this.customers = customers;
         this.procurement = procurement;
         this.jdbc = jdbc;
@@ -100,8 +103,11 @@ class RowLoaders {
             // the product was rolled back with the dry run: its stock settings cannot be rehearsed
             return Outcome.CREATED;
         }
-        if (sellingPrice != null || threshold > 0 || reorderQuantity > 0 || location != null) {
-            stock.configure(productId, sellingPrice, Math.max(threshold, 0), Math.max(reorderQuantity, 0), location);
+        if (sellingPrice != null || threshold > 0 || reorderQuantity > 0) {
+            stock.configure(productId, sellingPrice, Math.max(threshold, 0), Math.max(reorderQuantity, 0));
+        }
+        if (location != null) {
+            locations.assignByLabel(productId, location);
         }
         return created ? Outcome.CREATED : Outcome.UPDATED;
     }
@@ -185,7 +191,7 @@ class RowLoaders {
             return Outcome.CREATED;
         }
         if (sellingPrice != null) {
-            stock.configure(product.id(), sellingPrice, 0, 0, null);
+            stock.configure(product.id(), sellingPrice, 0, 0);
         }
         if (quantity == 0) {
             return Outcome.UPDATED;

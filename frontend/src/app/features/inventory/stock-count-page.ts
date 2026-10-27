@@ -2,8 +2,9 @@ import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { StockCount, StockCountLine } from '../../core/api/models';
+import { StockCount, StockCountLine, StorageLocation } from '../../core/api/models';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
@@ -278,13 +279,14 @@ const STATUS_BADGE: Record<StockCount['status'], string> = {
               </label>
               <label class="block">
                 <span class="label">Emplacement</span>
-                <input
-                  class="input"
-                  placeholder="Emplacement (optionnel)"
-                  [(ngModel)]="location"
-                  name="location"
-                  maxlength="50"
-                />
+                <select class="select" [(ngModel)]="locationId" name="location">
+                  <option value="">Tout le stock</option>
+                  @for (l of locations(); track l.id) {
+                    <option [value]="l.id">
+                      {{ l.code }} · {{ l.name }} ({{ l.productCount }})
+                    </option>
+                  }
+                </select>
               </label>
               <p class="hint">
                 Les quantités attendues sont figées au démarrage et cachées au compteur.
@@ -343,6 +345,7 @@ export class StockCountPage {
   private readonly http = inject(HttpClient);
   private readonly permissions = inject(PermissionService);
   private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/inventory/counts`;
+  private readonly locationsApi = `${inject(APP_ENVIRONMENT).apiUrl}/v1/inventory/locations`;
 
   protected readonly count = signal<StockCount | null>(null);
   protected readonly recent = signal<StockCount[]>([]);
@@ -364,14 +367,17 @@ export class StockCountPage {
       : lines;
   });
   protected readonly draft: Record<string, number | null> = {};
+  protected readonly locations = signal<StorageLocation[]>([]);
   protected label = '';
-  protected location = '';
+  /** Preselected from the Emplacements screen ("Inventorier"). */
+  protected locationId = inject(ActivatedRoute).snapshot.queryParamMap.get('location') ?? '';
   protected filter = '';
   protected scanInput = '';
   protected scanQuantity: number | null = null;
 
   constructor() {
     void this.loadRecent();
+    void this.loadLocations();
   }
 
   protected statusLabel(status: StockCount['status']): string {
@@ -391,13 +397,22 @@ export class StockCountPage {
       firstValueFrom(
         this.http.post<StockCount>(this.api, {
           label: this.label,
-          location: this.location || null,
+          locationId: this.locationId || null,
         }),
       ),
     );
     this.label = '';
-    this.location = '';
+    this.locationId = '';
     await this.loadRecent();
+  }
+
+  private async loadLocations(): Promise<void> {
+    const locations = await firstValueFrom(this.http.get<StorageLocation[]>(this.locationsApi));
+    this.locations.set(locations);
+    const preselected = locations.find((l) => l.id === this.locationId);
+    if (preselected && !this.label) {
+      this.label = `Inventaire ${preselected.code}`;
+    }
   }
 
   protected async open(id: string): Promise<void> {

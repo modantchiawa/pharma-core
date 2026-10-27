@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { DrugListing, SaleOutcome, SaleRequest } from '../api/models';
+import { DrugListing, SaleOutcome, SaleRequest, StorageLocationKind } from '../api/models';
 
 export interface CachedProduct {
   productId: string;
@@ -13,6 +13,14 @@ export interface CachedProduct {
   unitPriceCents: number | null;
   availableQuantity: number;
   active: boolean;
+  /**
+   * Where the product is stored. Not indexed, so no schema version is needed; absent from
+   * entries cached before locations existed, until the product changes again.
+   */
+  locationCode?: string | null;
+  locationName?: string | null;
+  locationKind?: StorageLocationKind | null;
+  locationDetail?: string | null;
   changedAt: string;
 }
 

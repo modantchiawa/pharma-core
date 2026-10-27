@@ -36,6 +36,8 @@ import { PrintSettingsService } from '../../core/printing/print-settings.service
 import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
 import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
+import { LocationChip } from '../../shared/ui/location-chip';
+import { placeOf } from '../../shared/storage-location';
 
 /**
  * Counter sale screen designed for keyboard and barcode scanner: the scanner types the EAN-13
@@ -43,7 +45,7 @@ import { IconName } from '../../shared/ui/icons';
  */
 @Component({
   selector: 'app-pos-page',
-  imports: [FormsModule, MoneyPipe, Receipt, Icon],
+  imports: [FormsModule, MoneyPipe, Receipt, Icon, LocationChip],
   providers: [CartStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
@@ -86,13 +88,20 @@ import { IconName } from '../../shared/ui/icons';
                   (mousedown)="pick(product)"
                 >
                   <span
-                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-muted"
+                    class="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-muted sm:flex"
                   >
                     <app-icon name="pill" [size]="16" />
                   </span>
                   <span class="min-w-0 flex-1">
                     <span class="block truncate font-medium">{{ product.designation }}</span>
-                    <span class="block text-xs text-subtle">{{ product.cip13 }}</span>
+                    <span
+                      class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle"
+                    >
+                      <span class="tabular-nums">{{ product.cip13 }}</span>
+                      @if (placeOf(product); as place) {
+                        <app-location-chip [place]="place" />
+                      }
+                    </span>
                   </span>
                   @if (product.availableQuantity === 0 && product.dci) {
                     <button
@@ -105,16 +114,22 @@ import { IconName } from '../../shared/ui/icons';
                     </button>
                   }
                   <span
-                    class="badge"
-                    [class.badge-success]="product.availableQuantity > 5"
-                    [class.badge-warning]="
-                      product.availableQuantity > 0 && product.availableQuantity <= 5
-                    "
-                    [class.badge-danger]="product.availableQuantity === 0"
+                    class="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3"
                   >
-                    stock {{ product.availableQuantity }}
+                    <span
+                      class="badge"
+                      [class.badge-success]="product.availableQuantity > 5"
+                      [class.badge-warning]="
+                        product.availableQuantity > 0 && product.availableQuantity <= 5
+                      "
+                      [class.badge-danger]="product.availableQuantity === 0"
+                    >
+                      stock {{ product.availableQuantity }}
+                    </span>
+                    <span class="num font-semibold sm:w-28">{{
+                      product.unitPriceCents | money
+                    }}</span>
                   </span>
-                  <span class="num w-28 font-semibold">{{ product.unitPriceCents | money }}</span>
                 </li>
               }
             </ul>
@@ -164,8 +179,13 @@ import { IconName } from '../../shared/ui/icons';
                             <span class="badge badge-danger">{{ line.listing }}</span>
                           }
                         </div>
-                        <div class="mt-0.5 text-xs text-subtle">
-                          {{ line.unitPriceCents | money }} · TVA {{ line.vatRate }} %
+                        <div
+                          class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle"
+                        >
+                          <span>{{ line.unitPriceCents | money }} · TVA {{ line.vatRate }} %</span>
+                          @if (line.place; as place) {
+                            <app-location-chip [place]="place" />
+                          }
                         </div>
                       </td>
                       <td>
@@ -701,6 +721,7 @@ export class PosPage {
   protected readonly prescriptionsOnFile = signal<Prescription[]>([]);
   protected readonly cashSessionOpen = signal(true);
   protected readonly results = signal<CachedProduct[]>([]);
+  protected readonly placeOf = placeOf;
   protected readonly highlighted = signal(0);
   protected readonly message = signal<string | null>(null);
   protected readonly busy = signal(false);

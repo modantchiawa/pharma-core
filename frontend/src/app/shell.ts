@@ -83,6 +83,12 @@ const PHARMACY_NAV: NavGroup[] = [
         permissions: ['STOCK_COUNT', 'STOCK_COUNT_VALIDATE'],
       },
       {
+        path: '/inventory/locations',
+        label: 'Emplacements',
+        icon: 'locations',
+        permissions: ['STOCK_VIEW', 'STOCK_LOCATION_MANAGE'],
+      },
+      {
         path: '/procurement',
         label: 'Commandes',
         icon: 'procurement',

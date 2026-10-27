@@ -76,6 +76,13 @@ export const routes: Routes = [
           import('./features/inventory/stock-count-page').then((m) => m.StockCountPage),
       },
       {
+        path: 'inventory/locations',
+        title: 'Emplacements',
+        canActivate: [permissionGuard('STOCK_VIEW', 'STOCK_LOCATION_MANAGE')],
+        loadComponent: () =>
+          import('./features/inventory/locations-page').then((m) => m.LocationsPage),
+      },
+      {
         path: 'customers',
         title: 'Clients',
         canActivate: [permissionGuard('CUSTOMER_MANAGE', 'SALE_CREATE')],
