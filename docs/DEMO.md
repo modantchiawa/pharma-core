@@ -131,6 +131,8 @@ Le script `frontend/scripts/write-demo-env.mjs` génère `environment.demo.ts` a
 |---|---|---|---|---|
 | Titulaire | `sahel` | `titulaire@sahel.demo` | `Demo2026!` | `1234` |
 | Caissier | `sahel` | `caisse@sahel.demo` | `Demo2026!` | `1234` |
+| Adjoint | `sahel` | `adjoint@sahel.demo` | `Demo2026!` | `1234` |
+| Préparatrice | `sahel` | `preparatrice@sahel.demo` | `Demo2026!` | `1234` |
 | Titulaire | `lacouroussou` | `titulaire@lacouroussou.demo` | `Demo2026!` | `1234` |
 | Caissier | `lacouroussou` | `caisse@lacouroussou.demo` | `Demo2026!` | `1234` |
 | Console éditeur | — | bouton « Console éditeur » | `DEMO_PLATFORM_PASSWORD` | — |
@@ -160,6 +162,11 @@ le PIN avec `DEMO_PIN`.
 * Abonnements : `sahel` en formule Pro payée sept mois d'avance (trois règlements), `lacouroussou`
   en formule Essentiel dont la période payée se termine dans cinq jours (bandeau « Abonnement : plus
   que … jours » dès la connexion).
+* Contrôle interne (`sahel`) : l'adjoint a annulé 6 de ses 27 ventes du soir 25 minutes après
+  encaissement (chacune sous le seuil, le taux le signale), déclaré trois sorties de stock (périmé,
+  perte, vol contre-signé par la titulaire), vendu à 23 h 20 hors garde ; la caisse `DEMO-2` d'hier a
+  été clôturée 2 500 F court ; le contrôle du jour d'hier a trouvé 2 gélules de tramadol manquantes
+  au coffre. Les alertes correspondantes sont dans la cloche.
 * Réseau « Gardes Niamey · groupe I » avec les deux pharmacies, gardes de nuit de la semaine et garde
   du dimanche, publication publique activée, fiches publiques avec coordonnées GPS.
 
@@ -190,6 +197,9 @@ le PIN avec `DEMO_PIN`.
 | 18 | Console éditeur : suspendre `sahel`, puis vendre au comptoir et consulter le stock et l'ordonnancier ; réactiver | Vente refusée (bandeau rouge, bouton désactivé, 423 côté serveur), consultation et exports ouverts ; tout revient à la réactivation |
 | 19 | Stocks › clic sur un produit sans photo › « Prendre une photo » (mobile) ou glisser une image | Photo recadrée au carré ; miniature visible au comptoir, dans les stocks et les commandes, puis hors ligne |
 | 20 | Rôles et droits › délais 1 min / 5 min ; panier en cours, ne plus toucher au poste | Avertissement à 30 s, écran verrouillé, panier intact après le PIN `1234` ; « Changer d'utilisateur » vers le caissier garde le panier ; 5 codes faux ferment la session |
+| 21 | Gestion › Contrôle interne en titulaire `sahel` | Dr Ibrahim Souley signalé (annulations après paiement, taux, hors horaires) avec « pourquoi ce signalement » et les tickets en cause ; onglet Stupéfiants : solde théorique du tramadol, inventaire −2 avec les deux signatures |
+| 22 | Pilotage › Contrôle du jour › Démarrer, compter, valider | Comptage à l'aveugle des produits tirés ; sur un stupéfiant, la validation demande l'e-mail et le PIN d'une seconde personne (`adjoint@sahel.demo`) |
+| 23 | Stocks › Sortie sur Augmentin (vol, 2 boîtes) en titulaire | Seconde personne exigée au-delà de 10 000 F au coût ; la titulaire elle-même est refusée, l'adjoint est accepté ; alerte poussée dans la cloche |
 
 Les anomalies se signalent avec l'URL, le compte utilisé, l'heure (UTC) et, si possible, le numéro de
 ticket ; l'audit (`AUDIT_VIEW`) permet de retrouver chaque action.

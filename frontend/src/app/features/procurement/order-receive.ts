@@ -11,7 +11,12 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { GoodsReceiptRequest, GoodsReceiptResult, PurchaseOrder } from '../../core/api/models';
+import {
+  GoodsReceiptRequest,
+  GoodsReceiptResult,
+  PurchaseOrder,
+  ReceivingView,
+} from '../../core/api/models';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { ToastService } from '../../core/ui/toast.service';
@@ -28,12 +33,15 @@ import {
   ReceiptLineDraft,
   receiptDraft,
   receiptLineProblem,
+  receiptOutcome,
 } from './purchase-orders';
 
 /**
  * Delivery against an order: each awaited line is pre-filled with what remains and its order
  * price; the pharmacist types (or scans) lot and expiry, adjusts what actually came, and the
- * lots enter the stock with the purchase entry in one call. Partial deliveries are fine.
+ * lots enter the stock with the purchase entry in one call. Partial deliveries are fine. In
+ * blind receiving the server withholds what was ordered: the receiver counts what came, and
+ * the difference with the order is computed once the receipt is booked.
  */
 @Component({
   selector: 'app-order-receive',
@@ -41,6 +49,15 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="space-y-4" (ngSubmit)="submit()" aria-label="Réception de la livraison">
+      @if (blind()) {
+        <div class="alert alert-info" data-testid="blind-receiving">
+          <app-icon name="eyeOff" [size]="16" />
+          <span>
+            Réception à l'aveugle : comptez ce qui est arrivé. L'écart avec la commande est calculé
+            après l'enregistrement.
+          </span>
+        </div>
+      }
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="block">
           <span class="label">N° de facture / bon de livraison</span>
@@ -99,7 +116,9 @@ import {
                     À ranger <app-location-chip [place]="place" />
                   </span>
                 }
-                <span class="badge">Reste {{ line.remaining }}</span>
+                @if (line.remaining !== null) {
+                  <span class="badge">Reste {{ line.remaining }}</span>
+                }
               </div>
             </div>
             <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -173,7 +192,7 @@ import {
               <p class="mt-2 flex items-center gap-1.5 text-xs text-danger">
                 <app-icon name="alert" [size]="13" />{{ text }}
               </p>
-            } @else if (line.quantity > line.remaining) {
+            } @else if (line.remaining !== null && line.quantity > line.remaining) {
               <p class="mt-2 text-xs text-warning">
                 Plus que la quantité attendue ({{ line.remaining }})
               </p>
@@ -209,6 +228,7 @@ export class OrderReceive implements OnInit {
 
   protected readonly today = isoToday();
   protected readonly lines = signal<ReceiptLineDraft[]>([]);
+  protected readonly blind = signal(false);
   protected readonly busy = signal(false);
   /** Bumped on every edit: the lines are mutated in place by the form. */
   private readonly revision = signal(0);
@@ -251,8 +271,16 @@ export class OrderReceive implements OnInit {
     );
   });
 
-  ngOnInit(): void {
-    this.lines.set(receiptDraft(this.order(), (minor) => this.currency.toUnits(minor)));
+  async ngOnInit(): Promise<void> {
+    try {
+      const view = await firstValueFrom(
+        this.http.get<ReceivingView>(`${this.api}/orders/${this.order().id}/receiving`),
+      );
+      this.blind.set(view.blind);
+      this.lines.set(receiptDraft(view, (minor) => this.currency.toUnits(minor)));
+    } catch (error) {
+      this.toast.error(errorDetail(error, 'Commande introuvable'));
+    }
   }
 
   protected problem(line: ReceiptLineDraft): string | null {
@@ -313,11 +341,7 @@ export class OrderReceive implements OnInit {
       const result = await firstValueFrom(
         this.http.post<GoodsReceiptResult>(`${this.api}/receipts`, request),
       );
-      this.toast.success(
-        result.orderStatus === 'RECEIVED'
-          ? `Commande ${order.number} reçue en totalité`
-          : `Réception enregistrée : ${this.units()} unité(s) en stock`,
-      );
+      this.toast.success(receiptOutcome(result, this.units(), order.number));
       this.received.emit(result);
     } catch (error) {
       this.toast.error(errorDetail(error, 'Réception refusée'));

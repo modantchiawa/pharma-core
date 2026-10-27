@@ -110,6 +110,14 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
               </section>
             }
             @default {
+              @if (o.quantitiesHidden) {
+                <div class="alert alert-info" data-testid="quantities-hidden">
+                  <app-icon name="eyeOff" [size]="16" />
+                  <span>
+                    Réception à l'aveugle : les quantités commandées sont réservées aux acheteurs.
+                  </span>
+                </div>
+              }
               <!-- actions according to the status -->
               @if (o.status === 'DRAFT' || open()) {
                 <div

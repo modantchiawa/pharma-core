@@ -21,6 +21,8 @@ import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
 import { LocationChip } from '../../shared/ui/location-chip';
 import { ProductThumb } from '../../shared/ui/product-thumb';
+import { DailyCountCard } from '../control/daily-count-card';
+import { StockExitDialog } from './stock-exit-dialog';
 
 const DAY_MS = 86_400_000;
 const EXPIRY_WINDOW_DAYS = 90;
@@ -82,6 +84,8 @@ interface CatalogHit {
     LocationChip,
     RouterLink,
     ProductThumb,
+    DailyCountCard,
+    StockExitDialog,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -146,6 +150,8 @@ interface CatalogHit {
             <div class="kpi-foot">Prochain lot à écouler en priorité</div>
           </div>
         </div>
+
+        <app-daily-count-card />
 
         @if (status(); as text) {
           <div class="alert alert-info" role="status">
@@ -349,6 +355,9 @@ interface CatalogHit {
                       <th>Écart hors-ligne</th>
                       <th>Prochaine péremption</th>
                       <th>Statut</th>
+                      @if (canAdjust()) {
+                        <th><span class="sr-only">Actions</span></th>
+                      }
                     </tr>
                   </thead>
                   <tbody>
@@ -498,10 +507,25 @@ interface CatalogHit {
                             >
                           }
                         </td>
+                        @if (canAdjust()) {
+                          <td class="text-right">
+                            @if (s.onHand > 0) {
+                              <button
+                                type="button"
+                                class="btn btn-ghost btn-sm"
+                                [attr.aria-label]="'Sortie ou correction de ' + s.designation"
+                                (click)="exiting.set(s)"
+                              >
+                                <app-icon name="minus" [size]="14" />
+                                Sortie
+                              </button>
+                            }
+                          </td>
+                        }
                       </tr>
                     } @empty {
                       <tr>
-                        <td [attr.colspan]="canPlace() ? 9 : 8">
+                        <td [attr.colspan]="(canPlace() ? 9 : 8) + (canAdjust() ? 1 : 0)">
                           <div class="empty-state">
                             <app-icon name="stock" [size]="22" />
                             <p>Aucun produit ne correspond à cette recherche.</p>
@@ -753,6 +777,15 @@ interface CatalogHit {
         }
       </div>
     </div>
+
+    @if (exiting(); as stock) {
+      <app-stock-exit-dialog
+        [productId]="stock.productId"
+        [designation]="stock.designation"
+        (closed)="exiting.set(null)"
+        (done)="exiting.set(null); loadStocks()"
+      />
+    }
   `,
   styles: `
     .kpi-icon-warning {
@@ -830,6 +863,9 @@ export class InventoryPage {
     () => this.stocks().length > 0 && this.stocks().every((s) => this.selected().has(s.productId)),
   );
   protected readonly editing = signal<string | null>(null);
+  /** Product whose stock exit (or correction) dialog is open. */
+  protected readonly exiting = signal<StockOverview | null>(null);
+  protected readonly canAdjust = computed(() => this.permissions.has('STOCK_ADJUST'));
   protected readonly busy = signal(false);
   protected draft = { locationId: '', detail: '' };
   protected bulkLocation = '';

@@ -3,6 +3,7 @@ package com.pharmacore.procurement.application;
 import com.pharmacore.accounting.application.AccountingPoster;
 import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.accounting.domain.VatSplit;
+import com.pharmacore.control.application.ReceivingControlService;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.TenantCalendar;
 import com.pharmacore.inventory.domain.ProductImageRules;
@@ -33,9 +34,12 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -62,14 +66,16 @@ public class ProcurementService {
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final EntityManager entityManager;
+    private final ReceivingControlService receivingControl;
     private final Clock clock;
 
     public ProcurementService(SupplierRepository suppliers, SupplierProductRepository supplierProducts,
                               PurchaseOrderRepository orders,
                               StockService stock, AccountingPoster accounting, TenantSequenceRepository sequences,
                               TenantCalendar calendar, AuditTrail audit, JdbcClient jdbc, EntityManager entityManager,
-                              Clock clock) {
+                              ReceivingControlService receivingControl, Clock clock) {
         this.entityManager = entityManager;
+        this.receivingControl = receivingControl;
         this.suppliers = suppliers;
         this.supplierProducts = supplierProducts;
         this.orders = orders;
@@ -257,7 +263,32 @@ public class ProcurementService {
                             Instant createdAt, Instant sentAt, LocalDate expectedAt, Instant closedAt,
                             long totalCents, String notes, boolean overdue, boolean shortClosed, int orderedUnits,
                             int receivedUnits, long receivedCents, long remainingCents, SupplierContact supplier,
-                            List<OrderLineView> lines) {
+                            List<OrderLineView> lines, boolean quantitiesHidden) {
+
+        /**
+         * Blind receiving: the same order without what was ordered, received or remains (zeros),
+         * flagged so the screen says why.
+         */
+        public OrderView withoutQuantities() {
+            return new OrderView(id, number, supplierId, supplierName, status, createdAt, sentAt, expectedAt, closedAt,
+                    0, notes, overdue, shortClosed, 0, 0, 0, 0, supplier,
+                    lines.stream().map(l -> new OrderLineView(l.lineNo(), l.productId(), l.designation(), l.cip13(),
+                            0, 0, l.unitCostCents(), l.packSize(), null, null, l.locationCode(), l.locationName(),
+                            l.locationKind(), l.locationDetail())).toList(), true);
+        }
+    }
+
+    /**
+     * What the receiving form gets: the products awaited and where to put them away; the ordered
+     * and remaining quantities only when the pharmacy does not receive blind.
+     */
+    public record ReceivingLine(int lineNo, UUID productId, String designation, String cip13, long unitCostCents,
+                                Integer quantityOrdered, Integer quantityRemaining, String locationCode,
+                                String locationName, String locationKind, String locationDetail) {
+    }
+
+    public record ReceivingView(UUID orderId, String number, UUID supplierId, String supplierName, String status,
+                                boolean blind, List<ReceivingLine> lines) {
     }
 
     /** One order line; the location says where the delivered boxes are put away (null when not assigned). */
@@ -508,7 +539,25 @@ public class ProcurementService {
                                  LocalDate invoiceDate, String notes, List<ReceiptLineCommand> lines) {
     }
 
-    public record ReceiptView(UUID id, long totalExclVatCents, long vatCents, int lines, String orderStatus) {
+    /** @param check comparison with the order (null for a delivery without order) */
+    public record ReceiptView(UUID id, long totalExclVatCents, long vatCents, int lines, String orderStatus,
+                              ReceivingControlService.ReceiptCheck check) {
+    }
+
+    /** The receiving form of an order: quantities left out in blind mode. */
+    @Transactional(readOnly = true)
+    public ReceivingView receiving(UUID orderId) {
+        OrderView order = order(orderId);
+        boolean blind = receivingControl.blindReceiving();
+        List<ReceivingLine> lines = order.lines().stream()
+                .filter(l -> !blind || l.quantityReceived() < l.quantityOrdered())
+                .map(l -> new ReceivingLine(l.lineNo(), l.productId(), l.designation(), l.cip13(), l.unitCostCents(),
+                        blind ? null : l.quantityOrdered(),
+                        blind ? null : Math.max(l.quantityOrdered() - l.quantityReceived(), 0),
+                        l.locationCode(), l.locationName(), l.locationKind(), l.locationDetail()))
+                .toList();
+        return new ReceivingView(order.id(), order.number(), order.supplierId(), order.supplierName(), order.status(),
+                blind, lines);
     }
 
     /**
@@ -529,6 +578,19 @@ public class ProcurementService {
             throw new BusinessRuleException("supplier-mismatch", "La commande n'est pas de ce fournisseur");
         }
         var user = TenantContext.requireTenantUser();
+        boolean separationWarning = order != null && receivingControl.checkReceiver(order.id(), order.createdBy());
+        // What the order still awaited before this delivery, compared once the receipt is booked
+        Map<UUID, ReceivingControlService.Expected> expected = new LinkedHashMap<>();
+        Map<UUID, String> designations = designations(command.lines().stream()
+                .map(ReceiptLineCommand::productId).toList(), order);
+        if (order != null) {
+            for (PurchaseOrderLineEntity line : order.lines()) {
+                expected.merge(line.productId(), new ReceivingControlService.Expected(
+                                designations.getOrDefault(line.productId(), ""),
+                                Math.max(line.quantityOrdered() - line.quantityReceived(), 0)),
+                        (a, b) -> new ReceivingControlService.Expected(a.designation(), a.remaining() + b.remaining()));
+            }
+        }
         Instant now = clock.instant();
         UUID receiptId = UUID.randomUUID();
         long totalExclVat = 0;
@@ -581,8 +643,27 @@ public class ProcurementService {
         audit.record("GOODS_RECEIVED", "GOODS_RECEIPT", receiptId, Map.of(
                 "supplier", supplier.name(), "invoice", String.valueOf(command.supplierInvoiceNumber()),
                 "lines", Integer.toString(command.lines().size()), "totalExclVatCents", Long.toString(totalExclVat)));
+        ReceivingControlService.ReceiptCheck check = null;
+        if (order != null) {
+            Map<UUID, Integer> received = new LinkedHashMap<>();
+            command.lines().forEach(line -> received.merge(line.productId(), line.quantity(), Integer::sum));
+            check = receivingControl.record(receiptId, order.id(), order.number(), expected, received, designations,
+                    separationWarning);
+        }
         return new ReceiptView(receiptId, totalExclVat, totalVat, command.lines().size(),
-                order == null ? null : order.status().name());
+                order == null ? null : order.status().name(), check);
+    }
+
+    private Map<UUID, String> designations(List<UUID> delivered, PurchaseOrderEntity order) {
+        Set<UUID> ids = new LinkedHashSet<>(delivered);
+        if (order != null) {
+            order.lines().forEach(line -> ids.add(line.productId()));
+        }
+        Map<UUID, String> names = new HashMap<>();
+        jdbc.sql("SELECT id, designation FROM product WHERE id = ANY(:ids)")
+                .param("ids", ids.toArray(UUID[]::new))
+                .query((RowCallbackHandler) rs -> names.put(rs.getObject("id", UUID.class), rs.getString("designation")));
+        return names;
     }
 
     // ------------------------------------------------------------------ helpers
@@ -696,7 +777,7 @@ public class ProcurementService {
                             remainingCents, new SupplierContact(rs.getString("contact_name"), rs.getString("phone"),
                                     rs.getString("whatsapp"), rs.getString("email"), rs.getLong("min_order_cents"),
                                     rs.getInt("lead_time_days")),
-                            orderLines));
+                            orderLines, false));
                 });
         return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
     }

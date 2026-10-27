@@ -19,7 +19,11 @@ import { PaperFormat } from '../../core/api/models';
 import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
 import { Icon } from '../../shared/ui/icon';
+import { FourEyesThresholdsService } from '../../core/control/four-eyes.service';
+import { ToastService } from '../../core/ui/toast.service';
+import { isFourEyesRefusal, secondPersonNeeded } from '../../shared/four-eyes';
 import { Receipt, ReceiptData } from './receipt';
+import { SaleReturnDialog } from './sale-return-dialog';
 
 /** Detail of a recorded sale as the server returns it, enough to rebuild its ticket. */
 interface SaleDetail {
@@ -89,7 +93,15 @@ interface SessionSale {
  */
 @Component({
   selector: 'app-cash-session-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, HasPermissionDirective, Receipt, Icon],
+  imports: [
+    FormsModule,
+    DatePipe,
+    MoneyPipe,
+    HasPermissionDirective,
+    Receipt,
+    Icon,
+    SaleReturnDialog,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (reprint(); as data) {
@@ -437,6 +449,16 @@ interface SessionSale {
                                 <button
                                   *appHasPermission="'SALE_CANCEL'"
                                   type="button"
+                                  class="btn btn-ghost btn-sm"
+                                  (click)="returning.set(sale)"
+                                  title="Retour partiel remboursé en espèces"
+                                >
+                                  <app-icon name="refresh" [size]="16" />
+                                  Retour
+                                </button>
+                                <button
+                                  *appHasPermission="'SALE_CANCEL'"
+                                  type="button"
                                   class="btn btn-ghost btn-sm text-danger"
                                   (click)="startCancel(sale)"
                                 >
@@ -760,14 +782,14 @@ interface SessionSale {
                 <div class="alert alert-warning">
                   <app-icon name="lock" [size]="18" />
                   <span>
-                    Montant au-dessus du seuil ou caisse déjà clôturée : un superviseur doit saisir
-                    son e-mail et son code PIN.
+                    Montant au-dessus du seuil, caisse déjà clôturée ou stupéfiant : une seconde
+                    personne habilitée (titulaire ou adjoint) saisit son e-mail et son code PIN.
                   </span>
                 </div>
                 <input
                   class="input"
                   type="email"
-                  placeholder="E-mail du superviseur"
+                  placeholder="E-mail de la seconde personne"
                   [(ngModel)]="supervisorEmail"
                   name="supervisorEmail"
                 />
@@ -795,6 +817,16 @@ interface SessionSale {
         </div>
       }
     </div>
+
+    @if (returning(); as sale) {
+      <app-sale-return-dialog
+        [saleId]="sale.id"
+        [ticket]="sale.ticketNumber"
+        [terminalId]="terminal.terminalId"
+        (closed)="returning.set(null)"
+        (done)="afterReturn($event.refundCents)"
+      />
+    }
   `,
 })
 export class CashSessionPage {
@@ -819,9 +851,23 @@ export class CashSessionPage {
     cancelApprovalThresholdCents: 0,
   });
   protected readonly cancelling = signal<SessionSale | null>(null);
+  protected readonly returning = signal<SessionSale | null>(null);
+  private readonly fourEyes = inject(FourEyesThresholdsService);
+  private readonly toast = inject(ToastService);
+  /** The server asked for a second signature (narcotic on the ticket, four-eyes threshold). */
+  private readonly approvalForced = signal(false);
   protected readonly needsSupervisor = computed(() => {
     const sale = this.cancelling();
-    if (!sale || this.permissions.has('CASH_APPROVE')) {
+    if (!sale) {
+      return false;
+    }
+    if (
+      this.approvalForced() ||
+      secondPersonNeeded(this.fourEyes.thresholds(), 'CANCELLATION', sale.totalNetCents, false)
+    ) {
+      return true;
+    }
+    if (this.permissions.has('CASH_APPROVE')) {
       return false;
     }
     const threshold = this.policy().cancelApprovalThresholdCents;
@@ -1052,6 +1098,8 @@ export class CashSessionPage {
   }
 
   protected startCancel(sale: SessionSale): void {
+    void this.fourEyes.load();
+    this.approvalForced.set(false);
     this.cancelReason = '';
     this.supervisorEmail = '';
     this.supervisorPin = '';
@@ -1080,9 +1128,29 @@ export class CashSessionPage {
         await this.loadSales(current);
       }
     } catch (error) {
+      if (isFourEyesRefusal(error)) {
+        this.approvalForced.set(true);
+        this.supervisorPin = '';
+      }
       this.error.set(
         (error as { error?: { detail?: string } }).error?.detail ?? 'Annulation refusée',
       );
+    }
+  }
+
+  protected async afterReturn(refundCents: number): Promise<void> {
+    this.returning.set(null);
+    const refund = new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: this.currency.current(),
+    }).format(this.currency.toUnits(refundCents));
+    this.toast.success(`Retour enregistré : ${refund} remboursés en espèces`);
+    const current = this.session();
+    if (current) {
+      this.session.set(
+        await firstValueFrom(this.http.get<CashSessionReport>(`${this.api}/${current.sessionId}`)),
+      );
+      await this.loadSales(current);
     }
   }
 

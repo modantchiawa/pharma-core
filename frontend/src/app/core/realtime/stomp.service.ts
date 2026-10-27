@@ -3,89 +3,132 @@ import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
 import { Observable } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
 import { NodeInfoService } from '../api/node-info.service';
+import { APP_ENVIRONMENT } from '../config';
 
 /**
- * Single STOMP connection shared by the app. The bearer token is read before every
- * (re)connection, and subscriptions are restored automatically after a reconnect.
+ * Where a subscription lives: the network broker (cloud: chat, transfers) or this node's own
+ * broker (hub or cloud: events of the pharmacy's operations, such as internal control alerts).
+ * On the cloud both are the same connection.
+ */
+export type StompTarget = 'network' | 'local';
+
+interface Connection {
+  client: Client;
+  registry: Map<string, Set<(message: IMessage) => void>>;
+  active: Map<string, StompSubscription>;
+  connected: (value: boolean) => void;
+}
+
+/**
+ * STOMP connections shared by the app, one per broker URL. The bearer token is read before
+ * every (re)connection, and subscriptions are restored automatically after a reconnect.
  */
 @Injectable({ providedIn: 'root' })
 export class StompService {
   private readonly node = inject(NodeInfoService);
   private readonly auth = inject(AuthService);
-  private readonly registry = new Map<string, Set<(message: IMessage) => void>>();
-  private readonly active = new Map<string, StompSubscription>();
-  private client: Client | null = null;
+  private readonly env = inject(APP_ENVIRONMENT);
+  private readonly connections = new Map<string, Connection>();
 
+  /** State of the network connection (chat, transfers). */
   readonly connected = signal(false);
+  /** State of this node's connection (live alerts). */
+  readonly localConnected = signal(false);
 
-  watch<T>(destination: string): Observable<T> {
+  watch<T>(destination: string, target: StompTarget = 'network'): Observable<T> {
     return new Observable<T>((subscriber) => {
+      const connection = this.connection(target);
       const handler = (message: IMessage) => subscriber.next(JSON.parse(message.body) as T);
-      const handlers = this.registry.get(destination) ?? new Set();
+      const handlers = connection.registry.get(destination) ?? new Set();
       handlers.add(handler);
-      this.registry.set(destination, handlers);
-      this.ensureClient();
-      this.subscribeIfConnected(destination);
+      connection.registry.set(destination, handlers);
+      this.subscribeIfConnected(connection, destination);
       return () => {
         handlers.delete(handler);
         if (handlers.size === 0) {
-          this.registry.delete(destination);
-          this.active.get(destination)?.unsubscribe();
-          this.active.delete(destination);
+          connection.registry.delete(destination);
+          connection.active.get(destination)?.unsubscribe();
+          connection.active.delete(destination);
         }
       };
     });
   }
 
   publish(destination: string, body: unknown): void {
-    if (!this.client?.connected) {
+    const client = this.connections.get(this.url('network'))?.client;
+    if (!client?.connected) {
       throw new Error('Messagerie déconnectée');
     }
-    this.client.publish({ destination, body: JSON.stringify(body) });
+    client.publish({ destination, body: JSON.stringify(body) });
   }
 
   disconnect(): void {
-    void this.client?.deactivate();
-    this.client = null;
-    this.active.clear();
+    for (const connection of this.connections.values()) {
+      void connection.client.deactivate();
+      connection.active.clear();
+    }
+    this.connections.clear();
     this.connected.set(false);
+    this.localConnected.set(false);
   }
 
-  private ensureClient(): void {
-    if (this.client) {
-      return;
+  private url(target: StompTarget): string {
+    return absoluteWsUrl(target === 'network' ? this.node.networkWsUrl() : this.env.wsUrl);
+  }
+
+  private connection(target: StompTarget): Connection {
+    const url = this.url(target);
+    const existing = this.connections.get(url);
+    if (existing) {
+      return existing;
     }
-    const client = new Client({
-      brokerURL: absoluteWsUrl(this.node.networkWsUrl()),
-      reconnectDelay: 5_000,
-      heartbeatIncoming: 20_000,
-      heartbeatOutgoing: 20_000,
-      beforeConnect: async () => {
-        const token = this.auth.accessToken() ?? (await this.auth.refresh());
-        client.connectHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-      },
-      onConnect: () => {
-        this.connected.set(true);
-        this.active.clear();
-        for (const destination of this.registry.keys()) {
-          this.subscribeIfConnected(destination);
+    const network = url === this.url('network');
+    const local = url === this.url('local');
+    const connection: Connection = {
+      client: new Client({
+        brokerURL: url,
+        reconnectDelay: 5_000,
+        heartbeatIncoming: 20_000,
+        heartbeatOutgoing: 20_000,
+      }),
+      registry: new Map(),
+      active: new Map(),
+      connected: (value) => {
+        if (network) {
+          this.connected.set(value);
+        }
+        if (local) {
+          this.localConnected.set(value);
         }
       },
-      onWebSocketClose: () => this.connected.set(false),
-      onStompError: () => this.connected.set(false),
-    });
-    this.client = client;
+    };
+    const client = connection.client;
+    client.beforeConnect = async () => {
+      const token = this.auth.accessToken() ?? (await this.auth.refresh());
+      client.connectHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+    };
+    client.onConnect = () => {
+      connection.connected(true);
+      connection.active.clear();
+      for (const destination of connection.registry.keys()) {
+        this.subscribeIfConnected(connection, destination);
+      }
+    };
+    client.onWebSocketClose = () => connection.connected(false);
+    client.onStompError = () => connection.connected(false);
+    this.connections.set(url, connection);
     client.activate();
+    return connection;
   }
 
-  private subscribeIfConnected(destination: string): void {
-    if (!this.client?.connected || this.active.has(destination)) {
+  private subscribeIfConnected(connection: Connection, destination: string): void {
+    if (!connection.client.connected || connection.active.has(destination)) {
       return;
     }
-    const subscription = this.client.subscribe(destination, (message) => {
-      this.registry.get(destination)?.forEach((handler) => handler(message));
+    const subscription = connection.client.subscribe(destination, (message) => {
+      connection.registry.get(destination)?.forEach((handler) => handler(message));
     });
-    this.active.set(destination, subscription);
+    connection.active.set(destination, subscription);
   }
 }
 

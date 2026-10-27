@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProposalLine, PurchaseOrder, Supplier } from '../../core/api/models';
+import { ProposalLine, PurchaseOrder, ReceivingView, Supplier } from '../../core/api/models';
 import { parseGs1 } from '../../shared/gs1';
 import {
   applyGs1,
@@ -10,9 +10,49 @@ import {
   orderTimeline,
   receiptDraft,
   receiptLineProblem,
+  receiptOutcome,
   receivedPercent,
   whatsappLink,
 } from './purchase-orders';
+
+/** Receiving form of the order below: blind mode withholds what remains (and the full line). */
+function receiving(blind: boolean): ReceivingView {
+  const place = {
+    locationCode: null,
+    locationName: null,
+    locationKind: null,
+    locationDetail: null,
+  };
+  const awaited = {
+    lineNo: 1,
+    productId: 'p1',
+    designation: 'DOLIPRANE 1000MG CPR B/8',
+    cip13: '3400990000011',
+    unitCostCents: 900,
+    quantityOrdered: blind ? null : 30,
+    quantityRemaining: blind ? null : 20,
+    ...place,
+  };
+  const done = {
+    lineNo: 2,
+    productId: 'p2',
+    designation: 'COARTEM 80/480MG CPR B/6',
+    cip13: '3400990000028',
+    unitCostCents: 1_870,
+    quantityOrdered: 20,
+    quantityRemaining: 0,
+    ...place,
+  };
+  return {
+    orderId: 'o1',
+    number: 'CMD-2026-00012',
+    supplierId: 's1',
+    supplierName: 'Laborex Niger',
+    status: 'PARTIALLY_RECEIVED',
+    blind,
+    lines: blind ? [awaited] : [awaited, done],
+  };
+}
 
 function order(overrides: Partial<PurchaseOrder> = {}): PurchaseOrder {
   return {
@@ -197,7 +237,7 @@ describe('purchase order helpers', () => {
   });
 
   it('pre-fills a delivery with the remaining quantities and fills lot and expiry from a scan', () => {
-    const lines = receiptDraft(order(), (minor) => minor);
+    const lines = receiptDraft(receiving(false), (minor) => minor);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toEqual(
       expect.objectContaining({ productId: 'p1', remaining: 20, quantity: 20, unitCost: '900' }),
@@ -214,6 +254,35 @@ describe('purchase order helpers', () => {
     lines[0].quantity = 0;
     lines[0].lotNumber = '';
     expect(receiptLineProblem(lines[0], '2026-10-27')).toBeNull();
+  });
+
+  it('leaves the quantities empty in blind receiving and reports the difference afterwards', () => {
+    const blind = receiptDraft(receiving(true), (minor) => minor);
+    expect(blind.map((l) => [l.productId, l.remaining, l.quantity])).toEqual([['p1', null, 0]]);
+
+    const result = { id: 'r', totalExclVatCents: 0, vatCents: 0, lines: 1 };
+    expect(
+      receiptOutcome(
+        {
+          ...result,
+          orderStatus: 'PARTIALLY_RECEIVED',
+          check: {
+            blind: true,
+            separationWarning: false,
+            discrepancyLines: 1,
+            discrepancyUnits: -2,
+            lines: [],
+          },
+        },
+        8,
+        'CMD-1',
+      ),
+    ).toBe(
+      'Réception enregistrée : 8 unité(s). 1 ligne(s) diffèrent de la commande, le titulaire en est informé.',
+    );
+    expect(receiptOutcome({ ...result, orderStatus: 'RECEIVED', check: null }, 8, 'CMD-1')).toBe(
+      'Commande CMD-1 reçue en totalité',
+    );
   });
 
   it('draws the timeline from creation to the short closure', () => {

@@ -1,5 +1,6 @@
 package com.pharmacore.inventory.web;
 
+import com.pharmacore.control.application.FourEyesService;
 import com.pharmacore.inventory.application.ExpiryWriteOffService;
 import com.pharmacore.inventory.application.ExpiryWriteOffService.WriteOff;
 import com.pharmacore.inventory.application.StockCountService;
@@ -78,7 +79,8 @@ class StockReliabilityController {
     @PostMapping("/counts/{countId}/validation")
     @PreAuthorize("hasAuthority('STOCK_COUNT_VALIDATE')")
     CountView validate(@PathVariable UUID countId, @RequestBody(required = false) NotesRequest request) {
-        return counts.validate(countId, request == null ? null : request.notes());
+        return counts.validate(countId, request == null ? null : request.notes(), request == null ? null
+                : new FourEyesService.Credentials(request.approverEmail(), request.approverPin()));
     }
 
     @PostMapping("/counts/{countId}/cancellation")
@@ -128,7 +130,9 @@ class StockReliabilityController {
     record ScanRequest(@NotNull UUID productId, @NotBlank @Size(max = 40) String lotNumber, @Min(0) int quantity) {
     }
 
-    record NotesRequest(@Size(max = 500) String notes) {
+    /** The approver's e-mail and PIN are required for a count that covers a narcotic or a large variance. */
+    record NotesRequest(@Size(max = 500) String notes, @Size(max = 200) String approverEmail,
+                        @Size(max = 12) String approverPin) {
     }
 
     record ReasonRequest(@NotBlank @Size(max = 500) String reason) {

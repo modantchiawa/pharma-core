@@ -3,6 +3,8 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  ViewContainerRef,
+  afterNextRender,
   computed,
   inject,
   signal,
@@ -115,6 +117,13 @@ const PHARMACY_NAV: NavGroup[] = [
         icon: 'accounting',
         permissions: ['ACCOUNTING_VIEW'],
       },
+      {
+        path: '/control',
+        label: 'Contrôle interne',
+        icon: 'activity',
+        permissions: ['CONTROL_VIEW'],
+      },
+      { path: '/control/alerts', label: 'Alertes', icon: 'bell', permissions: ['CONTROL_VIEW'] },
     ],
   },
   {
@@ -162,6 +171,12 @@ const PHARMACY_NAV: NavGroup[] = [
         permissions: ['PRINTER_MANAGE'],
       },
       { path: '/admin/hub', label: 'Serveur local', icon: 'server', permissions: ['HUB_ADMIN'] },
+      {
+        path: '/control/settings',
+        label: 'Règles de contrôle',
+        icon: 'settings',
+        permissions: ['CONTROL_SETTINGS'],
+      },
     ],
   },
 ];
@@ -404,6 +419,7 @@ interface PaletteEntry {
                 <app-icon name="lock" />
               </button>
             }
+            <ng-container #alertsBell />
 
             <button
               type="button"
@@ -763,6 +779,7 @@ export class Shell {
   private readonly paletteInput = viewChild<ElementRef<HTMLInputElement>>('paletteInput');
   private readonly displayMenu = viewChild<ElementRef<HTMLElement>>('displayMenu');
   private readonly userMenu = viewChild<ElementRef<HTMLElement>>('userMenu');
+  private readonly alertsBell = viewChild('alertsBell', { read: ViewContainerRef });
 
   protected readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   protected readonly canEditBranding = computed(() =>
@@ -897,6 +914,11 @@ export class Shell {
       this.license.start();
       this.idle.start(destroyRef);
     }
+    // The internal control bell (shown to CONTROL_VIEW only) is loaded apart from the first screen
+    afterNextRender(async () => {
+      const { AlertsBell } = await import('./features/control/alerts-bell');
+      this.alertsBell()?.createComponent(AlertsBell);
+    });
     this.router.events
       .pipe(
         filter((e): e is NavigationEnd => e instanceof NavigationEnd),

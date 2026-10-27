@@ -74,10 +74,24 @@ final class SaleRequests {
                             @PositiveOrZero Integer rejectedSales) {
     }
 
-    /** Supervisor credentials are only needed when the operation exceeds the pharmacy's thresholds. */
+    /**
+     * Supervisor credentials are only needed when the operation exceeds the pharmacy's thresholds;
+     * the same pair carries the second person's signature when four eyes apply.
+     */
     record ReasonRequest(@NotBlank @Size(max = 255) String reason,
                          @Size(max = 40) String terminalId,
                          @Size(max = 200) String supervisorEmail,
                          @Size(max = 12) String supervisorPin) {
+    }
+
+    record ReturnLineRequest(short lineNo, @Positive int quantity) {
+    }
+
+    /** The approver's e-mail and PIN are only needed above the four-eyes threshold or for a narcotic. */
+    record ReturnRequest(@NotEmpty @Size(max = 200) List<@Valid ReturnLineRequest> lines,
+                         @NotBlank @Size(max = 255) String reason,
+                         @Size(max = 40) String terminalId,
+                         @Size(max = 200) String approverEmail,
+                         @Size(max = 12) String approverPin) {
     }
 }
