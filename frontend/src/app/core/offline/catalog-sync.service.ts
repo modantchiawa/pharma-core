@@ -116,6 +116,10 @@ export function toCachedProduct(item: PosCatalogItem): CachedProduct {
     unitPriceCents: item.unitPriceCents,
     availableQuantity: item.availableQuantity,
     active: item.active,
+    locationCode: item.locationCode,
+    locationName: item.locationName,
+    locationKind: item.locationKind,
+    locationDetail: item.locationDetail,
     changedAt: item.changedAt,
   };
 }

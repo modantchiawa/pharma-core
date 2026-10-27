@@ -18,6 +18,7 @@ import com.pharmacore.insurance.domain.InsurerKind;
 import com.pharmacore.insurance.persistence.InsurancePolicyEntity;
 import com.pharmacore.insurance.persistence.InsurerEntity;
 import com.pharmacore.inventory.application.StockService;
+import com.pharmacore.inventory.application.StorageLocationService;
 import com.pharmacore.network.application.NetworkDirectoryService;
 import com.pharmacore.network.application.PublicSharingService;
 import com.pharmacore.procurement.application.ProcurementService;
@@ -118,7 +119,9 @@ class DemoDataSeeder {
             new Drug("SALBUTAMOL 100µG AEROSOL", "SALBUTAMOL", "100µG", "Aérosol", "GSK", DrugListing.LIST_I, 3_800),
             new Drug("DICLOFENAC GEL 1% 50G", "DICLOFENAC", "1%", "Gel", "Novartis", DrugListing.NONE, 1_500),
             new Drug("MOUSTIQUAIRE IMPREGNEE 2 PLACES", "", "", "Accessoire", "Vestergaard", DrugListing.NONE, 3_500),
-            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 2_500));
+            new Drug("THERMOMETRE DIGITAL", "", "", "Accessoire", "Omron", DrugListing.NONE, 2_500),
+            new Drug("INSULATARD 100UI/ML FL 10ML", "INSULINE HUMAINE ISOPHANE", "100UI/ML", "Injectable", "Novo Nordisk",
+                    DrugListing.LIST_I, 9_500));
 
     private final DemoProperties demo;
     private final NodeProperties node;
@@ -130,6 +133,7 @@ class DemoDataSeeder {
     private final TenantUserLoader loader;
     private final CatalogService catalog;
     private final StockService stock;
+    private final StorageLocationService locations;
     private final CustomerService customers;
     private final ProcurementService procurement;
     private final InsurerService insurers;
@@ -148,7 +152,7 @@ class DemoDataSeeder {
                    CustomerService customers, ProcurementService procurement, InsurerService insurers,
                    PublicSharingService publicSharing, NetworkDirectoryService networks, GuardScheduleService guards,
                    SaleRecordingService sales, CashSessionService cashSessions, JdbcClient jdbc,
-                   PlatformTransactionManager transactionManager, Clock clock) {
+                   PlatformTransactionManager transactionManager, Clock clock, StorageLocationService locations) {
         this.demo = demo;
         this.node = node;
         this.provisioning = provisioning;
@@ -159,6 +163,7 @@ class DemoDataSeeder {
         this.loader = loader;
         this.catalog = catalog;
         this.stock = stock;
+        this.locations = locations;
         this.customers = customers;
         this.procurement = procurement;
         this.insurers = insurers;
@@ -302,8 +307,9 @@ class DemoDataSeeder {
                     // short-dated lot large enough to survive two weeks of FEFO sales: shows in the alerts
                     stock.receiveLot(product.id(), "L" + (2501 + i), today.plusDays(25 + random.nextInt(50)), 30, cost);
                 }
-                stock.configure(product.id(), product.publicPriceCents(), 10, 40, "Rayon " + (char) ('A' + i % 6));
+                stock.configure(product.id(), product.publicPriceCents(), 10, 40);
             }
+            DemoStorageLocations.seed(locations, products, DRUGS);
 
             // customers, one with a credit account and an insurance policy
             var hadiza = customers.create(new CustomerEntity.Details("Mme Hadiza Moussa", "+22790" + (300000 + index),

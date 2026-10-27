@@ -3,14 +3,23 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ExpiryWriteOff, StockIntegrityReport } from '../../core/api/models';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import {
+  ExpiryWriteOff,
+  StockIntegrityReport,
+  StockLocation,
+  StorageLocation,
+} from '../../core/api/models';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
+import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
+import { ToastService } from '../../core/ui/toast.service';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { Icon } from '../../shared/ui/icon';
 import { IconName } from '../../shared/ui/icons';
+import { LocationChip } from '../../shared/ui/location-chip';
 
 const DAY_MS = 86_400_000;
 const EXPIRY_WINDOW_DAYS = 90;
@@ -28,7 +37,11 @@ interface StockOverview {
   reorderThreshold: number;
   nextExpiry: string | null;
   belowThreshold: boolean;
+  location: StockLocation | null;
 }
+
+/** Location filter of the stock list: every product, those put nowhere, or one location id. */
+type LocationFilter = 'ALL' | 'NONE' | string;
 
 interface ExpiryAlert {
   lotId: string;
@@ -56,7 +69,15 @@ interface CatalogHit {
 
 @Component({
   selector: 'app-inventory-page',
-  imports: [FormsModule, MoneyPipe, DatePipe, HasPermissionDirective, Icon],
+  imports: [
+    FormsModule,
+    MoneyPipe,
+    DatePipe,
+    HasPermissionDirective,
+    Icon,
+    LocationChip,
+    RouterLink,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -67,10 +88,16 @@ interface CatalogHit {
             Disponibilités, péremptions et réapprovisionnement de l'officine
           </p>
         </div>
-        <button type="button" class="btn btn-secondary" (click)="open(tab())">
-          <app-icon name="refresh" [size]="16" />
-          Actualiser
-        </button>
+        <div class="flex flex-wrap gap-2">
+          <a class="btn btn-secondary" routerLink="/inventory/locations">
+            <app-icon name="locations" [size]="16" />
+            Emplacements
+          </a>
+          <button type="button" class="btn btn-secondary" (click)="open(tab())">
+            <app-icon name="refresh" [size]="16" />
+            Actualiser
+          </button>
+        </div>
       </header>
 
       <div class="space-y-5">
@@ -244,12 +271,73 @@ interface CatalogHit {
                   <input type="checkbox" [(ngModel)]="belowOnly" (change)="loadStocks()" />
                   Sous le seuil
                 </label>
+                <label class="input-with-icon w-full sm:w-64">
+                  <app-icon name="mapPin" [size]="16" />
+                  <select
+                    class="select pl-10"
+                    aria-label="Filtrer par emplacement"
+                    data-testid="location-filter"
+                    [(ngModel)]="locationFilter"
+                    (ngModelChange)="loadStocks()"
+                  >
+                    <option value="ALL">Tous les emplacements</option>
+                    <option value="NONE">Sans emplacement</option>
+                    @for (l of locations(); track l.id) {
+                      <option [value]="l.id">{{ l.code }} · {{ l.name }}</option>
+                    }
+                  </select>
+                </label>
               </div>
+              @if (selected().size > 0) {
+                <div
+                  class="bulk flex flex-wrap items-center gap-2 border-b border-line px-5 py-3"
+                  role="region"
+                  aria-label="Rangement groupé"
+                >
+                  <span class="text-sm font-medium">
+                    {{ selected().size }} produit(s) sélectionné(s)
+                  </span>
+                  <select
+                    class="select h-9 w-full sm:w-64"
+                    aria-label="Emplacement pour la sélection"
+                    [(ngModel)]="bulkLocation"
+                  >
+                    <option value="">Choisir un emplacement…</option>
+                    <option value="NONE">Retirer l'emplacement</option>
+                    @for (l of locations(); track l.id) {
+                      <option [value]="l.id">{{ l.code }} · {{ l.name }}</option>
+                    }
+                  </select>
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    [disabled]="!bulkLocation || busy()"
+                    (click)="assignSelection()"
+                  >
+                    <app-icon name="check" [size]="14" />
+                    Ranger
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-sm" (click)="clearSelection()">
+                    Annuler
+                  </button>
+                </div>
+              }
               <div class="overflow-x-auto">
                 <table class="data-table">
                   <thead class="whitespace-nowrap">
                     <tr>
+                      @if (canPlace()) {
+                        <th class="w-10">
+                          <input
+                            type="checkbox"
+                            aria-label="Tout sélectionner"
+                            [checked]="allSelected()"
+                            (change)="toggleAll()"
+                          />
+                        </th>
+                      }
                       <th>Produit</th>
+                      <th>Emplacement</th>
                       <th class="num text-right">Prix</th>
                       <th class="num text-right">Disponible</th>
                       <th class="num text-right">Réservé</th>
@@ -260,10 +348,83 @@ interface CatalogHit {
                   </thead>
                   <tbody>
                     @for (s of stocks(); track s.productId) {
-                      <tr>
+                      <tr [class.row-selected]="selected().has(s.productId)">
+                        @if (canPlace()) {
+                          <td>
+                            <input
+                              type="checkbox"
+                              [attr.aria-label]="'Sélectionner ' + s.designation"
+                              [checked]="selected().has(s.productId)"
+                              (change)="toggle(s.productId)"
+                            />
+                          </td>
+                        }
                         <td class="min-w-56">
                           <p class="font-medium">{{ s.designation }}</p>
                           <p class="text-xs text-subtle tabular-nums">{{ s.cip13 }}</p>
+                        </td>
+                        <td class="min-w-40">
+                          @if (editing() === s.productId) {
+                            <form
+                              class="flex min-w-80 items-center gap-1.5"
+                              (ngSubmit)="savePlacement(s)"
+                            >
+                              <select
+                                class="select h-9 min-w-0 flex-1"
+                                name="location"
+                                [attr.aria-label]="'Emplacement de ' + s.designation"
+                                [(ngModel)]="draft.locationId"
+                              >
+                                <option value="">Aucun</option>
+                                @for (l of locations(); track l.id) {
+                                  <option [value]="l.id">{{ l.code }} · {{ l.name }}</option>
+                                }
+                              </select>
+                              <input
+                                class="input h-9 w-28"
+                                name="detail"
+                                placeholder="case, bac…"
+                                maxlength="40"
+                                [attr.aria-label]="'Détail pour ' + s.designation"
+                                [disabled]="!draft.locationId"
+                                [(ngModel)]="draft.detail"
+                              />
+                              <button
+                                type="submit"
+                                class="btn btn-primary btn-icon btn-sm"
+                                aria-label="Enregistrer l'emplacement"
+                                [disabled]="busy()"
+                              >
+                                <app-icon name="check" [size]="14" />
+                              </button>
+                              <button
+                                type="button"
+                                class="btn btn-ghost btn-icon btn-sm"
+                                aria-label="Annuler"
+                                (click)="editing.set(null)"
+                              >
+                                <app-icon name="x" [size]="14" />
+                              </button>
+                            </form>
+                          } @else {
+                            <div class="flex items-center gap-1">
+                              @if (s.location; as place) {
+                                <app-location-chip [place]="place" />
+                              } @else {
+                                <span class="text-subtle">—</span>
+                              }
+                              @if (canPlace()) {
+                                <button
+                                  type="button"
+                                  class="btn btn-ghost btn-icon btn-sm text-muted"
+                                  [attr.aria-label]="'Changer l’emplacement de ' + s.designation"
+                                  (click)="edit(s)"
+                                >
+                                  <app-icon name="pencil" [size]="14" />
+                                </button>
+                              }
+                            </div>
+                          }
                         </td>
                         <td class="num whitespace-nowrap">
                           {{ s.sellingPriceCents ?? s.publicPriceCents | money }}
@@ -317,7 +478,7 @@ interface CatalogHit {
                       </tr>
                     } @empty {
                       <tr>
-                        <td colspan="7">
+                        <td [attr.colspan]="canPlace() ? 9 : 8">
                           <div class="empty-state">
                             <app-icon name="stock" [size]="22" />
                             <p>Aucun produit ne correspond à cette recherche.</p>
@@ -570,6 +731,12 @@ interface CatalogHit {
       background: var(--info-soft);
       color: var(--info);
     }
+    .bulk {
+      background: var(--brand-softer);
+    }
+    .row-selected td {
+      background: var(--brand-softer);
+    }
     .toggle-on {
       border-color: var(--brand-primary);
       background: var(--brand-soft);
@@ -580,6 +747,8 @@ interface CatalogHit {
 export class InventoryPage {
   private readonly http = inject(HttpClient);
   private readonly currency = inject(CurrencyService);
+  private readonly permissions = inject(PermissionService);
+  private readonly toasts = inject(ToastService);
   private readonly apiBase = inject(APP_ENVIRONMENT).apiUrl;
   private readonly api = `${this.apiBase}/v1/inventory`;
 
@@ -612,6 +781,18 @@ export class InventoryPage {
   protected readonly integrity = signal<StockIntegrityReport[]>([]);
   protected readonly writeOffs = signal<ExpiryWriteOff[]>([]);
   protected readonly status = signal<string | null>(null);
+  protected readonly locations = signal<StorageLocation[]>([]);
+  protected readonly canPlace = computed(() => this.permissions.has('STOCK_LOCATION_MANAGE'));
+  protected readonly selected = signal<ReadonlySet<string>>(new Set());
+  protected readonly allSelected = computed(
+    () => this.stocks().length > 0 && this.stocks().every((s) => this.selected().has(s.productId)),
+  );
+  protected readonly editing = signal<string | null>(null);
+  protected readonly busy = signal(false);
+  protected draft = { locationId: '', detail: '' };
+  protected bulkLocation = '';
+  protected locationFilter: LocationFilter =
+    inject(ActivatedRoute).snapshot.queryParamMap.get('location') ?? 'ALL';
   protected query = '';
   protected belowOnly = false;
   protected receipt = {
@@ -626,6 +807,7 @@ export class InventoryPage {
 
   constructor() {
     void this.loadStocks();
+    void this.loadLocations();
   }
 
   protected async open(tab: Tab): Promise<void> {
@@ -650,10 +832,94 @@ export class InventoryPage {
   }
 
   protected async loadStocks(): Promise<void> {
-    const params = new HttpParams().set('q', this.query).set('belowThreshold', this.belowOnly);
+    let params = new HttpParams().set('q', this.query).set('belowThreshold', this.belowOnly);
+    if (this.locationFilter === 'NONE') {
+      params = params.set('unassigned', true);
+    } else if (this.locationFilter !== 'ALL') {
+      params = params.set('locationId', this.locationFilter);
+    }
     this.stocks.set(
       await firstValueFrom(this.http.get<StockOverview[]>(`${this.api}/stocks`, { params })),
     );
+    const visible = new Set(this.stocks().map((s) => s.productId));
+    this.selected.update((current) => new Set([...current].filter((id) => visible.has(id))));
+  }
+
+  private async loadLocations(): Promise<void> {
+    this.locations.set(
+      await firstValueFrom(this.http.get<StorageLocation[]>(`${this.api}/locations`)),
+    );
+  }
+
+  protected toggle(productId: string): void {
+    this.selected.update((current) => {
+      const next = new Set(current);
+      if (!next.delete(productId)) {
+        next.add(productId);
+      }
+      return next;
+    });
+  }
+
+  protected toggleAll(): void {
+    this.selected.set(
+      this.allSelected() ? new Set() : new Set(this.stocks().map((s) => s.productId)),
+    );
+  }
+
+  protected clearSelection(): void {
+    this.selected.set(new Set());
+    this.bulkLocation = '';
+  }
+
+  protected edit(stock: StockOverview): void {
+    this.draft = { locationId: stock.location?.id ?? '', detail: stock.location?.detail ?? '' };
+    this.editing.set(stock.productId);
+  }
+
+  protected async savePlacement(stock: StockOverview): Promise<void> {
+    this.busy.set(true);
+    try {
+      await firstValueFrom(
+        this.http.put(`${this.api}/stocks/${stock.productId}/location`, {
+          locationId: this.draft.locationId || null,
+          detail: this.draft.locationId ? this.draft.detail.trim() || null : null,
+        }),
+      );
+      this.editing.set(null);
+      this.toasts.success(`Emplacement de ${stock.designation} enregistré`);
+      await Promise.all([this.loadStocks(), this.loadLocations()]);
+    } catch (error) {
+      this.toasts.error(problemDetail(error, 'Emplacement refusé'));
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async assignSelection(): Promise<void> {
+    const productIds = [...this.selected()];
+    const target = this.bulkLocation === 'NONE' ? null : this.bulkLocation;
+    this.busy.set(true);
+    try {
+      const result = await firstValueFrom(
+        this.http.post<{ changed: number }>(`${this.api}/stocks/location-assignments`, {
+          productIds,
+          locationId: target,
+        }),
+      );
+      const where = this.locations().find((l) => l.id === target);
+      this.toasts.success(
+        where
+          ? `${result.changed} produit(s) rangé(s) en ${where.code}`
+          : `Emplacement retiré pour ${result.changed} produit(s)`,
+      );
+      this.clearSelection();
+      await Promise.all([this.loadStocks(), this.loadLocations()]);
+    } catch (error) {
+      this.toasts.error(problemDetail(error, 'Rangement refusé'));
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   protected daysUntil(date: string): number {
@@ -796,4 +1062,8 @@ export class InventoryPage {
       await this.loadStocks();
     }
   }
+}
+
+function problemDetail(error: unknown, fallback: string): string {
+  return (error as { error?: { detail?: string } }).error?.detail ?? fallback;
 }

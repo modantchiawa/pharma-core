@@ -42,6 +42,11 @@ export interface PosCatalogItem {
   unitPriceCents: number | null;
   availableQuantity: number;
   active: boolean;
+  /** Where the product is stored in this pharmacy; null when it is not put away. */
+  locationCode: string | null;
+  locationName: string | null;
+  locationKind: StorageLocationKind | null;
+  locationDetail: string | null;
   changedAt: string;
 }
 
@@ -533,6 +538,29 @@ export interface PendingPayment {
   amountCents: number;
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'NOT_REQUIRED';
   rejectionReason: string | null;
+}
+
+export type StorageLocationKind =
+  'SHELF' | 'DRAWER' | 'FRIDGE' | 'SAFE' | 'RESERVE' | 'COUNTER' | 'OTHER';
+
+export interface StorageLocation {
+  id: string;
+  code: string;
+  name: string;
+  kind: StorageLocationKind;
+  sortOrder: number;
+  active: boolean;
+  productCount: number;
+  updatedAt: string;
+}
+
+/** Placement of a product as the stock lists return it. */
+export interface StockLocation {
+  id: string;
+  code: string;
+  name: string;
+  kind: StorageLocationKind;
+  detail: string | null;
 }
 
 // ---------------------------------------------------------------- tiers payant
