@@ -171,7 +171,7 @@ class SaleController {
             return new SaleDetail(SaleSummary.of(sale), sale.totalGrossCents(), sale.totalDiscountCents(),
                     sale.lines().stream().map(line -> new Line(line.lineNo(), line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate(),
-                            returned.getOrDefault(line.id(), 0))).toList(),
+                            returned.getOrDefault(line.id(), 0), line.posologyJson())).toList(),
                     sale.payments().stream().map(payment -> new Payment(payment.method().name(),
                             payment.amountCents(), payment.thirdPartyCode(), payment.provider(),
                             payment.confirmationStatus().name())).toList(),
@@ -180,8 +180,9 @@ class SaleController {
     }
 
     /** @param returnedQuantity units already brought back by partial returns */
+    /** @param posology JSON typed at the counter (see {@code Posology}), null without */
     record Line(short lineNo, UUID productId, int quantity, long unitPriceCents, long discountCents, long netCents,
-                BigDecimal vatRate, int returnedQuantity) {
+                BigDecimal vatRate, int returnedQuantity, String posology) {
     }
 
     record Payment(String method, long amountCents, String thirdPartyCode, String provider, String confirmationStatus) {

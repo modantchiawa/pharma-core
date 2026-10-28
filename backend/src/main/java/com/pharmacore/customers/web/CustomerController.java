@@ -4,6 +4,7 @@ import com.pharmacore.customers.application.CustomerService;
 import com.pharmacore.customers.application.CustomerService.CustomerView;
 import com.pharmacore.customers.application.CustomerService.PaymentView;
 import com.pharmacore.customers.persistence.CustomerEntity;
+import com.pharmacore.followup.domain.MessageChannel;
 import com.pharmacore.sales.domain.PaymentMethod;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -81,10 +82,13 @@ class CustomerController {
                            @Email @Size(max = 200) String email,
                            @Size(max = 300) String address,
                            @PositiveOrZero long creditLimitCents,
-                           @Size(max = 500) String notes) {
+                           @Size(max = 500) String notes,
+                           boolean messagingConsent,
+                           MessageChannel preferredChannel) {
 
         CustomerEntity.Details toDetails() {
-            return new CustomerEntity.Details(displayName, phone, email, address, creditLimitCents, notes);
+            return new CustomerEntity.Details(displayName, phone, email, address, creditLimitCents, notes,
+                    messagingConsent, preferredChannel == null ? MessageChannel.WHATSAPP : preferredChannel);
         }
     }
 

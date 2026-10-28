@@ -111,6 +111,7 @@ export function toCachedProduct(item: PosCatalogItem): CachedProduct {
     designation: item.designation,
     designationKey: designationKey(item.designation),
     dci: item.dci,
+    atcCode: item.atcCode,
     listing: item.listing,
     vatRate: item.vatRate,
     unitPriceCents: item.unitPriceCents,

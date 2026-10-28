@@ -25,23 +25,44 @@ public final class OrderProposalCalculator {
      * @param expiringSoon     units on the shelf that expire before the next replenishment can sell them
      * @param reorderThreshold pharmacist's minimum stock (0 = none)
      * @param reorderQuantity  pharmacist's usual order quantity when below threshold (0 = computed)
+     * @param seasonalFactor   how the coming weeks sold last year against the yearly average
+     *                         (1 = no seasonality known); bounded to {@link #MIN_SEASONAL_FACTOR}
+     *                         and {@link #MAX_SEASONAL_FACTOR}
      */
     public record Input(long soldLastPeriod, long shortfallUnits, int periodDays, int available, int onOrder,
                         int expiringSoon, int reorderThreshold, int reorderQuantity, int leadTimeDays,
-                        int coverageDays, int safetyDays, int packSize) {
+                        int coverageDays, int safetyDays, int packSize, double seasonalFactor) {
+
+        public Input(long soldLastPeriod, long shortfallUnits, int periodDays, int available, int onOrder,
+                     int expiringSoon, int reorderThreshold, int reorderQuantity, int leadTimeDays, int coverageDays,
+                     int safetyDays, int packSize) {
+            this(soldLastPeriod, shortfallUnits, periodDays, available, onOrder, expiringSoon, reorderThreshold,
+                    reorderQuantity, leadTimeDays, coverageDays, safetyDays, packSize, 1.0);
+        }
 
         public Input {
             if (periodDays <= 0 || packSize <= 0) {
                 throw new IllegalArgumentException("periodDays and packSize must be positive");
             }
+            seasonalFactor = Double.isFinite(seasonalFactor) && seasonalFactor > 0
+                    ? Math.clamp(seasonalFactor, MIN_SEASONAL_FACTOR, MAX_SEASONAL_FACTOR)
+                    : 1.0;
         }
     }
+
+    /** Seasonality never cuts the demand by more than half nor multiplies it by more than three. */
+    public static final double MIN_SEASONAL_FACTOR = 0.5;
+    public static final double MAX_SEASONAL_FACTOR = 3.0;
+    /** From this factor on, the sheet says why the quantity is higher than the recent sales suggest. */
+    public static final double SEASONAL_UPTURN_FROM = 1.25;
 
     public enum Reason {
         BELOW_TARGET,
         BELOW_THRESHOLD,
         EXPIRING_REPLACEMENT,
-        LOST_SALES
+        LOST_SALES,
+        /** Last year, the coming weeks sold markedly more than the yearly average (malaria season, Ramadan…). */
+        SEASONAL_UPTURN
     }
 
     public record Proposal(int quantity, double dailyDemand, int targetStock, int projectedStock, List<Reason> reasons) {
@@ -54,7 +75,7 @@ public final class OrderProposalCalculator {
     }
 
     public static Proposal propose(Input in) {
-        double dailyDemand = (in.soldLastPeriod() + in.shortfallUnits()) / (double) in.periodDays();
+        double dailyDemand = (in.soldLastPeriod() + in.shortfallUnits()) / (double) in.periodDays() * in.seasonalFactor();
         int horizon = in.leadTimeDays() + in.coverageDays() + in.safetyDays();
         int target = (int) Math.ceil(dailyDemand * horizon);
         int projected = in.available() - in.expiringSoon() + in.onOrder();
@@ -79,6 +100,9 @@ public final class OrderProposalCalculator {
         }
         if (in.shortfallUnits() > 0 && needed > 0) {
             reasons.add(Reason.LOST_SALES);
+        }
+        if (in.seasonalFactor() >= SEASONAL_UPTURN_FROM && needed > 0) {
+            reasons.add(Reason.SEASONAL_UPTURN);
         }
         if (needed <= 0) {
             return new Proposal(0, dailyDemand, target, projected, List.of());

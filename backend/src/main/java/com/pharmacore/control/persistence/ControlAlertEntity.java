@@ -27,6 +27,10 @@ public class ControlAlertEntity {
         OUTSIDE_HOURS,
         PIN_FAILURES,
         RECEIPT_DISCREPANCY,
+        /** A pharmacist dispensed despite a contraindication found at the counter. */
+        SAFETY_OVERRIDE,
+        /** The evening figures of the pharmacy, for the owner's phone. */
+        DAILY_DIGEST,
         /** Sent from the settings screen to check the bell and the webhook. */
         TEST
     }

@@ -104,7 +104,7 @@ public class CatalogService {
         int pageSize = Math.clamp(limit, 1, 2_000);
         List<PosCatalogItem> items = jdbc.sql("""
                         WITH merged AS (
-                            SELECT p.id, p.cip13, p.ean13, p.designation, p.dci, p.listing, p.vat_rate,
+                            SELECT p.id, p.cip13, p.ean13, p.designation, p.dci, p.atc_code, p.listing, p.vat_rate,
                                    coalesce(s.selling_price_cents, p.public_price_cents) AS unit_price_cents,
                                    p.active,
                                    GREATEST(coalesce(l.qty, 0) - coalesce(s.reserved_quantity, 0), 0) AS available,
@@ -138,6 +138,7 @@ public class CatalogService {
                         rs.getString("ean13"),
                         rs.getString("designation"),
                         rs.getString("dci"),
+                        rs.getString("atc_code"),
                         rs.getString("listing"),
                         rs.getBigDecimal("vat_rate"),
                         (Long) rs.getObject("unit_price_cents"),
@@ -204,7 +205,7 @@ public class CatalogService {
      * @param imageVersion version of the pharmacy's photo of the product, {@code null} without photo
      */
     public record PosCatalogItem(UUID productId, String cip13, String ean13, String designation, String dci,
-                                 String listing, java.math.BigDecimal vatRate, Long unitPriceCents,
+                                 String atcCode, String listing, java.math.BigDecimal vatRate, Long unitPriceCents,
                                  int availableQuantity, boolean active, String locationCode, String locationName,
                                  String locationKind, String locationDetail, Instant changedAt,
                                  String imageVersion) {

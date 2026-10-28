@@ -8,6 +8,8 @@ export interface CachedProduct {
   designation: string;
   designationKey: string;
   dci: string | null;
+  /** ATC class, absent from entries cached before the counter vigilance existed. */
+  atcCode?: string | null;
   listing: DrugListing;
   vatRate: number;
   unitPriceCents: number | null;
@@ -42,6 +44,17 @@ export interface OutboxSale {
   outcome?: SaleOutcome;
 }
 
+/** A line of the interaction referential, kept locally so the counter warns offline too. */
+export interface CachedSafetyRule {
+  id: string;
+  kind: 'INTERACTION' | 'CONTEXT';
+  substance: string;
+  counterpart: string;
+  severity: 'CONTRAINDICATED' | 'ADVISED_AGAINST' | 'PRECAUTION';
+  advice: string;
+  updatedAt: string;
+}
+
 export interface MetaEntry {
   key: string;
   value: unknown;
@@ -55,6 +68,7 @@ export class PosDatabase extends Dexie {
   products!: Table<CachedProduct, string>;
   outbox!: Table<OutboxSale, string>;
   meta!: Table<MetaEntry, string>;
+  safetyRules!: Table<CachedSafetyRule, string>;
 
   constructor(tenantId: string) {
     super(`pharmacore-pos-${tenantId}`);
@@ -62,6 +76,13 @@ export class PosDatabase extends Dexie {
       products: 'productId, cip13, ean13, designationKey, changedAt',
       outbox: 'clientSaleId, status, [status+nextAttemptAt], createdAt',
       meta: 'key',
+    });
+    // v2: the interaction referential, for the counter vigilance without the server
+    this.version(2).stores({
+      products: 'productId, cip13, ean13, designationKey, changedAt',
+      outbox: 'clientSaleId, status, [status+nextAttemptAt], createdAt',
+      meta: 'key',
+      safetyRules: 'id, substance, counterpart, updatedAt',
     });
   }
 }

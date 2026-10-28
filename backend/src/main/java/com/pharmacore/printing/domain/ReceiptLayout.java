@@ -68,6 +68,9 @@ public final class ReceiptLayout {
                 rows.add(new Row(columns("  Remise", "-" + money(line.discountCents(), currency), width),
                         Style.NORMAL, Align.LEFT));
             }
+            if (notBlank(line.posology())) {
+                wrap("  > " + line.posology(), width).forEach(text -> rows.add(new Row(text, Style.BOLD, Align.LEFT)));
+            }
         }
         rows.add(rule(width));
         if (document.discountCents() > 0) {

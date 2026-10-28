@@ -7,6 +7,8 @@ import com.pharmacore.customers.application.CustomerService;
 import com.pharmacore.insurance.application.InsuranceCoverageResolver;
 import com.pharmacore.inventory.application.TenantCalendar;
 import com.pharmacore.prescription.application.PrescriptionService;
+import com.pharmacore.safety.application.SafetyCheckService;
+import com.pharmacore.safety.domain.SafetyAlert;
 import com.pharmacore.sales.application.certification.CertificationService;
 import com.pharmacore.catalog.persistence.ProductRepository;
 import com.pharmacore.inventory.application.StockLedger;
@@ -46,6 +48,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Records one sale atomically: idempotency check, rule evaluation, FEFO stock withdrawal,
@@ -67,8 +70,10 @@ public class SaleRecordingService {
     private final InsuranceCoverageResolver coverage;
     private final PrescriptionService prescriptions;
     private final PaymentReconciliationService paymentReferences;
+    private final SafetyCheckService safety;
     private final TenantCalendar calendar;
     private final AuditTrail audit;
+    private final ObjectMapper json;
     private final Clock clock;
 
     public SaleRecordingService(SaleRepository sales, ProductRepository products, StockRepository stocks,
@@ -76,9 +81,11 @@ public class SaleRecordingService {
                                 CustomerService customers, CashSessionService cashSessions,
                                 AccountingPoster accounting, CertificationService certification,
                                 InsuranceCoverageResolver coverage, PrescriptionService prescriptions,
-                                PaymentReconciliationService paymentReferences,
-                                TenantCalendar calendar, AuditTrail audit, Clock clock) {
+                                PaymentReconciliationService paymentReferences, SafetyCheckService safety,
+                                TenantCalendar calendar, AuditTrail audit, ObjectMapper json, Clock clock) {
         this.coverage = coverage;
+        this.safety = safety;
+        this.json = json;
         this.prescriptions = prescriptions;
         this.paymentReferences = paymentReferences;
         this.sales = sales;
@@ -138,6 +145,17 @@ public class SaleRecordingService {
             return new SaleOutcome.Rejected(draft.clientSaleId(), "duplicate-payment-reference", anomalies,
                     "Une référence de transaction mobile money ou carte a déjà été utilisée par une autre vente");
         }
+        // Counter vigilance: a contraindication is refused online unless the pharmacist took it on
+        // (override with a reason); offline it is kept and routed to the review queue.
+        List<SafetyAlert> safetyAlerts = safety.evaluate(draft);
+        Set<String> overridden = draft.safetyOverrides().stream()
+                .map(SaleDraft.SafetyOverride::alertKey).collect(Collectors.toSet());
+        if (safetyAlerts.stream().anyMatch(alert -> alert.blocking() && !overridden.contains(alert.key()))) {
+            anomalies.add(SaleAnomaly.SAFETY_CONTRAINDICATION);
+        }
+        if (!draft.safetyOverrides().isEmpty() && !seller.can("SAFETY_OVERRIDE")) {
+            anomalies.add(SaleAnomaly.SAFETY_OVERRIDE_NOT_ALLOWED);
+        }
         if (draft.onCredit() && draft.customerId() != null && !anomalies.contains(SaleAnomaly.CREDIT_NOT_ALLOWED)
                 && !customers.addCredit(draft.customerId(), draft.creditCents())) {
             anomalies.add(SaleAnomaly.CREDIT_LIMIT_EXCEEDED);
@@ -151,13 +169,14 @@ public class SaleRecordingService {
                 yield new SaleOutcome.Rejected(draft.clientSaleId(), "sale-rule-violation",
                         reject.violations(), "The sale violates business rules: " + reject.violations());
             }
-            case SaleDecision.Accept accept -> persist(draft, catalog, seller, accept.anomalies(), insured, now, today);
+            case SaleDecision.Accept accept -> persist(draft, catalog, seller, accept.anomalies(), insured, safetyAlerts,
+                    now, today);
         };
     }
 
     private SaleOutcome persist(SaleDraft draft, Map<UUID, ProductEntity> catalog, SellerProfile seller,
                                 Set<SaleAnomaly> ruleAnomalies, InsuranceCoverageResolver.Resolution insured,
-                                Instant now, LocalDate today) {
+                                List<SafetyAlert> safetyAlerts, Instant now, LocalDate today) {
         UUID saleId = UUID.randomUUID();
         Map<UUID, Integer> quantities = draft.lines().stream()
                 .collect(Collectors.toMap(SaleDraft.Line::productId, SaleDraft.Line::quantity, Integer::sum,
@@ -190,7 +209,8 @@ public class SaleRecordingService {
         for (SaleDraft.Line line : draft.lines()) {
             sale.addLine(new SaleLineEntity(lineNo++, line.productId(), line.quantity(), line.unitPriceCents(),
                     line.discountCents(), catalog.get(line.productId()).vatRate(),
-                    remaining.take(line.productId(), line.quantity())));
+                    remaining.take(line.productId(), line.quantity()),
+                    line.posology() == null ? null : json.writeValueAsString(line.posology())));
         }
         draft.payments().forEach(payment -> sale.addPayment(new SalePaymentEntity(payment.method(),
                 payment.amountCents(), payment.thirdPartyCode(), payment.reference(), payment.provider(),
@@ -199,6 +219,7 @@ public class SaleRecordingService {
                 payment.policyId())));
         // save() merges an entity with an assigned id: later changes must go to the managed copy
         SaleEntity managed = sales.save(sale);
+        safety.recordOverrides(managed, draft, safetyAlerts, seller.userId(), now);
         // A refused renewal keeps the (offline) sale for review but does not consume the prescription
         if (draft.prescriptionId() != null && !anomalies.contains(SaleAnomaly.PRESCRIPTION_RENEWAL_REFUSED)) {
             prescriptions.recordDispensing(draft.prescriptionId(), managed, today);

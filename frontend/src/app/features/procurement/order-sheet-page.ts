@@ -33,12 +33,14 @@ const REASON_LABELS: Record<string, string> = {
   BELOW_THRESHOLD: 'sous le seuil',
   EXPIRING_REPLACEMENT: 'péremption proche',
   LOST_SALES: 'ventes perdues',
+  SEASONAL_UPTURN: 'saison haute',
 };
 
 const REASON_BADGE: Record<string, string> = {
   BELOW_THRESHOLD: 'badge-warning',
   EXPIRING_REPLACEMENT: 'badge-info',
   LOST_SALES: 'badge-danger',
+  SEASONAL_UPTURN: 'badge-warning',
 };
 
 type Tab = 'proposal' | 'orders';
@@ -304,7 +306,16 @@ type Tab = 'proposal' | 'orders';
                         }
                       </td>
                       <td class="num">{{ line.onOrder }}</td>
-                      <td class="num">{{ line.dailyDemand | number: '1.1-1' }}</td>
+                      <td class="num">
+                        {{ line.dailyDemand | number: '1.1-1' }}
+                        @if (line.seasonalFactor !== 1) {
+                          <span
+                            class="ml-1 text-xs text-muted"
+                            title="Ventes des prochaines semaines l'an dernier, rapportées à la moyenne de l'année"
+                            >×{{ line.seasonalFactor | number: '1.1-1' }}</span
+                          >
+                        }
+                      </td>
                       <td class="num">{{ line.targetStock }}</td>
                       <td class="num whitespace-nowrap">
                         {{ line.suggestedQuantity }}

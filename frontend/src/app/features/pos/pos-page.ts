@@ -46,6 +46,18 @@ import { placeOf } from '../../shared/storage-location';
 import { ProductThumb } from '../../shared/ui/product-thumb';
 import { IdleService } from '../../core/session/idle.service';
 import { SoundService } from '../../core/ui/sound.service';
+import { SafetyService } from '../../core/safety/safety.service';
+import { PosologyLabels } from './posology-labels';
+import {
+  POSOLOGY_MOMENTS,
+  Posology,
+  PosologyMoment,
+  emptyPosology,
+  normalizePosology,
+  posologySummary,
+} from '../../shared/posology';
+import { CartLine } from './cart.store';
+import { SAFETY_SEVERITY_LABELS, SafetyAlert } from '../../core/api/models';
 import { AnimatedNumber } from '../../shared/ui/animated-number';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { withExits } from '../../shared/ui/exit-list';
@@ -79,6 +91,7 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
     AnimatedNumber,
     EmptyState,
     MotionFeedback,
+    PosologyLabels,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown)': 'onShortcut($event)' },
@@ -147,6 +160,17 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                       Équivalents
                     </button>
                   }
+                  @if (product.availableQuantity === 0 && cart.customer()) {
+                    <button
+                      type="button"
+                      class="btn btn-soft btn-sm"
+                      (mousedown)="$event.stopPropagation(); requestWish(product)"
+                      title="Prévenir le client par WhatsApp ou SMS quand le produit revient"
+                    >
+                      <app-icon name="bellRing" [size]="14" />
+                      Prévenir à l'arrivée
+                    </button>
+                  }
                   <span
                     class="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3"
                   >
@@ -173,6 +197,274 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
           <div class="alert alert-warning" role="alert">
             <app-icon name="alert" [size]="18" />
             <span>{{ text }}</span>
+          </div>
+        }
+
+        @if (cart.safetyAlerts().length > 0 || safetyPending()) {
+          <section class="card overflow-hidden" data-testid="pos-safety" aria-live="polite">
+            <div class="card-header">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="shield"
+                  [size]="18"
+                  [class.text-danger]="cart.blockingSafety().length > 0"
+                  [class.text-warning]="cart.blockingSafety().length === 0"
+                />
+                <h2 class="card-title">Vigilance</h2>
+                @if (cart.safetyAlerts().length > 0) {
+                  <span
+                    class="badge"
+                    [class.badge-danger]="cart.blockingSafety().length > 0"
+                    [class.badge-warning]="cart.blockingSafety().length === 0"
+                    >{{ cart.safetyAlerts().length }} signalement(s)</span
+                  >
+                }
+              </div>
+              <span class="text-xs text-subtle">
+                @if (safetyPending()) {
+                  Vérification…
+                } @else if (!safetyServerChecked()) {
+                  Serveur injoignable : profil du client non vérifié
+                } @else if (cart.customer() && !safetyProfileKnown()) {
+                  Aucun profil santé pour ce client
+                } @else if (cart.customer()) {
+                  Profil santé du client vérifié
+                }
+              </span>
+            </div>
+            <ul class="divide-y">
+              @for (alert of cart.safetyAlerts(); track alert.key) {
+                <li
+                  class="flex items-start gap-3 px-4 py-2.5 text-sm"
+                  [style.background-color]="
+                    alert.severity === 'CONTRAINDICATED' && !cart.safetyOverrides().has(alert.key)
+                      ? 'var(--danger-soft)'
+                      : null
+                  "
+                >
+                  <app-icon
+                    [name]="alert.severity === 'PRECAUTION' ? 'info' : 'alert'"
+                    [size]="18"
+                    class="mt-0.5 shrink-0"
+                    [class.text-danger]="alert.severity === 'CONTRAINDICATED'"
+                    [class.text-warning]="alert.severity === 'ADVISED_AGAINST'"
+                    [class.text-muted]="alert.severity === 'PRECAUTION'"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <p class="flex flex-wrap items-center gap-2 font-medium">
+                      <span
+                        class="badge"
+                        [class.badge-danger]="alert.severity === 'CONTRAINDICATED'"
+                        [class.badge-warning]="alert.severity === 'ADVISED_AGAINST'"
+                        >{{ severityLabel(alert) }}</span
+                      >
+                      {{ alert.title }}
+                    </p>
+                    @if (alert.detail) {
+                      <p class="mt-0.5 text-xs text-muted">{{ alert.detail }}</p>
+                    }
+                    @if (cart.safetyOverrides().get(alert.key); as reason) {
+                      <p class="mt-0.5 text-xs font-medium text-success">
+                        Levée par le pharmacien : {{ reason }}
+                      </p>
+                    }
+                  </div>
+                  @if (
+                    alert.severity === 'CONTRAINDICATED' &&
+                    !cart.safetyOverrides().has(alert.key) &&
+                    canOverride()
+                  ) {
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm shrink-0"
+                      (click)="overriding.set(alert)"
+                    >
+                      Passer outre
+                    </button>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+
+        @if (posologyEditing(); as editing) {
+          <div
+            class="fixed inset-0 z-50 flex items-end justify-center bg-[rgb(2_6_12/0.5)] p-0 backdrop-blur-sm sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Posologie"
+          >
+            <form
+              class="card w-full max-w-lg rounded-b-none shadow-[var(--shadow-lg)] animate-in sm:rounded-b-[var(--radius-lg)]"
+              (ngSubmit)="savePosology(editing.productId)"
+            >
+              <div class="card-header">
+                <div class="min-w-0">
+                  <h3 class="card-title">Posologie</h3>
+                  <p class="mt-0.5 truncate text-sm text-muted">{{ editing.designation }}</p>
+                </div>
+                <app-icon name="pill" [size]="20" class="shrink-0 text-brand" />
+              </div>
+              <div class="card-body space-y-4">
+                <div class="flex flex-wrap gap-1.5">
+                  @for (preset of presets; track preset.label) {
+                    <button
+                      type="button"
+                      class="btn btn-soft btn-sm"
+                      (click)="applyPreset(preset.posology)"
+                    >
+                      {{ preset.label }}
+                    </button>
+                  }
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                  @for (moment of moments; track moment.key) {
+                    <div
+                      class="rounded-[var(--radius)] border p-2 text-center"
+                      [class.border-brand]="posologyDraft[moment.key] > 0"
+                      [class.bg-brand-soft]="posologyDraft[moment.key] > 0"
+                    >
+                      <app-icon [name]="moment.icon" [size]="22" class="mx-auto block text-brand" />
+                      <p class="mt-1 text-xs font-medium">{{ moment.label }}</p>
+                      <div class="stepper mt-1 justify-center">
+                        <button
+                          type="button"
+                          (click)="stepPosology(moment.key, -1)"
+                          [attr.aria-label]="'Moins le ' + moment.label"
+                        >
+                          <app-icon name="minus" [size]="14" />
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          [(ngModel)]="posologyDraft[moment.key]"
+                          [name]="'posology-' + moment.key"
+                          [attr.aria-label]="moment.label"
+                        />
+                        <button
+                          type="button"
+                          (click)="stepPosology(moment.key, 1)"
+                          [attr.aria-label]="'Plus le ' + moment.label"
+                        >
+                          <app-icon name="plus" [size]="14" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block">
+                    <span class="label">Durée (jours)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="365"
+                      class="input"
+                      [(ngModel)]="posologyDraft.durationDays"
+                      name="posology-duration"
+                    />
+                  </label>
+                  <label class="flex items-end gap-2 pb-2">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="posologyDraft.withFood"
+                      name="posology-food"
+                    />
+                    Pendant les repas
+                  </label>
+                </div>
+                <label class="block">
+                  <span class="label">Consigne (facultative)</span>
+                  <input
+                    class="input"
+                    maxlength="120"
+                    placeholder="Ex. : avec un grand verre d'eau, ne pas croquer"
+                    [(ngModel)]="posologyDraft.instructions"
+                    name="posology-instructions"
+                  />
+                </label>
+                <p class="text-sm text-muted">
+                  Sur le ticket et l'étiquette :
+                  <strong class="text-ink">{{ summaryOf(posologyDraft) || '—' }}</strong>
+                </p>
+              </div>
+              <div class="flex justify-between gap-2 border-t p-4">
+                <button
+                  type="button"
+                  class="btn btn-ghost"
+                  (click)="clearPosology(editing.productId)"
+                >
+                  Effacer
+                </button>
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="posologyEditing.set(null)"
+                  >
+                    Annuler
+                  </button>
+                  <button type="submit" class="btn btn-primary">
+                    <app-icon name="check" [size]="16" />
+                    Enregistrer
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        }
+
+        @if (overriding(); as alert) {
+          <div
+            class="fixed inset-0 z-50 flex items-end justify-center bg-[rgb(2_6_12/0.5)] p-0 backdrop-blur-sm sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Passer outre une contre-indication"
+          >
+            <form
+              class="card w-full max-w-md rounded-b-none shadow-[var(--shadow-lg)] animate-in sm:rounded-b-[var(--radius-lg)]"
+              (ngSubmit)="confirmOverride(alert)"
+            >
+              <div class="card-header">
+                <div class="min-w-0">
+                  <h3 class="card-title">Passer outre la contre-indication</h3>
+                  <p class="mt-0.5 text-sm text-muted">{{ alert.title }}</p>
+                </div>
+                <app-icon name="shield" [size]="20" class="shrink-0 text-danger" />
+              </div>
+              <div class="card-body space-y-3">
+                @if (alert.detail) {
+                  <p class="text-sm">{{ alert.detail }}</p>
+                }
+                <p class="text-xs text-muted">
+                  Votre décision est enregistrée avec la vente, auditée et signalée au titulaire.
+                </p>
+                <label class="block">
+                  <span class="label">Motif (obligatoire)</span>
+                  <textarea
+                    class="textarea"
+                    rows="2"
+                    name="overrideReason"
+                    [(ngModel)]="overrideReason"
+                    placeholder="Ex. : allergie infirmée par le patient, décision du prescripteur"
+                    maxlength="255"
+                    required
+                    autofocus
+                  ></textarea>
+                </label>
+              </div>
+              <div class="flex justify-end gap-2 border-t p-4">
+                <button type="button" class="btn btn-ghost" (click)="overriding.set(null)">
+                  Annuler
+                </button>
+                <button type="submit" class="btn btn-primary" [disabled]="!overrideReason.trim()">
+                  <app-icon name="check" [size]="16" />
+                  Délivrer sous ma responsabilité
+                </button>
+              </div>
+            </form>
           </div>
         }
 
@@ -239,6 +531,16 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                           @if (line.place; as place) {
                             <app-location-chip [place]="place" />
                           }
+                          <button
+                            type="button"
+                            class="badge cursor-pointer"
+                            [class.badge-brand]="!!line.posology"
+                            (click)="editPosology(line)"
+                            [attr.aria-label]="'Posologie de ' + line.designation"
+                          >
+                            <app-icon name="pill" [size]="12" />
+                            {{ line.posology ? summaryOf(line.posology) : 'Posologie' }}
+                          </button>
                         </div>
                       </td>
                       <td>
@@ -664,6 +966,17 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                   Facture A4
                 </button>
               }
+              @if (labelCount(last) > 0) {
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  (click)="printLabels(last)"
+                  data-testid="pos-print-labels"
+                >
+                  <app-icon name="pill" [size]="14" />
+                  {{ labelCount(last) }} étiquette(s) de posologie
+                </button>
+              }
             </div>
           }
         </div>
@@ -671,7 +984,19 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
     </div>
 
     @if (receipt(); as data) {
-      <div class="hidden print:block"><app-receipt [data]="data" [format]="printFormat()" /></div>
+      <div class="hidden print:block">
+        @if (printTarget() === 'labels') {
+          <app-posology-labels
+            [lines]="data.lines"
+            [patient]="data.customer?.displayName ?? null"
+            [ticketNumber]="data.ticketNumber"
+            [occurredAt]="data.occurredAt"
+            [format]="printFormat() === 'MM80' ? 'MM80' : 'MM58'"
+          />
+        } @else {
+          <app-receipt [data]="data" [format]="printFormat()" />
+        }
+      </div>
     }
   `,
   styles: `
@@ -989,6 +1314,31 @@ export class PosPage {
   private readonly sound = inject(SoundService);
   /** Success banner of the sale just recorded, over the total. */
   protected readonly saleDone = signal<SaleDone | null>(null);
+  private readonly safety = inject(SafetyService);
+  protected readonly safetyPending = signal(false);
+  protected readonly safetyServerChecked = signal(true);
+  protected readonly safetyProfileKnown = signal(false);
+  protected readonly overriding = signal<SafetyAlert | null>(null);
+  protected readonly printTarget = signal<'receipt' | 'labels'>('receipt');
+  protected readonly posologyEditing = signal<{ productId: string; designation: string } | null>(
+    null,
+  );
+  protected posologyDraft: Posology = emptyPosology();
+  protected readonly moments = POSOLOGY_MOMENTS;
+  protected readonly presets: { label: string; posology: Partial<Posology> }[] = [
+    { label: '1 matin · 1 soir · 7 j', posology: { morning: 1, evening: 1, durationDays: 7 } },
+    {
+      label: '1 matin · 1 midi · 1 soir · 5 j',
+      posology: { morning: 1, noon: 1, evening: 1, durationDays: 5 },
+    },
+    { label: '1 matin · 30 j', posology: { morning: 1, durationDays: 30 } },
+    { label: '1 coucher · 10 j', posology: { bedtime: 1, durationDays: 10 } },
+  ];
+  protected overrideReason = '';
+  protected readonly canOverride = computed(() => this.permissions.has('SAFETY_OVERRIDE'));
+  private safetyTimer: ReturnType<typeof setTimeout> | undefined;
+  private safetyRun = 0;
+  private safetyKey = '';
   protected readonly saleBanner = withExits(
     () => {
       const done = this.saleDone();
@@ -1005,7 +1355,22 @@ export class PosPage {
   private saleDoneTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => clearTimeout(this.saleDoneTimer));
+    inject(DestroyRef).onDestroy(() => {
+      clearTimeout(this.saleDoneTimer);
+      clearTimeout(this.safetyTimer);
+    });
+    // Counter vigilance: every change of the basket or of the customer is checked, shortly
+    // debounced so a scanner burst costs one request
+    effect(() => {
+      const items = this.cart.lines().map((l) => ({
+        productId: l.productId,
+        designation: l.designation,
+        dci: l.dci ?? null,
+        atcCode: l.atcCode ?? null,
+      }));
+      const customerId = this.cart.customer()?.id ?? null;
+      untracked(() => this.scheduleSafetyCheck(customerId, items));
+    });
     void this.checkCashSession();
     // The basket outlives the page (removed while the terminal is locked): the covers and
     // prescriptions of its customer are read again, the chosen cover kept as it was
@@ -1125,6 +1490,39 @@ export class PosPage {
     );
   }
 
+  /** The customer wants to be told when the product is back: the delivery will queue the message. */
+  protected async requestWish(product: CachedProduct): Promise<void> {
+    const customer = this.cart.customer();
+    if (!customer) {
+      return;
+    }
+    if (!customer.messagingConsent) {
+      this.message.set(
+        `${customer.displayName} n'a pas donné son accord pour être contacté : cochez-le dans sa fiche client`,
+      );
+      return;
+    }
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.env.apiUrl}/v1/followup/wishes`, {
+          customerId: customer.id,
+          productId: product.productId,
+          quantity: 1,
+        }),
+      );
+      this.toasts.success(
+        `${customer.displayName} sera prévenu(e) à l'arrivée de ${product.designation}`,
+      );
+      this.results.set([]);
+      this.term = '';
+    } catch (error) {
+      this.message.set(
+        (error as { error?: { detail?: string } }).error?.detail ??
+          'Demande non enregistrée (serveur injoignable)',
+      );
+    }
+  }
+
   /** Replaces the result list with the substitutes of an out-of-stock product (same DCI). */
   protected async showAlternatives(product: CachedProduct): Promise<void> {
     const substitutes = await this.catalog.alternatives(product);
@@ -1229,10 +1627,103 @@ export class PosPage {
         void this.checkout();
         break;
       case 'Escape':
-        if (!this.term) {
+        if (this.overriding()) {
+          this.overriding.set(null);
+        } else if (this.posologyEditing()) {
+          this.posologyEditing.set(null);
+        } else if (!this.term) {
           this.cart.clear();
         }
         break;
+    }
+  }
+
+  private scheduleSafetyCheck(
+    customerId: string | null,
+    items: { productId: string; designation: string; dci: string | null; atcCode: string | null }[],
+  ): void {
+    // Quantities and discounts do not change the verdict: only the products and the customer do
+    const key = `${customerId ?? ''}|${items.map((i) => i.productId).join(',')}`;
+    if (key === this.safetyKey) {
+      return;
+    }
+    this.safetyKey = key;
+    clearTimeout(this.safetyTimer);
+    const run = ++this.safetyRun;
+    if (items.length === 0) {
+      this.safetyPending.set(false);
+      this.cart.setSafetyAlerts([]);
+      return;
+    }
+    this.safetyPending.set(true);
+    this.safetyTimer = setTimeout(async () => {
+      const verdict = await this.safety.check(customerId, items);
+      if (run !== this.safetyRun) {
+        return;
+      }
+      this.safetyPending.set(false);
+      this.safetyServerChecked.set(verdict.serverChecked);
+      this.safetyProfileKnown.set(verdict.profileKnown);
+      const before = this.cart.blockingSafety().length;
+      this.cart.setSafetyAlerts(verdict.alerts);
+      if (this.cart.blockingSafety().length > before) {
+        this.sound.play('refusal');
+      }
+    }, 250);
+  }
+
+  protected summaryOf(posology: Posology): string {
+    return posologySummary(posology);
+  }
+
+  protected editPosology(line: CartLine): void {
+    this.posologyDraft = { ...emptyPosology(), ...(line.posology ?? {}) };
+    this.posologyEditing.set({ productId: line.productId, designation: line.designation });
+  }
+
+  protected applyPreset(preset: Partial<Posology>): void {
+    this.posologyDraft = { ...emptyPosology(), ...preset, withFood: this.posologyDraft.withFood };
+  }
+
+  protected stepPosology(moment: PosologyMoment, delta: number): void {
+    const next = Math.min(Math.max((Number(this.posologyDraft[moment]) || 0) + delta, 0), 20);
+    this.posologyDraft = { ...this.posologyDraft, [moment]: next };
+  }
+
+  protected savePosology(productId: string): void {
+    this.cart.setPosology(productId, normalizePosology(this.posologyDraft));
+    this.posologyEditing.set(null);
+    this.searchInput().nativeElement.focus();
+  }
+
+  protected clearPosology(productId: string): void {
+    this.cart.setPosology(productId, null);
+    this.posologyEditing.set(null);
+  }
+
+  protected labelCount(data: ReceiptData): number {
+    return data.lines.filter((l) => !!l.posology).length;
+  }
+
+  /** The pictogram labels of the last sale, one per product with a posology, on the ticket roll. */
+  protected printLabels(data: ReceiptData): void {
+    const settings = this.printing.settings();
+    const paper = settings.paper === 'MM80' ? 'MM80' : 'MM58';
+    this.receipt.set(data);
+    this.printTarget.set('labels');
+    this.printFormat.set(paper);
+    this.printing.printPage(paper);
+  }
+
+  protected severityLabel(alert: SafetyAlert): string {
+    return SAFETY_SEVERITY_LABELS[alert.severity];
+  }
+
+  protected confirmOverride(alert: SafetyAlert): void {
+    if (this.cart.overrideSafety(alert.key, this.overrideReason)) {
+      this.overriding.set(null);
+      this.overrideReason = '';
+      this.searchInput().nativeElement.focus();
     }
   }
 
@@ -1244,6 +1735,7 @@ export class PosPage {
    */
   protected async printReceipt(data: ReceiptData, invoice: boolean): Promise<void> {
     const settings = this.printing.settings();
+    this.printTarget.set('receipt');
     if (invoice) {
       this.printFormat.set('A4');
       this.printing.printPage('A4');
@@ -1261,6 +1753,7 @@ export class PosPage {
           unitPriceCents: l.unitPriceCents,
           discountCents: l.discountCents,
           vatRate: l.vatRate,
+          posology: l.posology ? posologySummary(l.posology) : null,
         })),
         discountCents: data.discountCents,
         netCents: data.netCents,
@@ -1318,6 +1811,7 @@ export class PosPage {
       const occurredAt = new Date();
       const applied = this.cart.appliedPayments();
       const prescription = this.cart.prescription();
+      const overrides = this.cart.appliedSafetyOverrides();
       let ticketNumber = '';
       await db.transaction('rw', db.meta, db.outbox, db.products, async () => {
         ticketNumber = await this.terminal.nextTicketNumber();
@@ -1333,6 +1827,7 @@ export class PosPage {
             quantity: l.quantity,
             unitPriceCents: l.unitPriceCents,
             discountCents: l.discountCents,
+            posology: l.posology ?? undefined,
           })),
           payments: applied.map((p) => ({
             method: p.method,
@@ -1342,6 +1837,7 @@ export class PosPage {
             policyId: p.policyId,
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
+          safetyOverrides: overrides.length > 0 ? overrides : undefined,
         });
       });
       const customer = this.cart.customer();

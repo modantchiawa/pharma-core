@@ -144,6 +144,7 @@ function proposalLine(
     packSize: 1,
     purchasePriceCents: price,
     reasons: [],
+    seasonalFactor: 1,
   };
 }
 

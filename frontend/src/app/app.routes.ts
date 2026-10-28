@@ -113,6 +113,13 @@ export const routes: Routes = [
           import('./features/customers/customers-page').then((m) => m.CustomersPage),
       },
       {
+        path: 'customers/followup',
+        title: 'Suivi patients',
+        canActivate: [permissionGuard('FOLLOWUP_VIEW')],
+        loadComponent: () =>
+          import('./features/followup/followup-page').then((m) => m.FollowupPage),
+      },
+      {
         path: 'procurement',
         title: 'Commandes',
         canActivate: [permissionGuard('PROCUREMENT_VIEW')],

@@ -8,7 +8,10 @@ inventaires à l'aveugle et contrôle d'intégrité, caisse à l'aveugle avec ap
 bord, réseau inter-pharmacies (qui a ce produit ?), annuaire public et pharmacies de garde
 partagées, impression de tickets 58 mm / 80 mm et factures A4 (navigateur ou ESC/POS direct),
 importation de données depuis un autre logiciel (CSV, Excel) et du référentiel des médicaments,
-console de supervision éditeur.
+console de supervision éditeur, **vigilance au comptoir** (interactions, allergies, grossesse, profil du
+patient), **posologie par pictogrammes** sur ticket et étiquette, **suivi des patients par WhatsApp / SMS**
+(fin de traitement, renouvellement, produit attendu, créances), **rapport du soir au titulaire** et
+**saisonnalité** de la fiche de commande.
 
 | Dossier | Contenu |
 |---|---|

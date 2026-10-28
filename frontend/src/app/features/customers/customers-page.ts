@@ -1,8 +1,24 @@
 import { HttpClient } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { Customer, MOBILE_MONEY_PROVIDERS, PaymentMethod } from '../../core/api/models';
+import {
+  Customer,
+  HealthContext,
+  HealthProfile,
+  HealthProfileRequest,
+  HealthVocabulary,
+  MOBILE_MONEY_PROVIDERS,
+  MessageChannel,
+  PaymentMethod,
+} from '../../core/api/models';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { TerminalService } from '../../core/offline/terminal.service';
@@ -194,6 +210,36 @@ import { SkeletonRows } from '../../shared/ui/skeleton-rows';
                   name="notes"
                 ></textarea>
               </label>
+              <div class="rounded-[var(--radius)] border bg-surface-2 p-3 text-sm">
+                <label class="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    class="mt-0.5"
+                    [(ngModel)]="form.messagingConsent"
+                    name="messagingConsent"
+                  />
+                  <span>
+                    <span class="font-medium">Accepte les messages de la pharmacie</span>
+                    <span class="block text-xs text-muted"
+                      >Fin de traitement, renouvellement, produit arrivé, créance. Accord donné par
+                      le client, révocable à tout moment.</span
+                    >
+                  </span>
+                </label>
+                @if (form.messagingConsent) {
+                  <label class="mt-2 block">
+                    <span class="label">Canal préféré</span>
+                    <select
+                      class="select"
+                      [(ngModel)]="form.preferredChannel"
+                      name="preferredChannel"
+                    >
+                      <option value="WHATSAPP">WhatsApp</option>
+                      <option value="SMS">SMS</option>
+                    </select>
+                  </label>
+                }
+              </div>
               <div class="flex gap-2 pt-1">
                 <button type="submit" class="btn btn-primary flex-1">
                   <app-icon name="check" [size]="16" />
@@ -204,6 +250,148 @@ import { SkeletonRows } from '../../shared/ui/skeleton-rows';
             </div>
           </form>
           @if (selected(); as c) {
+            <form class="card" (ngSubmit)="saveHealth(c)" data-testid="customer-health">
+              <div class="card-header">
+                <div class="flex items-center gap-2">
+                  <app-icon name="heartPulse" [size]="18" class="text-brand" />
+                  <h3 class="card-title">Profil santé</h3>
+                </div>
+                @if (health(); as h) {
+                  @if (h.empty) {
+                    <span class="badge">non renseigné</span>
+                  } @else {
+                    <span class="badge badge-brand">vérifié au comptoir</span>
+                  }
+                }
+              </div>
+              <div class="card-body space-y-3 text-sm">
+                <p class="text-xs text-muted">
+                  Le comptoir compare chaque vente à ce profil : allergies, grossesse, âge et
+                  pathologies. Jamais partagé hors de la pharmacie.
+                </p>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block">
+                    <span class="label">Date de naissance</span>
+                    <input
+                      class="input"
+                      type="date"
+                      [(ngModel)]="healthForm.birthDate"
+                      name="birthDate"
+                    />
+                  </label>
+                  <label class="block">
+                    <span class="label">Sexe</span>
+                    <select class="select" [(ngModel)]="healthForm.sex" name="sex">
+                      <option [ngValue]="null">—</option>
+                      <option value="F">Femme</option>
+                      <option value="M">Homme</option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="label">Poids (kg)</span>
+                    <input
+                      class="input"
+                      type="number"
+                      min="1"
+                      max="300"
+                      [(ngModel)]="healthForm.weightKg"
+                      name="weight"
+                    />
+                  </label>
+                  @if (healthForm.sex !== 'M') {
+                    <div class="flex flex-col justify-end gap-1.5">
+                      <label class="flex items-center gap-2">
+                        <input type="checkbox" [(ngModel)]="healthForm.pregnant" name="pregnant" />
+                        Enceinte
+                      </label>
+                      <label class="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          [(ngModel)]="healthForm.breastfeeding"
+                          name="breastfeeding"
+                        />
+                        Allaite
+                      </label>
+                    </div>
+                  }
+                </div>
+                <div>
+                  <span class="label">Allergies</span>
+                  <div class="flex flex-wrap gap-1.5">
+                    @for (family of vocabulary()?.allergyFamilies ?? []; track family.code) {
+                      <button
+                        type="button"
+                        class="badge cursor-pointer"
+                        [class.badge-danger]="healthForm.allergies.includes(family.code)"
+                        [attr.aria-pressed]="healthForm.allergies.includes(family.code)"
+                        (click)="toggleAllergy(family.code)"
+                      >
+                        {{ family.label }}
+                      </button>
+                    }
+                  </div>
+                  @if (otherAllergies().length > 0) {
+                    <div class="mt-1.5 flex flex-wrap gap-1.5">
+                      @for (allergy of otherAllergies(); track allergy) {
+                        <span class="badge badge-danger">
+                          {{ allergy }}
+                          <button
+                            type="button"
+                            class="ml-1"
+                            (click)="toggleAllergy(allergy)"
+                            [attr.aria-label]="'Retirer ' + allergy"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      }
+                    </div>
+                  }
+                  <div class="mt-1.5 flex gap-2">
+                    <input
+                      class="input"
+                      placeholder="Autre substance (ex. latex, lidocaïne)"
+                      [(ngModel)]="newAllergy"
+                      name="newAllergy"
+                      maxlength="80"
+                      (keydown.enter)="$event.preventDefault(); addAllergy()"
+                    />
+                    <button type="button" class="btn btn-secondary" (click)="addAllergy()">
+                      Ajouter
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <span class="label">Pathologies chroniques</span>
+                  <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                    @for (condition of vocabulary()?.conditions ?? []; track condition.code) {
+                      <label class="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          [checked]="healthForm.conditions.includes(condition.code)"
+                          (change)="toggleCondition(condition.code)"
+                        />
+                        {{ condition.label }}
+                      </label>
+                    }
+                  </div>
+                </div>
+                <label class="block">
+                  <span class="label">Notes de suivi</span>
+                  <textarea
+                    class="textarea"
+                    rows="2"
+                    [(ngModel)]="healthForm.notes"
+                    name="healthNotes"
+                    maxlength="500"
+                  ></textarea>
+                </label>
+                <button type="submit" class="btn btn-primary w-full">
+                  <app-icon name="check" [size]="16" />
+                  Enregistrer le profil santé
+                </button>
+              </div>
+            </form>
             @if (c.creditBalanceCents > 0) {
               <form class="card" (ngSubmit)="pay(c)">
                 <div class="card-header">
@@ -275,14 +463,121 @@ export class CustomersPage {
   protected readonly selected = signal<Customer | null>(null);
   protected readonly status = signal<string | null>(null);
   protected readonly providers = MOBILE_MONEY_PROVIDERS;
-  protected form = { displayName: '', phone: '', address: '', creditLimit: '', notes: '' };
+  protected form = emptyCustomerForm();
   protected payAmount = '';
   protected payMethod: PaymentMethod = 'CASH';
   protected provider: string = MOBILE_MONEY_PROVIDERS[0];
   protected reference = '';
+  protected readonly vocabulary = signal<HealthVocabulary | null>(null);
+  protected readonly health = signal<HealthProfile | null>(null);
+  protected readonly otherAllergies = signal<string[]>([]);
+  protected healthForm: HealthProfileRequest = emptyHealthForm();
+  protected newAllergy = '';
 
   constructor() {
     void this.debtors();
+    void this.loadVocabulary();
+    effect(() => {
+      const customer = this.selected();
+      untracked(() => {
+        this.form = customer ? formOf(customer) : emptyCustomerForm();
+        void this.loadHealth(customer);
+      });
+    });
+  }
+
+  private async loadVocabulary(): Promise<void> {
+    try {
+      this.vocabulary.set(
+        await firstValueFrom(this.http.get<HealthVocabulary>(`${this.api}/health-vocabulary`)),
+      );
+    } catch {
+      this.vocabulary.set({ allergyFamilies: [], conditions: [] });
+    }
+  }
+
+  private async loadHealth(customer: Customer | null): Promise<void> {
+    this.health.set(null);
+    this.healthForm = emptyHealthForm();
+    this.otherAllergies.set([]);
+    if (!customer) {
+      return;
+    }
+    try {
+      const profile = await firstValueFrom(
+        this.http.get<HealthProfile>(`${this.api}/${customer.id}/health`),
+      );
+      if (this.selected()?.id !== customer.id) {
+        return;
+      }
+      this.health.set(profile);
+      this.healthForm = {
+        birthDate: profile.birthDate,
+        sex: profile.sex,
+        weightKg: profile.weightKg,
+        pregnant: profile.pregnant,
+        breastfeeding: profile.breastfeeding,
+        allergies: [...profile.allergies],
+        conditions: [...profile.conditions],
+        notes: profile.notes,
+      };
+      this.refreshOtherAllergies();
+    } catch {
+      this.status.set('Profil santé indisponible (serveur injoignable)');
+    }
+  }
+
+  private refreshOtherAllergies(): void {
+    const families = new Set((this.vocabulary()?.allergyFamilies ?? []).map((f) => f.code));
+    this.otherAllergies.set(this.healthForm.allergies.filter((a) => !families.has(a)));
+  }
+
+  protected toggleAllergy(code: string): void {
+    const current = this.healthForm.allergies;
+    this.healthForm.allergies = current.includes(code)
+      ? current.filter((a) => a !== code)
+      : [...current, code];
+    this.refreshOtherAllergies();
+  }
+
+  protected addAllergy(): void {
+    const value = this.newAllergy.trim();
+    if (value.length >= 3 && !this.healthForm.allergies.includes(value)) {
+      this.healthForm.allergies = [...this.healthForm.allergies, value];
+      this.refreshOtherAllergies();
+    }
+    this.newAllergy = '';
+  }
+
+  protected toggleCondition(code: HealthContext): void {
+    const current = this.healthForm.conditions;
+    this.healthForm.conditions = current.includes(code)
+      ? current.filter((c) => c !== code)
+      : [...current, code];
+  }
+
+  protected async saveHealth(customer: Customer): Promise<void> {
+    const body: HealthProfileRequest = {
+      ...this.healthForm,
+      birthDate: this.healthForm.birthDate || null,
+      weightKg: this.healthForm.weightKg || null,
+      pregnant: this.healthForm.sex === 'M' ? false : this.healthForm.pregnant,
+      breastfeeding: this.healthForm.sex === 'M' ? false : this.healthForm.breastfeeding,
+      notes: this.healthForm.notes?.trim() || null,
+    };
+    try {
+      const saved = await firstValueFrom(
+        this.http.put<HealthProfile>(`${this.api}/${customer.id}/health`, body),
+      );
+      this.health.set(saved);
+      this.healthForm = { ...this.healthForm, allergies: [...saved.allergies] };
+      this.refreshOtherAllergies();
+      this.status.set(`Profil santé de ${customer.displayName} enregistré`);
+    } catch (error) {
+      this.status.set(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Profil santé refusé',
+      );
+    }
   }
 
   protected async search(): Promise<void> {
@@ -306,7 +601,7 @@ export class CustomersPage {
 
   protected reset(): void {
     this.selected.set(null);
-    this.form = { displayName: '', phone: '', address: '', creditLimit: '', notes: '' };
+    this.form = emptyCustomerForm();
   }
 
   protected async save(): Promise<void> {
@@ -316,6 +611,8 @@ export class CustomersPage {
       address: this.form.address || null,
       creditLimitCents: this.currency.parse(this.form.creditLimit),
       notes: this.form.notes || null,
+      messagingConsent: this.form.messagingConsent,
+      preferredChannel: this.form.preferredChannel,
     };
     try {
       const current = this.selected();
@@ -354,4 +651,51 @@ export class CustomersPage {
       );
     }
   }
+}
+
+interface CustomerForm {
+  displayName: string;
+  phone: string;
+  address: string;
+  creditLimit: string;
+  notes: string;
+  messagingConsent: boolean;
+  preferredChannel: MessageChannel;
+}
+
+function emptyCustomerForm(): CustomerForm {
+  return {
+    displayName: '',
+    phone: '',
+    address: '',
+    creditLimit: '',
+    notes: '',
+    messagingConsent: false,
+    preferredChannel: 'WHATSAPP',
+  };
+}
+
+function formOf(customer: Customer): CustomerForm {
+  return {
+    displayName: customer.displayName,
+    phone: customer.phone ?? '',
+    address: customer.address ?? '',
+    creditLimit: customer.creditLimitCents ? String(customer.creditLimitCents / 100) : '',
+    notes: customer.notes ?? '',
+    messagingConsent: customer.messagingConsent,
+    preferredChannel: customer.preferredChannel ?? 'WHATSAPP',
+  };
+}
+
+function emptyHealthForm(): HealthProfileRequest {
+  return {
+    birthDate: null,
+    sex: null,
+    weightKg: null,
+    pregnant: false,
+    breastfeeding: false,
+    allergies: [],
+    conditions: [],
+    notes: null,
+  };
 }

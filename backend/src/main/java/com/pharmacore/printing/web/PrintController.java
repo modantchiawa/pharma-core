@@ -144,7 +144,8 @@ class PrintController {
                     customer == null ? null : new Customer(customer.displayName(), customer.phone(), customer.address(),
                             customer.policy()),
                     lines.stream().map(l -> new Line(l.designation(), l.quantity(), l.unitPriceCents(),
-                            l.discountCents(), l.unitPriceCents() * l.quantity() - l.discountCents(), l.vatRate())).toList(),
+                            l.discountCents(), l.unitPriceCents() * l.quantity() - l.discountCents(), l.vatRate(),
+                            l.posology())).toList(),
                     discountCents, netCents,
                     payments.stream().map(p -> new Payment(p.label(), p.amountCents())).toList(),
                     changeDueCents,
@@ -159,7 +160,7 @@ class PrintController {
 
     record LineRequest(@NotBlank @Size(max = 255) String designation, @Min(1) int quantity,
                        @PositiveOrZero long unitPriceCents, @PositiveOrZero long discountCents,
-                       @NotNull BigDecimal vatRate) {
+                       @NotNull BigDecimal vatRate, @Size(max = 200) String posology) {
     }
 
     record PaymentRequest(@NotBlank @Size(max = 60) String label, long amountCents) {

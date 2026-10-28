@@ -12,7 +12,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.TenantId;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "sale_line")
@@ -46,6 +48,11 @@ public class SaleLineEntity {
     @Column(name = "vat_rate", nullable = false, updatable = false, precision = 5, scale = 2)
     private BigDecimal vatRate;
 
+    /** Posology typed at the counter, as JSON (see {@code Posology}); null when none was given. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "posology", updatable = false)
+    private String posology;
+
     /** FEFO lots the units were taken from: batch traceability in case of a drug recall. */
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
     @JoinColumn(name = "sale_line_id", nullable = false, updatable = false)
@@ -56,7 +63,13 @@ public class SaleLineEntity {
 
     public SaleLineEntity(short lineNo, UUID productId, int quantity, long unitPriceCents, long discountCents,
                           BigDecimal vatRate, List<LotAllocation> lotAllocations) {
+        this(lineNo, productId, quantity, unitPriceCents, discountCents, vatRate, lotAllocations, null);
+    }
+
+    public SaleLineEntity(short lineNo, UUID productId, int quantity, long unitPriceCents, long discountCents,
+                          BigDecimal vatRate, List<LotAllocation> lotAllocations, String posologyJson) {
         this.id = UUID.randomUUID();
+        this.posology = posologyJson;
         this.lineNo = lineNo;
         this.productId = productId;
         this.quantity = quantity;
@@ -107,5 +120,9 @@ public class SaleLineEntity {
 
     public BigDecimal vatRate() {
         return vatRate;
+    }
+
+    public String posologyJson() {
+        return posology;
     }
 }

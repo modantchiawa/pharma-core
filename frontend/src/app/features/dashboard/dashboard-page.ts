@@ -14,10 +14,11 @@ import {
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { Dashboard, PurchaseOrderSummary } from '../../core/api/models';
+import { DailyDigestView, Dashboard, PurchaseOrderSummary } from '../../core/api/models';
 import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { CurrencyService } from '../../core/ui/currency.service';
+import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { columnPath, niceCeiling } from '../../shared/ui/chart';
 import { staggerDelay } from '../../shared/ui/motion';
@@ -289,6 +290,45 @@ const METHOD_LABELS: Record<string, string> = {
             <div class="kpi-foot">sur la période</div>
           </div>
         </section>
+
+        @if (digest(); as report) {
+          <section class="card" data-testid="daily-digest">
+            <div class="card-header">
+              <div class="flex items-center gap-2">
+                <app-icon name="sunset" [size]="18" class="text-brand" />
+                <h2 class="card-title">Rapport du soir</h2>
+                <span class="badge" [class.badge-success]="report.alreadyPublished">
+                  {{ report.alreadyPublished ? 'publié aujourd’hui' : 'pas encore publié' }}
+                </span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-ghost btn-sm" (click)="copyDigest(report)">
+                  <app-icon name="copy" [size]="14" />
+                  Copier
+                </button>
+                @if (report.whatsappLink; as link) {
+                  <a class="btn btn-secondary btn-sm" [href]="link" target="_blank" rel="noopener">
+                    <app-icon name="messageCircle" [size]="14" />
+                    Envoyer sur WhatsApp
+                  </a>
+                }
+                @if (!report.alreadyPublished) {
+                  <button type="button" class="btn btn-primary btn-sm" (click)="publishDigest()">
+                    <app-icon name="bellRing" [size]="14" />
+                    Publier maintenant
+                  </button>
+                }
+              </div>
+            </div>
+            <pre class="card-body font-sans text-sm leading-relaxed whitespace-pre-wrap">{{
+              report.message
+            }}</pre>
+            <p class="border-t px-5 py-2 text-xs text-subtle">
+              Publié chaque soir à l'heure réglée dans Suivi patients › Réglages : cloche des
+              alertes, webhook, et SMS au titulaire si une passerelle est configurée.
+            </p>
+          </section>
+        }
 
         <section class="card">
           <div class="card-header">
@@ -626,6 +666,8 @@ export class DashboardPage {
   private readonly chart = viewChild<ElementRef<HTMLElement>>('chart');
   protected readonly currency = inject(CurrencyService);
   protected readonly data = signal<Dashboard | null>(null);
+  protected readonly digest = signal<DailyDigestView | null>(null);
+  private readonly toasts = inject(ToastService);
   protected readonly purchaseOrders = signal<PurchaseOrderSummary | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly view = signal<'chart' | 'table'>('chart');
@@ -758,7 +800,41 @@ export class DashboardPage {
     return total === 0 ? 0 : (amountCents / total) * 100;
   }
 
+  protected async loadDigest(): Promise<void> {
+    try {
+      this.digest.set(
+        await firstValueFrom(
+          this.http.get<DailyDigestView>(`${this.env.apiUrl}/v1/reports/daily-digest`),
+        ),
+      );
+    } catch {
+      this.digest.set(null);
+    }
+  }
+
+  protected async publishDigest(): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.env.apiUrl}/v1/reports/daily-digest/publish`, {}),
+      );
+      this.toasts.success('Rapport du soir publié : alertes, webhook et SMS si configuré');
+      await this.loadDigest();
+    } catch {
+      this.toasts.error('Publication impossible');
+    }
+  }
+
+  protected async copyDigest(report: DailyDigestView): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(report.message);
+      this.toasts.success('Rapport copié');
+    } catch {
+      this.toasts.error('Copie impossible dans ce navigateur');
+    }
+  }
+
   protected async load(preset: number | null = null): Promise<void> {
+    void this.loadDigest();
     this.error.set(null);
     this.hovered.set(null);
     this.activePreset.set(preset);

@@ -51,6 +51,31 @@ class OrderProposalCalculatorTest {
     }
 
     @Test
+    void seasonalFactorRaisesTheTargetAndSaysWhy() {
+        // same sales as the first case, but last year these weeks sold 1.6× the yearly average
+        var proposal = OrderProposalCalculator.propose(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, 1.6));
+
+        assertThat(proposal.dailyDemand()).isEqualTo(3.2);
+        assertThat(proposal.targetStock()).isEqualTo(32);
+        assertThat(proposal.quantity()).isEqualTo(36);
+        assertThat(proposal.reasons()).containsExactly(Reason.BELOW_TARGET, Reason.SEASONAL_UPTURN);
+    }
+
+    @Test
+    void seasonalFactorIsBoundedAndSilentWhenSmall() {
+        assertThat(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, 9.0).seasonalFactor()).isEqualTo(3.0);
+        assertThat(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, 0.1).seasonalFactor()).isEqualTo(0.5);
+        assertThat(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, Double.NaN).seasonalFactor()).isEqualTo(1.0);
+
+        var proposal = OrderProposalCalculator.propose(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, 1.1));
+        assertThat(proposal.reasons()).containsExactly(Reason.BELOW_TARGET);
+        // a low season lowers the target: 2/day × 0.6 = 1.2/day × 10 days = 12, 6 on shelf → 6 more, one pack of 12
+        var low = OrderProposalCalculator.propose(new Input(56, 0, 28, 6, 0, 0, 0, 0, 1, 7, 2, 12, 0.6));
+        assertThat(low.targetStock()).isEqualTo(12);
+        assertThat(low.quantity()).isEqualTo(12);
+    }
+
+    @Test
     void nothingToOrderYieldsEmptyProposal() {
         Proposal proposal = OrderProposalCalculator.propose(new Input(0, 0, 28, 50, 0, 0, 0, 0, 1, 7, 2, 1));
 

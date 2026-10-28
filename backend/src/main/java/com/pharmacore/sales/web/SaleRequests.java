@@ -1,11 +1,14 @@
 package com.pharmacore.sales.web;
 
 import com.pharmacore.sales.domain.PaymentMethod;
+import com.pharmacore.sales.domain.Posology;
 import com.pharmacore.sales.domain.SaleDraft;
 import com.pharmacore.sales.domain.SaleOrigin;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
@@ -29,25 +32,54 @@ final class SaleRequests {
                        UUID customerId,
                        @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines,
                        @NotNull @Size(max = 10) List<@Valid PaymentRequest> payments,
-                       @Valid PrescriptionRequest prescription) {
+                       @Valid PrescriptionRequest prescription,
+                       @Size(max = 50) List<@Valid SafetyOverrideRequest> safetyOverrides) {
 
         SaleDraft toDraft(SaleOrigin origin) {
             return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId,
                     lines.stream().map(line -> new SaleDraft.Line(line.productId(), line.quantity(),
-                            line.unitPriceCents(), line.discountCents())).toList(),
+                            line.unitPriceCents(), line.discountCents(),
+                            line.posology() == null ? null : line.posology().toPosology())).toList(),
                     payments.stream().map(payment -> new SaleDraft.Payment(payment.method(), payment.amountCents(),
                             payment.thirdPartyCode(), payment.reference(), payment.provider(), payment.policyId()))
                             .toList(),
                     prescription == null ? null : new SaleDraft.Prescription(prescription.prescriberName(),
                             prescription.prescriberRpps(), prescription.patientReference(),
-                            prescription.prescriptionId()));
+                            prescription.prescriptionId()),
+                    safetyOverrides == null ? List.of() : safetyOverrides.stream()
+                            .map(o -> new SaleDraft.SafetyOverride(o.alertKey(), o.reason())).toList());
         }
+    }
+
+    /** The pharmacist dispensed despite an alert the terminal showed (see {@code /api/v1/safety/check}). */
+    record SafetyOverrideRequest(@NotBlank @Size(max = 300) String alertKey,
+                                 @NotBlank @Size(max = 255) String reason) {
     }
 
     record LineRequest(@NotNull UUID productId,
                        @Positive int quantity,
                        @PositiveOrZero long unitPriceCents,
-                       @PositiveOrZero long discountCents) {
+                       @PositiveOrZero long discountCents,
+                       @Valid PosologyRequest posology) {
+    }
+
+    /** Units at each moment of the day, duration, food, free instruction (all optional but one). */
+    record PosologyRequest(@Min(0) @Max(Posology.MAX_UNITS_PER_TAKE) int morning,
+                           @Min(0) @Max(Posology.MAX_UNITS_PER_TAKE) int noon,
+                           @Min(0) @Max(Posology.MAX_UNITS_PER_TAKE) int evening,
+                           @Min(0) @Max(Posology.MAX_UNITS_PER_TAKE) int bedtime,
+                           @Min(0) @Max(Posology.MAX_DURATION_DAYS) int durationDays,
+                           boolean withFood,
+                           @Size(max = Posology.MAX_INSTRUCTIONS) String instructions) {
+
+        /** An all-empty posology is treated as none rather than refused: the terminal sends what it has. */
+        Posology toPosology() {
+            if (morning + noon + evening + bedtime == 0 && durationDays == 0
+                    && (instructions == null || instructions.isBlank())) {
+                return null;
+            }
+            return new Posology(morning, noon, evening, bedtime, durationDays, withFood, instructions);
+        }
     }
 
     record PaymentRequest(@NotNull PaymentMethod method,

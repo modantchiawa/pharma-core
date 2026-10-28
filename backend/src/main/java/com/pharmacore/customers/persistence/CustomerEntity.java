@@ -1,7 +1,10 @@
 package com.pharmacore.customers.persistence;
 
+import com.pharmacore.followup.domain.MessageChannel;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -48,6 +51,14 @@ public class CustomerEntity {
     @Column(length = 500)
     private String notes;
 
+    /** The customer agreed to receive the pharmacy's messages (treatment, renewal, product back, credit). */
+    @Column(name = "messaging_consent", nullable = false)
+    private boolean messagingConsent;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "preferred_channel", nullable = false, length = 8)
+    private MessageChannel preferredChannel = MessageChannel.WHATSAPP;
+
     @Column(nullable = false)
     private boolean active;
 
@@ -75,6 +86,8 @@ public class CustomerEntity {
         this.address = details.address();
         this.creditLimitCents = details.creditLimitCents();
         this.notes = details.notes();
+        this.messagingConsent = details.messagingConsent();
+        this.preferredChannel = details.preferredChannel() == null ? MessageChannel.WHATSAPP : details.preferredChannel();
     }
 
     /** @return true when the new balance stays within the credit limit */
@@ -127,11 +140,25 @@ public class CustomerEntity {
         return active;
     }
 
+    public boolean messagingConsent() {
+        return messagingConsent;
+    }
+
+    public MessageChannel preferredChannel() {
+        return preferredChannel == null ? MessageChannel.WHATSAPP : preferredChannel;
+    }
+
     public Details details() {
-        return new Details(displayName, phone, email, address, creditLimitCents, notes);
+        return new Details(displayName, phone, email, address, creditLimitCents, notes, messagingConsent,
+                preferredChannel());
     }
 
     public record Details(String displayName, String phone, String email, String address, long creditLimitCents,
-                          String notes) {
+                          String notes, boolean messagingConsent, MessageChannel preferredChannel) {
+
+        public Details(String displayName, String phone, String email, String address, long creditLimitCents,
+                       String notes) {
+            this(displayName, phone, email, address, creditLimitCents, notes, false, MessageChannel.WHATSAPP);
+        }
     }
 }
