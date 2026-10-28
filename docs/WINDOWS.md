@@ -64,6 +64,39 @@ conservés, Flyway migre la base au démarrage.
 | **Wi-Fi instable** | Le poste bascule hors-ligne/en ligne sans intervention. | Journal local + file de synchronisation avec backoff. |
 | **Erreur humaine** (vente annulée à tort, suppression) | Toute action sensible est dans le journal d'audit inaltérable ; les ventes s'annulent par contre-passation, jamais par suppression. | Historique complet, sauvegardes quotidiennes 14 jours + USB + réplique cloud. |
 
+## 3 bis. Confirmations mobile money sans Internet
+
+La confirmation d'un paiement Airtel Money, Moov Money, Orange Money, Zamani Cash, MyNITA ou Wave
+arrive par SMS sur le téléphone de la pharmacie. Pour qu'elle atteigne toutes les caisses même quand
+l'Internet est coupé, c'est le **hub** qui la reçoit, sur le réseau local, et qui la diffuse :
+
+1. Dans **Paiements › Réception des confirmations**, créez le **jeton** (affiché une seule fois).
+2. Sur le téléphone qui reçoit les SMS, installez une application de transfert de SMS (« SMS
+   forwarder », gratuite sur Android). Règle : pour les SMS des opérateurs, envoyer une requête
+   `POST` à `http://<adresse du hub>:8080/api/public/payments/<identifiant>/sms` avec l'en-tête
+   `X-PharmaCore-Token: <jeton>` (ou le paramètre `token`). Corps JSON (`from`, `text`) ou
+   formulaire : les deux sont acceptés. L'adresse complète est affichée dans la page Paiements.
+3. Le téléphone reste sur le **Wi-Fi de l'officine** : le hub suffit, aucun accès Internet n'est
+   nécessaire.
+
+Ce qui se passe ensuite :
+
+* Le hub lit le SMS (montant, référence de transaction, numéro du client, entrant ou sortant),
+  le garde une seule fois (un SMS réexpédié deux fois ne compte qu'une fois) et le **diffuse à
+  toutes les caisses** par le temps réel du réseau local.
+* Au comptoir, un règlement mobile money du même montant et du même opérateur reçoit la
+  confirmation aussitôt (« confirmé ») ; la vente est enregistrée avec la référence de
+  l'opérateur, et le règlement passe **confirmé** sans attendre le relevé.
+* Si le règlement a déjà été enregistré (vente faite avant l'arrivée du SMS, ou poste hors ligne
+  rejoué plus tard), le rapprochement se fait tout seul dès que le serveur voit les deux, à
+  condition que le règlement en attente soit **unique** pour ce montant et cet opérateur ;
+  sinon la confirmation reste « à rattacher » et l'équipe choisit le ticket dans Paiements.
+* Sans téléphone branché, n'importe quel poste peut **saisir le SMS** (bouton « SMS reçu » au
+  comptoir) : si le hub ne répond pas, la saisie est gardée sur le poste et envoyée à son retour,
+  comme les ventes.
+* Les webhooks des opérateurs arrivent sur le cloud ; pour une pharmacie en mode hub, le cloud
+  les garde et le hub les récupère à sa prochaine synchronisation (avec Internet, donc).
+
 ## 4. Sauvegardes
 
 * **Locale** : `pg_dump` compressé chaque soir à 22:30 et à chaque démarrage, 14 jours

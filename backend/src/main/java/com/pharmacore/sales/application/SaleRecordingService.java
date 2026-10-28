@@ -70,6 +70,7 @@ public class SaleRecordingService {
     private final InsuranceCoverageResolver coverage;
     private final PrescriptionService prescriptions;
     private final PaymentReconciliationService paymentReferences;
+    private final PaymentNotificationService paymentNotifications;
     private final SafetyCheckService safety;
     private final TenantCalendar calendar;
     private final AuditTrail audit;
@@ -81,9 +82,11 @@ public class SaleRecordingService {
                                 CustomerService customers, CashSessionService cashSessions,
                                 AccountingPoster accounting, CertificationService certification,
                                 InsuranceCoverageResolver coverage, PrescriptionService prescriptions,
-                                PaymentReconciliationService paymentReferences, SafetyCheckService safety,
+                                PaymentReconciliationService paymentReferences,
+                                PaymentNotificationService paymentNotifications, SafetyCheckService safety,
                                 TenantCalendar calendar, AuditTrail audit, ObjectMapper json, Clock clock) {
         this.coverage = coverage;
+        this.paymentNotifications = paymentNotifications;
         this.safety = safety;
         this.json = json;
         this.prescriptions = prescriptions;
@@ -220,6 +223,8 @@ public class SaleRecordingService {
         // save() merges an entity with an assigned id: later changes must go to the managed copy
         SaleEntity managed = sales.save(sale);
         safety.recordOverrides(managed, draft, safetyAlerts, seller.userId(), now);
+        // A confirmation that arrived before the sale (offline terminal replaying later) settles it now
+        paymentNotifications.matchSale(managed);
         // A refused renewal keeps the (offline) sale for review but does not consume the prescription
         if (draft.prescriptionId() != null && !anomalies.contains(SaleAnomaly.PRESCRIPTION_RENEWAL_REFUSED)) {
             prescriptions.recordDispensing(draft.prescriptionId(), managed, today);

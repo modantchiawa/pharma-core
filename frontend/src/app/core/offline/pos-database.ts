@@ -1,5 +1,11 @@
 import Dexie, { Table } from 'dexie';
-import { DrugListing, SaleOutcome, SaleRequest, StorageLocationKind } from '../api/models';
+import {
+  DrugListing,
+  ManualPaymentNotice,
+  SaleOutcome,
+  SaleRequest,
+  StorageLocationKind,
+} from '../api/models';
 
 export interface CachedProduct {
   productId: string;
@@ -55,6 +61,16 @@ export interface CachedSafetyRule {
   updatedAt: string;
 }
 
+/** A payment confirmation typed on this terminal, waiting for the server to take it. */
+export interface OutboxPaymentNotice {
+  clientId: string;
+  payload: ManualPaymentNotice;
+  status: 'PENDING' | 'SYNCED';
+  attempts: number;
+  createdAt: number;
+  lastError?: string;
+}
+
 export interface MetaEntry {
   key: string;
   value: unknown;
@@ -69,6 +85,7 @@ export class PosDatabase extends Dexie {
   outbox!: Table<OutboxSale, string>;
   meta!: Table<MetaEntry, string>;
   safetyRules!: Table<CachedSafetyRule, string>;
+  paymentNotices!: Table<OutboxPaymentNotice, string>;
 
   constructor(tenantId: string) {
     super(`pharmacore-pos-${tenantId}`);
@@ -83,6 +100,14 @@ export class PosDatabase extends Dexie {
       outbox: 'clientSaleId, status, [status+nextAttemptAt], createdAt',
       meta: 'key',
       safetyRules: 'id, substance, counterpart, updatedAt',
+    });
+    // v3: payment confirmations typed on the terminal while the server was unreachable
+    this.version(3).stores({
+      products: 'productId, cip13, ean13, designationKey, changedAt',
+      outbox: 'clientSaleId, status, [status+nextAttemptAt], createdAt',
+      meta: 'key',
+      safetyRules: 'id, substance, counterpart, updatedAt',
+      paymentNotices: 'clientId, status, createdAt',
     });
   }
 }

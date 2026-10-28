@@ -1740,3 +1740,63 @@ export interface DailyDigestView {
   whatsappLink: string | null;
   alreadyPublished: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Payment confirmations received live (SMS forwarded by the pharmacy's phone, webhooks, typed)
+// ---------------------------------------------------------------------------
+
+export type PaymentNotificationSource = 'SMS' | 'WEBHOOK' | 'MANUAL';
+export type PaymentNotificationStatus = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
+
+export interface PaymentNotification {
+  id: string;
+  source: PaymentNotificationSource;
+  provider: string | null;
+  amountCents: number | null;
+  reference: string | null;
+  payerPhone: string | null;
+  rawText: string | null;
+  incoming: boolean;
+  status: PaymentNotificationStatus;
+  paymentId: string | null;
+  ticketNumber: string | null;
+  receivedAt: string;
+  matchedAt: string | null;
+  matchedBy: string | null;
+}
+
+export interface PaymentNotificationFeed {
+  open: number;
+  notifications: PaymentNotification[];
+}
+
+/** A confirmation typed on a terminal; replayed as is when the server was unreachable. */
+export interface ManualPaymentNotice {
+  clientId: string;
+  provider: string | null;
+  amountCents: number;
+  reference: string | null;
+  payerPhone: string | null;
+  rawText: string | null;
+  receivedAt: string;
+  terminalId: string;
+}
+
+export interface PaymentChannelPattern {
+  provider: string | null;
+  regex: string;
+}
+
+export interface PaymentChannelSettings {
+  values: { autoConfirm: boolean; matchWindowHours: number; patterns: PaymentChannelPattern[] };
+  tokenSet: boolean;
+  tokenHint: string | null;
+  tokenCreatedAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface IssuedIngestToken {
+  token: string;
+  hint: string;
+  createdAt: string;
+}

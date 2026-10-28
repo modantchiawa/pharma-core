@@ -45,6 +45,8 @@ class SecurityConfiguration {
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/public/hub/**").permitAll()
+                        // Payment confirmations presented with the pharmacy's ingest token (phone, operator webhook)
+                        .requestMatchers(HttpMethod.POST, "/api/public/payments/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/pin",
                                 "/api/auth/logout", "/api/auth/unlock", "/api/auth/platform-login").permitAll()
                         // STOMP authenticates the CONNECT frame itself (see StompAuthenticationInterceptor)

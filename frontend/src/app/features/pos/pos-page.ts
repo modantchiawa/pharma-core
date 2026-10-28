@@ -10,6 +10,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
@@ -48,6 +49,9 @@ import { IdleService } from '../../core/session/idle.service';
 import { SoundService } from '../../core/ui/sound.service';
 import { SafetyService } from '../../core/safety/safety.service';
 import { PosologyLabels } from './posology-labels';
+import { PaymentNotificationsService } from '../../core/payments/payment-notifications.service';
+import { PaymentNotification } from '../../core/api/models';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   POSOLOGY_MOMENTS,
   Posology,
@@ -56,7 +60,7 @@ import {
   normalizePosology,
   posologySummary,
 } from '../../shared/posology';
-import { CartLine } from './cart.store';
+import { CartLine, CartPayment } from './cart.store';
 import { SAFETY_SEVERITY_LABELS, SafetyAlert } from '../../core/api/models';
 import { AnimatedNumber } from '../../shared/ui/animated-number';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -82,6 +86,7 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
 @Component({
   selector: 'app-pos-page',
   imports: [
+    DatePipe,
     FormsModule,
     MoneyPipe,
     Receipt,
@@ -411,6 +416,82 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                     Enregistrer
                   </button>
                 </div>
+              </div>
+            </form>
+          </div>
+        }
+
+        @if (smsEntry()) {
+          <div
+            class="fixed inset-0 z-50 flex items-end justify-center bg-[rgb(2_6_12/0.5)] p-0 backdrop-blur-sm sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmation de paiement reçue"
+          >
+            <form
+              class="card w-full max-w-md rounded-b-none shadow-[var(--shadow-lg)] animate-in sm:rounded-b-[var(--radius-lg)]"
+              (ngSubmit)="recordSms()"
+            >
+              <div class="card-header">
+                <div class="min-w-0">
+                  <h3 class="card-title">Confirmation reçue sur le téléphone</h3>
+                  <p class="mt-0.5 text-sm text-muted">
+                    Recopiez le SMS de l'opérateur : la confirmation est partagée avec tous les
+                    postes, même sans Internet, et rattachée au règlement.
+                  </p>
+                </div>
+                <app-icon name="mobileMoney" [size]="20" class="shrink-0 text-brand" />
+              </div>
+              <div class="card-body space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block">
+                    <span class="label">Opérateur</span>
+                    <select class="select" [(ngModel)]="smsForm.provider" name="sms-provider">
+                      @for (p of providers; track p) {
+                        <option [value]="p">{{ p.replace('_', ' ') }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="label">Montant</span>
+                    <input
+                      class="input text-right tabular-nums"
+                      inputmode="decimal"
+                      [(ngModel)]="smsForm.amount"
+                      name="sms-amount"
+                      required
+                    />
+                  </label>
+                </div>
+                <label class="block">
+                  <span class="label">Référence (Trans ID, Ref)</span>
+                  <input
+                    class="input"
+                    [(ngModel)]="smsForm.reference"
+                    name="sms-reference"
+                    maxlength="64"
+                  />
+                </label>
+                <label class="block">
+                  <span class="label">Texte du SMS (facultatif)</span>
+                  <textarea
+                    class="textarea"
+                    rows="2"
+                    maxlength="1000"
+                    [(ngModel)]="smsForm.rawText"
+                    name="sms-text"
+                    (ngModelChange)="readSmsText($event)"
+                  ></textarea>
+                </label>
+              </div>
+              <div class="flex justify-end gap-2 border-t p-4">
+                <button type="button" class="btn btn-ghost" (click)="smsEntry.set(false)">
+                  Annuler
+                </button>
+                <button type="submit" class="btn btn-primary" [disabled]="!smsForm.amount">
+                  <app-icon name="check" [size]="16" />
+                  Enregistrer la confirmation
+                </button>
               </div>
             </form>
           </div>
@@ -850,6 +931,58 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
               </select>
             </div>
           </div>
+          <div class="flex items-end gap-2">
+            <label class="block min-w-0 flex-1">
+              <span class="label">Référence de la transaction (SMS)</span>
+              <input
+                class="input"
+                [(ngModel)]="reference"
+                name="pos-reference"
+                maxlength="64"
+                placeholder="Facultatif : Trans ID, Ref…"
+                autocomplete="off"
+              />
+            </label>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              (click)="smsEntry.set(true)"
+              title="Saisir une confirmation reçue sur le téléphone de la pharmacie"
+            >
+              <app-icon name="mobileMoney" [size]="16" />
+              SMS reçu
+              @if (paymentNotifications.queued() > 0) {
+                <span class="badge badge-warning ml-1">{{ paymentNotifications.queued() }}</span>
+              }
+            </button>
+          </div>
+
+          @if (openConfirmations().length > 0) {
+            <div
+              class="rounded-[var(--radius)] border bg-[var(--success-soft)] p-3 text-sm"
+              data-testid="pos-confirmations"
+            >
+              <p class="flex items-center gap-2 font-medium text-success">
+                <app-icon name="mobileMoney" [size]="16" />
+                {{ openConfirmations().length }} confirmation(s) reçue(s), non rattachée(s)
+              </p>
+              <ul class="mt-1 space-y-0.5 text-xs">
+                @for (n of openConfirmations(); track n.id) {
+                  <li class="flex flex-wrap items-center gap-x-2">
+                    <span class="font-semibold">{{ n.amountCents ?? 0 | money }}</span>
+                    <span class="text-muted">{{
+                      (n.provider ?? 'opérateur ?').replace('_', ' ')
+                    }}</span>
+                    @if (n.reference) {
+                      <span class="font-mono">{{ n.reference }}</span>
+                    }
+                    <span class="text-subtle">{{ n.receivedAt | date: 'HH:mm' }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+
           @if (!cashSessionOpen()) {
             <div class="alert alert-warning text-xs">
               <app-icon name="alert" [size]="16" />
@@ -872,6 +1005,23 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                     }
                     @if (payment.policyId) {
                       <span class="text-muted">· {{ cart.policy()?.insurerName }}</span>
+                    }
+                    @if (payment.reference) {
+                      <span class="font-mono text-xs text-muted">· {{ payment.reference }}</span>
+                    }
+                    @if (payment.notificationId) {
+                      <span class="badge badge-success ml-1">confirmé</span>
+                    } @else if (payment.method === 'MOBILE_MONEY') {
+                      @for (n of candidatesFor(payment); track n.id) {
+                        <button
+                          type="button"
+                          class="btn btn-soft btn-sm ml-1"
+                          (click)="attachConfirmation($index, n)"
+                        >
+                          <app-icon name="check" [size]="12" />
+                          Confirmation {{ n.reference ?? (n.receivedAt | date: 'HH:mm') }}
+                        </button>
+                      }
                     }
                   </span>
                   <span class="num font-medium">{{ payment.amountCents | money }}</span>
@@ -1319,6 +1469,20 @@ export class PosPage {
   protected readonly safetyServerChecked = signal(true);
   protected readonly safetyProfileKnown = signal(false);
   protected readonly overriding = signal<SafetyAlert | null>(null);
+  protected readonly paymentNotifications = inject(PaymentNotificationsService);
+  protected reference = '';
+  protected readonly smsEntry = signal(false);
+  protected smsForm = {
+    provider: MOBILE_MONEY_PROVIDERS[0] as string,
+    amount: '',
+    reference: '',
+    rawText: '',
+  };
+  /** Received confirmations not attached to any payment of this basket. */
+  protected readonly openConfirmations = computed(() => {
+    const attached = new Set(this.cart.payments().map((p) => p.notificationId));
+    return this.paymentNotifications.open().filter((n) => !attached.has(n.id));
+  });
   protected readonly printTarget = signal<'receipt' | 'labels'>('receipt');
   protected readonly posologyEditing = signal<{ productId: string; designation: string } | null>(
     null,
@@ -1358,6 +1522,16 @@ export class PosPage {
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.saleDoneTimer);
       clearTimeout(this.safetyTimer);
+    });
+    this.paymentNotifications.start();
+    this.paymentNotifications.arrivals.pipe(takeUntilDestroyed()).subscribe((n) => {
+      if (n.status === 'UNMATCHED' && n.incoming) {
+        this.sound.play('scan');
+        this.toasts.info(
+          `Paiement reçu : ${this.money.transform(n.amountCents ?? 0)} ${(n.provider ?? '').replace('_', ' ')}${n.reference ? ' · ' + n.reference : ''}`,
+        );
+        this.autoAttach(n);
+      }
     });
     // Counter vigilance: every change of the basket or of the customer is checked, shortly
     // debounced so a scanner burst costs one request
@@ -1595,13 +1769,124 @@ export class PosPage {
     }
     const typed = this.currency.parse(this.amount);
     const cents = typed > 0 ? typed : this.cart.remainingCents();
+    const reference = method === 'MOBILE_MONEY' || method === 'CARD' ? this.reference.trim() : '';
     this.cart.addPayment({
       method,
       amountCents: cents,
       thirdPartyCode: method === 'THIRD_PARTY_PAYER' ? 'AMO' : undefined,
       provider: method === 'MOBILE_MONEY' ? this.provider : undefined,
+      reference: reference || undefined,
     });
     this.amount = '';
+    this.reference = '';
+    if (method === 'MOBILE_MONEY' && !reference) {
+      const candidates = this.paymentNotifications.candidates(cents, this.provider);
+      if (candidates.length === 1) {
+        this.attachConfirmation(this.cart.payments().length - 1, candidates[0]);
+      }
+    }
+  }
+
+  /** Open confirmations that could justify this basket payment (same amount and operator). */
+  protected candidatesFor(payment: CartPayment): PaymentNotification[] {
+    if (payment.method !== 'MOBILE_MONEY' || payment.notificationId) {
+      return [];
+    }
+    return this.paymentNotifications.candidates(payment.amountCents, payment.provider).slice(0, 3);
+  }
+
+  protected attachConfirmation(index: number, notification: PaymentNotification): void {
+    this.cart.attachConfirmation(index, notification.reference ?? '', notification.id);
+    this.paymentNotifications.consume(notification.id);
+    this.toasts.success('Confirmation rattachée au règlement');
+  }
+
+  /** A confirmation just arrived: the single untyped payment of that amount and operator takes it. */
+  private autoAttach(notification: PaymentNotification): void {
+    const payments = this.cart.payments();
+    const matches = payments
+      .map((p, index) => ({ p, index }))
+      .filter(
+        ({ p }) =>
+          p.method === 'MOBILE_MONEY' &&
+          !p.notificationId &&
+          !p.reference &&
+          p.amountCents === notification.amountCents &&
+          (!notification.provider || !p.provider || p.provider === notification.provider),
+      );
+    if (matches.length === 1) {
+      this.attachConfirmation(matches[0].index, notification);
+    }
+  }
+
+  /** Reads amount and reference out of a pasted SMS, like the server does. */
+  protected readSmsText(text: string): void {
+    const amount =
+      /(\d{1,3}(?:[ .\u202f\u00a0]?\d{3})*)\s?(?:F\s?CFA|FCFA|XOF|CFA|F(?![A-Za-z]))/i.exec(text);
+    if (amount && !this.smsForm.amount) {
+      this.smsForm.amount = amount[1].replace(/[ .\u202f\u00a0]/g, '');
+    }
+    const reference =
+      /(?:trans(?:action)?\s?id|txn\s?id|ref(?:erence)?|id)\s*[:.=]?\s*([A-Z0-9][A-Z0-9.\-_/]{4,39})/i.exec(
+        text,
+      );
+    if (reference && !this.smsForm.reference) {
+      this.smsForm.reference = reference[1].toUpperCase();
+    }
+    const upper = text.toUpperCase();
+    for (const p of this.providers) {
+      if (upper.includes(p.split('_')[0])) {
+        this.smsForm.provider = p;
+      }
+    }
+  }
+
+  protected async recordSms(): Promise<void> {
+    const amountCents = this.currency.parse(this.smsForm.amount);
+    if (amountCents <= 0) {
+      return;
+    }
+    try {
+      const result = await this.paymentNotifications.record({
+        provider: this.smsForm.provider,
+        amountCents,
+        reference: this.smsForm.reference.trim() || null,
+        payerPhone: null,
+        rawText: this.smsForm.rawText.trim() || null,
+      });
+      this.smsEntry.set(false);
+      if (result.notification) {
+        this.toasts.success(
+          result.notification.status === 'MATCHED'
+            ? 'Confirmation enregistrée et rattachée à une vente'
+            : 'Confirmation enregistrée : visible sur tous les postes',
+        );
+        if (result.notification.status === 'UNMATCHED') {
+          this.autoAttach(result.notification);
+        }
+      } else {
+        this.toasts.info(
+          'Serveur injoignable : confirmation gardée sur ce poste, envoyée dès son retour',
+        );
+        // the basket payment of that amount takes the typed reference right away
+        const payments = this.cart.payments();
+        const index = payments.findIndex(
+          (p) => p.method === 'MOBILE_MONEY' && !p.reference && p.amountCents === amountCents,
+        );
+        if (index >= 0 && this.smsForm.reference.trim()) {
+          this.cart.payments.update((list) =>
+            list.map((p, i) =>
+              i === index ? { ...p, reference: this.smsForm.reference.trim() } : p,
+            ),
+          );
+        }
+      }
+      this.smsForm = { provider: this.smsForm.provider, amount: '', reference: '', rawText: '' };
+    } catch (error) {
+      this.message.set(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Confirmation refusée',
+      );
+    }
   }
 
   protected labelOf(method: PaymentMethod): string {
@@ -1631,6 +1916,8 @@ export class PosPage {
           this.overriding.set(null);
         } else if (this.posologyEditing()) {
           this.posologyEditing.set(null);
+        } else if (this.smsEntry()) {
+          this.smsEntry.set(false);
         } else if (!this.term) {
           this.cart.clear();
         }
@@ -1835,6 +2122,7 @@ export class PosPage {
             thirdPartyCode: p.thirdPartyCode,
             provider: p.provider,
             policyId: p.policyId,
+            reference: p.reference,
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
           safetyOverrides: overrides.length > 0 ? overrides : undefined,
@@ -1865,6 +2153,11 @@ export class PosPage {
         offline: !this.connectivity.online(),
       };
       this.receipt.set(data);
+      for (const payment of applied) {
+        if (payment.notificationId) {
+          this.paymentNotifications.consume(payment.notificationId);
+        }
+      }
       this.cart.clear();
       this.celebrate({
         ticketNumber,
