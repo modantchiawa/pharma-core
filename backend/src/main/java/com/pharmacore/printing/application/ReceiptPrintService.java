@@ -19,6 +19,7 @@ import com.pharmacore.printing.domain.ReceiptDocument.Payment;
 import com.pharmacore.printing.domain.ReceiptDocument.VatRow;
 import com.pharmacore.printing.domain.TextReceiptRenderer;
 import com.pharmacore.sales.domain.PaymentMethod;
+import com.pharmacore.sales.domain.Posology;
 import com.pharmacore.sales.persistence.SaleEntity;
 import com.pharmacore.sales.persistence.SaleLineEntity;
 import com.pharmacore.sales.persistence.SalePaymentEntity;
@@ -66,11 +67,13 @@ public class ReceiptPrintService {
     private final BrandingService branding;
     private final PrintSettingsService settings;
     private final AuditTrail audit;
+    private final tools.jackson.databind.ObjectMapper json;
 
     public ReceiptPrintService(SaleRepository sales, ProductRepository products, CustomerRepository customers,
                                InsurancePolicyRepository policies, InsurerRepository insurers, AppUserRepository users,
                                TenantRepository tenants, BrandingService branding, PrintSettingsService settings,
-                               AuditTrail audit) {
+                               AuditTrail audit, tools.jackson.databind.ObjectMapper json) {
+        this.json = json;
         this.sales = sales;
         this.products = products;
         this.customers = customers;
@@ -171,6 +174,18 @@ public class ReceiptPrintService {
         return payload;
     }
 
+    /** The posology stored with the line, as printed; null when none was typed or it cannot be read. */
+    private String posologySummary(String posologyJson) {
+        if (posologyJson == null || posologyJson.isBlank()) {
+            return null;
+        }
+        try {
+            return json.readValue(posologyJson, Posology.class).summary();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private SaleEntity load(UUID saleId) {
         return sales.findWithLines(saleId).orElseThrow(() -> new NotFoundException("Sale", saleId));
     }
@@ -184,7 +199,8 @@ public class ReceiptPrintService {
                 .map(line -> new Line(
                         catalog.containsKey(line.productId()) ? catalog.get(line.productId()).designation()
                                 : "Produit " + line.productId(),
-                        line.quantity(), line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate()))
+                        line.quantity(), line.unitPriceCents(), line.discountCents(), line.netCents(), line.vatRate(),
+                        posologySummary(line.posologyJson())))
                 .toList();
         List<Payment> payments = sale.payments().stream().map(this::payment).toList();
         long paid = sale.payments().stream().mapToLong(SalePaymentEntity::amountCents).sum();

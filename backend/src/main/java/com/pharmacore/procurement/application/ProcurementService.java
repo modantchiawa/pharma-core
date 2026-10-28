@@ -152,13 +152,33 @@ public class ProcurementService {
 
     // ------------------------------------------------------------------ proposal
 
+    /** @param seasonalFactor the coming weeks last year against the yearly average (1 = unknown or flat) */
     public record ProposalLine(UUID productId, String cip13, String designation, UUID supplierId, String supplierName,
                                int available, int onOrder, int expiringSoon, long soldLastPeriod, long shortfall,
                                double dailyDemand, int targetStock, int suggestedQuantity, int packSize,
-                               Long purchasePriceCents, List<OrderProposalCalculator.Reason> reasons) {
+                               Long purchasePriceCents, List<OrderProposalCalculator.Reason> reasons,
+                               double seasonalFactor) {
     }
 
+    /** The coming weeks, one year ago, compared with the twelve months around them. */
+    static final int SEASON_WINDOW_DAYS = 35;
+    /** Below this many units sold over the reference year, no seasonality is inferred. */
+    static final int SEASON_MIN_YEAR_UNITS = 24;
+
     public record ProposalSheet(LocalDate date, int periodDays, List<ProposalLine> lines, long estimatedTotalCents) {
+    }
+
+    /**
+     * Daily rate of the coming weeks last year over the daily rate of the year around them,
+     * rounded to a tenth; 1 when last year is too thin to tell.
+     */
+    static double seasonalFactor(long windowUnits, long yearUnits) {
+        if (yearUnits < SEASON_MIN_YEAR_UNITS) {
+            return 1.0;
+        }
+        double windowRate = windowUnits / (double) SEASON_WINDOW_DAYS;
+        double yearRate = yearUnits / 365.0;
+        return Math.round(windowRate / yearRate * 10.0) / 10.0;
     }
 
     /**
@@ -169,6 +189,11 @@ public class ProcurementService {
     public ProposalSheet proposal(UUID supplierId) {
         LocalDate today = calendar.today();
         Instant periodStart = today.minusDays(VELOCITY_PERIOD_DAYS).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        LocalDate windowStart = today.plusDays(1).minusYears(1);
+        Instant seasonStart = windowStart.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        Instant seasonEnd = windowStart.plusDays(SEASON_WINDOW_DAYS).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        Instant yearStart = windowStart.minusDays(182).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        Instant yearEnd = windowStart.plusDays(183).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
         List<ProposalLine> lines = jdbc.sql("""
                         WITH pref AS (
                             SELECT DISTINCT ON (sp.product_id) sp.product_id, sp.supplier_id, s.name AS supplier_name,
@@ -193,19 +218,31 @@ public class ProcurementService {
                             FROM purchase_order_line l JOIN purchase_order o ON o.id = l.purchase_order_id
                             WHERE o.tenant_id = :tenant AND o.status IN ('SENT', 'PARTIALLY_RECEIVED')
                             GROUP BY l.product_id
+                        ),
+                        season AS (
+                            SELECT l.product_id,
+                                   coalesce(sum(l.quantity) FILTER (WHERE s.occurred_at >= :seasonStart
+                                                                      AND s.occurred_at < :seasonEnd), 0) AS window_qty,
+                                   sum(l.quantity) AS year_qty
+                            FROM sale_line l JOIN sale s ON s.id = l.sale_id
+                            WHERE s.tenant_id = :tenant AND s.status = 'COMPLETED'
+                              AND s.occurred_at >= :yearStart AND s.occurred_at < :yearEnd
+                            GROUP BY l.product_id
                         )
                         SELECT st.product_id, p.cip13, p.designation, st.reorder_threshold, st.reorder_quantity,
                                st.coverage_days, st.safety_days, st.reserved_quantity, st.shortfall_quantity,
                                pref.supplier_id, pref.supplier_name, coalesce(pref.lead_time_days, 1) AS lead_time_days,
                                coalesce(pref.pack_size, 1) AS pack_size, pref.purchase_price_cents,
                                coalesce(sold.qty, 0) AS sold, coalesce(lost.qty, 0) AS lost, coalesce(ordered.qty, 0) AS on_order,
-                               coalesce(l.sellable, 0) AS sellable, coalesce(l.expiring, 0) AS expiring
+                               coalesce(l.sellable, 0) AS sellable, coalesce(l.expiring, 0) AS expiring,
+                               coalesce(season.window_qty, 0) AS season_window, coalesce(season.year_qty, 0) AS season_year
                         FROM stock st
                         JOIN product p ON p.id = st.product_id AND p.active
                         LEFT JOIN pref ON pref.product_id = st.product_id
                         LEFT JOIN sold ON sold.product_id = st.product_id
                         LEFT JOIN lost ON lost.product_id = st.product_id
                         LEFT JOIN ordered ON ordered.product_id = st.product_id
+                        LEFT JOIN season ON season.product_id = st.product_id
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) FILTER (WHERE expiry_date > :today::date) AS sellable,
                                    sum(quantity) FILTER (WHERE expiry_date > :today::date
@@ -219,20 +256,25 @@ public class ProcurementService {
                 .param("supplier", supplierId)
                 .param("since", Timestamp.from(periodStart))
                 .param("today", Date.valueOf(today))
+                .param("seasonStart", Timestamp.from(seasonStart))
+                .param("seasonEnd", Timestamp.from(seasonEnd))
+                .param("yearStart", Timestamp.from(yearStart))
+                .param("yearEnd", Timestamp.from(yearEnd))
                 .query((rs, rowNum) -> {
                     int available = Math.max(rs.getInt("sellable") - rs.getInt("reserved_quantity"), 0);
                     int packSize = rs.getInt("pack_size");
+                    double seasonalFactor = seasonalFactor(rs.getLong("season_window"), rs.getLong("season_year"));
                     Proposal proposal = OrderProposalCalculator.propose(new Input(
                             rs.getLong("sold"), rs.getLong("lost"), VELOCITY_PERIOD_DAYS, available,
                             rs.getInt("on_order"), rs.getInt("expiring"), rs.getInt("reorder_threshold"),
                             rs.getInt("reorder_quantity"), rs.getInt("lead_time_days"), rs.getInt("coverage_days"),
-                            rs.getInt("safety_days"), packSize));
+                            rs.getInt("safety_days"), packSize, seasonalFactor));
                     return new ProposalLine(rs.getObject("product_id", UUID.class), rs.getString("cip13"),
                             rs.getString("designation"), rs.getObject("supplier_id", UUID.class),
                             rs.getString("supplier_name"), available, rs.getInt("on_order"), rs.getInt("expiring"),
                             rs.getLong("sold"), rs.getLong("lost"), proposal.dailyDemand(), proposal.targetStock(),
                             proposal.quantity(), packSize, (Long) rs.getObject("purchase_price_cents"),
-                            proposal.reasons());
+                            proposal.reasons(), seasonalFactor);
                 })
                 .list()
                 .stream()
@@ -703,6 +745,7 @@ public class ProcurementService {
             case BELOW_THRESHOLD -> "sous le seuil";
             case EXPIRING_REPLACEMENT -> "péremption proche";
             case LOST_SALES -> "ventes perdues";
+            case SEASONAL_UPTURN -> "saison haute";
         }).collect(Collectors.joining(", "));
     }
 

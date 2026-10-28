@@ -52,13 +52,15 @@ public class CustomerService {
 
     public record CustomerView(UUID id, String code, String displayName, String phone, String email, String address,
                                long creditLimitCents, long creditBalanceCents, long availableCreditCents,
-                               int loyaltyPoints, String notes, boolean active) {
+                               int loyaltyPoints, String notes, boolean active, boolean messagingConsent,
+                               String preferredChannel) {
 
         static CustomerView of(CustomerEntity c) {
             var d = c.details();
             return new CustomerView(c.id(), c.code(), c.displayName(), c.phone(), d.email(), d.address(),
                     c.creditLimitCents(), c.creditBalanceCents(),
-                    Math.max(c.creditLimitCents() - c.creditBalanceCents(), 0), c.loyaltyPoints(), d.notes(), c.active());
+                    Math.max(c.creditLimitCents() - c.creditBalanceCents(), 0), c.loyaltyPoints(), d.notes(), c.active(),
+                    c.messagingConsent(), c.preferredChannel().name());
         }
     }
 
@@ -78,7 +80,12 @@ public class CustomerService {
     public CustomerView update(UUID id, CustomerEntity.Details details) {
         var customer = customers.findById(id).orElseThrow(() -> new NotFoundException("Customer", id));
         long previousLimit = customer.creditLimitCents();
+        boolean previousConsent = customer.messagingConsent();
         customer.update(details);
+        if (previousConsent != details.messagingConsent()) {
+            audit.record("CUSTOMER_MESSAGING_CONSENT", "CUSTOMER", id, Map.of(
+                    "consent", Boolean.toString(details.messagingConsent())));
+        }
         if (previousLimit != details.creditLimitCents()) {
             audit.record("CUSTOMER_CREDIT_LIMIT_CHANGED", "CUSTOMER", id, Map.of(
                     "from", Long.toString(previousLimit), "to", Long.toString(details.creditLimitCents())));

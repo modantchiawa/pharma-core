@@ -67,6 +67,12 @@ const PHARMACY_NAV: NavGroup[] = [
       },
       { path: '/customers', label: 'Clients', icon: 'customers', permissions: ['CUSTOMER_MANAGE'] },
       {
+        path: '/customers/followup',
+        label: 'Suivi patients',
+        icon: 'messageCircle',
+        permissions: ['FOLLOWUP_VIEW'],
+      },
+      {
         path: '/prescriptions',
         label: 'Ordonnances',
         icon: 'prescription',

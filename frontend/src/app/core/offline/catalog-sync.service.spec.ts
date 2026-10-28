@@ -91,6 +91,7 @@ describe('toCachedProduct', () => {
       ean13: null,
       designation: 'Insulatard 100UI/ml',
       dci: 'INSULINE',
+      atcCode: 'A10AC01',
       listing: 'LIST_I',
       vatRate: 0,
       unitPriceCents: 9_500,

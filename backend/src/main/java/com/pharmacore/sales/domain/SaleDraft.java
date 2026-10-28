@@ -21,7 +21,15 @@ public record SaleDraft(UUID clientSaleId,
                         UUID customerId,
                         List<Line> lines,
                         List<Payment> payments,
-                        Prescription prescription) {
+                        Prescription prescription,
+                        List<SafetyOverride> safetyOverrides) {
+
+    public SaleDraft(UUID clientSaleId, String terminalId, String ticketNumber, Instant occurredAt, SaleOrigin origin,
+                     UUID cashierUserId, UUID customerId, List<Line> lines, List<Payment> payments,
+                     Prescription prescription) {
+        this(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId, lines, payments,
+                prescription, List.of());
+    }
 
     public SaleDraft {
         Objects.requireNonNull(clientSaleId, "clientSaleId");
@@ -29,12 +37,18 @@ public record SaleDraft(UUID clientSaleId,
         Objects.requireNonNull(origin, "origin");
         lines = List.copyOf(lines);
         payments = List.copyOf(payments);
+        safetyOverrides = safetyOverrides == null ? List.of() : List.copyOf(safetyOverrides);
         if (lines.isEmpty()) {
             throw new IllegalArgumentException("A sale needs at least one line");
         }
     }
 
-    public record Line(UUID productId, int quantity, long unitPriceCents, long discountCents) {
+    /** @param posology how the patient takes it, as typed at the counter (optional) */
+    public record Line(UUID productId, int quantity, long unitPriceCents, long discountCents, Posology posology) {
+
+        public Line(UUID productId, int quantity, long unitPriceCents, long discountCents) {
+            this(productId, quantity, unitPriceCents, discountCents, null);
+        }
 
         public Line {
             if (quantity <= 0) {
@@ -94,6 +108,21 @@ public record SaleDraft(UUID clientSaleId,
 
         public Prescription(String prescriberName, String prescriberRpps, String patientReference) {
             this(prescriberName, prescriberRpps, patientReference, null);
+        }
+    }
+
+    /**
+     * The pharmacist's decision to dispense despite a contraindication found at the counter:
+     * {@code alertKey} is the stable key of the alert, {@code reason} what they wrote.
+     */
+    public record SafetyOverride(String alertKey, String reason) {
+
+        public SafetyOverride {
+            Objects.requireNonNull(alertKey, "alertKey");
+            if (reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException("An override needs a reason");
+            }
+            reason = reason.trim();
         }
     }
 

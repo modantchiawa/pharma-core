@@ -65,8 +65,14 @@ public record ReceiptDocument(Header header,
     public record Customer(String displayName, String phone, String address, String policy) {
     }
 
+    /** @param posology summary printed under the line ("1 matin · 1 soir · 7 jours"), optional */
     public record Line(String designation, int quantity, long unitPriceCents, long discountCents, long netCents,
-                       BigDecimal vatRate) {
+                       BigDecimal vatRate, String posology) {
+
+        public Line(String designation, int quantity, long unitPriceCents, long discountCents, long netCents,
+                    BigDecimal vatRate) {
+            this(designation, quantity, unitPriceCents, discountCents, netCents, vatRate, null);
+        }
     }
 
     public record Payment(String label, long amountCents) {

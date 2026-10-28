@@ -6,10 +6,13 @@ import {
   PaymentMethod,
   Prescription,
   PrescriptionRequest,
+  SafetyAlert,
+  SafetyOverrideRequest,
   insuredShareCents,
 } from '../../core/api/models';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CachedProduct } from '../../core/offline/pos-database';
+import { Posology, normalizePosology } from '../../shared/posology';
 import { ProductPlace, placeOf } from '../../shared/storage-location';
 
 export interface CartLine {
@@ -17,6 +20,9 @@ export interface CartLine {
   designation: string;
   cip13: string;
   listing: DrugListing;
+  /** Composition, for the counter vigilance (interactions, duplicates); absent on reprinted sales. */
+  dci?: string | null;
+  atcCode?: string | null;
   vatRate: number;
   unitPriceCents: number;
   quantity: number;
@@ -26,6 +32,8 @@ export interface CartLine {
   place?: ProductPlace | null;
   /** Version of the product photo shown beside the line. */
   imageVersion?: string | null;
+  /** How the patient takes it, typed at the counter; printed on the ticket and the label. */
+  posology?: Posology | null;
 }
 
 export interface CartPayment {
@@ -67,6 +75,10 @@ export class CartStore {
   readonly prescriptionOnFile = signal<Prescription | null>(null);
   /** What to tell the cashier who switched in, once: their predecessor's payments were dropped. */
   readonly handover = signal<string | null>(null);
+  /** Counter vigilance: what the referential and the customer's file say of the basket. */
+  readonly safetyAlerts = signal<SafetyAlert[]>([]);
+  /** Contraindications the pharmacist took on, by alert key, with the reason typed. */
+  readonly safetyOverrides = signal<Map<string, string>>(new Map());
 
   constructor() {
     let cashier = untracked(() => this.permissions.profile()?.userId ?? null);
@@ -135,6 +147,14 @@ export class CartStore {
       }));
   });
 
+  /** Contraindications still standing: the sale cannot go through until each is overridden. */
+  readonly blockingSafety = computed(() => {
+    const overrides = this.safetyOverrides();
+    return this.safetyAlerts().filter(
+      (a) => a.severity === 'CONTRAINDICATED' && !overrides.has(a.key),
+    );
+  });
+
   readonly blockingIssues = computed(() => {
     const issues: string[] = [];
     const max = this.permissions.maxDiscountPercent();
@@ -180,6 +200,9 @@ export class CartStore {
     if (onFile && onFile.renewalsRemaining <= 0) {
       issues.push('Ordonnance épuisée : aucune délivrance restante');
     }
+    for (const alert of this.blockingSafety()) {
+      issues.push(`${alert.title} : contre-indication à lever par un pharmacien`);
+    }
     return issues;
   });
 
@@ -210,6 +233,8 @@ export class CartStore {
           designation: product.designation,
           cip13: product.cip13,
           listing: product.listing,
+          dci: product.dci,
+          atcCode: product.atcCode ?? null,
           vatRate: product.vatRate,
           unitPriceCents: price,
           quantity,
@@ -253,6 +278,44 @@ export class CartStore {
 
   remove(productId: string): void {
     this.lines.update((lines) => lines.filter((l) => l.productId !== productId));
+  }
+
+  /** Sets or clears the posology of a line; an all-empty posology clears it. */
+  setPosology(productId: string, posology: Posology | null): void {
+    const cleaned = normalizePosology(posology);
+    this.lines.update((lines) =>
+      lines.map((l) => (l.productId === productId ? { ...l, posology: cleaned } : l)),
+    );
+  }
+
+  /** Lines whose posology is set: the labels to print for the patient. */
+  readonly posologyLines = computed(() => this.lines().filter((l) => !!l.posology));
+
+  /** Replaces the alerts of the basket; overrides of alerts that disappeared are forgotten. */
+  setSafetyAlerts(alerts: SafetyAlert[]): void {
+    this.safetyAlerts.set(alerts);
+    const keys = new Set(alerts.map((a) => a.key));
+    this.safetyOverrides.update((current) => {
+      const kept = new Map([...current].filter(([key]) => keys.has(key)));
+      return kept.size === current.size ? current : kept;
+    });
+  }
+
+  /** The pharmacist dispenses despite the alert: needs the SAFETY_OVERRIDE right and a reason. */
+  overrideSafety(alertKey: string, reason: string): boolean {
+    if (!this.permissions.has('SAFETY_OVERRIDE') || !reason.trim()) {
+      return false;
+    }
+    this.safetyOverrides.update((current) => new Map(current).set(alertKey, reason.trim()));
+    return true;
+  }
+
+  /** What the sale carries to the server: every override of an alert still present. */
+  appliedSafetyOverrides(): SafetyOverrideRequest[] {
+    const keys = new Set(this.safetyAlerts().map((a) => a.key));
+    return [...this.safetyOverrides()]
+      .filter(([key]) => keys.has(key))
+      .map(([alertKey, reason]) => ({ alertKey, reason }));
   }
 
   addPayment(payment: CartPayment): void {
@@ -323,6 +386,8 @@ export class CartStore {
     this.customer.set(null);
     this.policy.set(null);
     this.prescriptionOnFile.set(null);
+    this.safetyAlerts.set([]);
+    this.safetyOverrides.set(new Map());
   }
 }
 

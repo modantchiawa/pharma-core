@@ -3,6 +3,7 @@ import { Injectable, effect, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { APP_ENVIRONMENT } from '../config';
 import { CatalogSyncService } from './catalog-sync.service';
+import { SafetyService } from '../safety/safety.service';
 import { ConnectivityService } from './connectivity.service';
 import { SaleOutboxService } from './sale-outbox.service';
 import { TerminalService } from './terminal.service';
@@ -18,6 +19,7 @@ export class SyncOrchestratorService {
   private readonly env = inject(APP_ENVIRONMENT);
   private readonly outbox = inject(SaleOutboxService);
   private readonly catalog = inject(CatalogSyncService);
+  private readonly safety = inject(SafetyService);
   private readonly connectivity = inject(ConnectivityService);
   private readonly terminal = inject(TerminalService);
   private started = false;
@@ -38,7 +40,10 @@ export class SyncOrchestratorService {
     this.outbox.watchCounters();
     void this.syncNow();
     setInterval(() => void this.outbox.flush(), FLUSH_INTERVAL_MS);
-    setInterval(() => void this.catalog.pull().catch(() => undefined), CATALOG_INTERVAL_MS);
+    setInterval(() => {
+      void this.catalog.pull().catch(() => undefined);
+      void this.safety.pullRules().catch(() => undefined);
+    }, CATALOG_INTERVAL_MS);
     setInterval(() => void this.heartbeat(), HEARTBEAT_INTERVAL_MS);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -55,6 +60,7 @@ export class SyncOrchestratorService {
   async syncNow(): Promise<void> {
     await this.outbox.flush();
     await this.catalog.pull().catch(() => undefined);
+    await this.safety.pullRules().catch(() => undefined);
     await this.outbox.purgeSynced().catch(() => undefined);
     await this.heartbeat();
   }

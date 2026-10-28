@@ -4,6 +4,7 @@ import { PaperFormat } from '../../core/api/models';
 import { BrandingService } from '../../core/branding/branding.service';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { amountInWords } from '../../shared/amount-words';
+import { Posology, posologySummary } from '../../shared/posology';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { CartLine, CartPayment } from './cart.store';
 
@@ -137,7 +138,14 @@ export const PAYMENT_LABELS: Record<string, string> = {
           <tbody>
             @for (line of data().lines; track line.productId) {
               <tr class="border-b border-slate-300">
-                <td class="py-1">{{ line.designation }}</td>
+                <td class="py-1">
+                  {{ line.designation }}
+                  @if (line.posology) {
+                    <span class="block text-[10px] text-slate-700">
+                      Posologie : {{ summaryOf(line.posology) }}
+                    </span>
+                  }
+                </td>
                 <td class="py-1 text-right">{{ line.quantity }}</td>
                 <td class="py-1 text-right">{{ line.unitPriceCents | money }}</td>
                 <td class="py-1 text-right">
@@ -257,6 +265,13 @@ export const PAYMENT_LABELS: Record<string, string> = {
                   <td class="text-right">-{{ line.discountCents | money }}</td>
                 </tr>
               }
+              @if (line.posology) {
+                <tr>
+                  <td colspan="2" class="pl-2 font-bold break-words">
+                    &gt; {{ summaryOf(line.posology) }}
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>
@@ -347,6 +362,10 @@ export class Receipt {
   }
 
   /** A 58 mm ticket holds about 30 characters: long names are cut on a word boundary. */
+  protected summaryOf(posology: Posology): string {
+    return posologySummary(posology);
+  }
+
   protected shorten(designation: string): string {
     if (this.format() !== 'MM58' || designation.length <= 30) {
       return designation;

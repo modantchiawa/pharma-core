@@ -19,5 +19,9 @@ public enum SaleAnomaly {
     /** The renewable prescription attached to the sale is exhausted, expired or cancelled. */
     PRESCRIPTION_RENEWAL_REFUSED,
     /** A mobile money or card transaction reference was already used by another sale. */
-    DUPLICATE_PAYMENT_REFERENCE
+    DUPLICATE_PAYMENT_REFERENCE,
+    /** A contraindication (interaction, allergy, patient situation) without the pharmacist's override. */
+    SAFETY_CONTRAINDICATION,
+    /** The seller overrode a contraindication without the right to do so. */
+    SAFETY_OVERRIDE_NOT_ALLOWED
 }

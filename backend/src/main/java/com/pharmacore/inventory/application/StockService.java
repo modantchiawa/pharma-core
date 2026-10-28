@@ -38,11 +38,14 @@ public class StockService {
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final FourEyesService fourEyes;
+    private final org.springframework.context.ApplicationEventPublisher events;
     private final Clock clock;
 
     public StockService(StockLedger ledger, StockRepository stocks, StockLotRepository lots,
                         StockMovementRepository movements, TenantCalendar calendar, AuditTrail audit, JdbcClient jdbc,
-                        FourEyesService fourEyes, Clock clock) {
+                        FourEyesService fourEyes, org.springframework.context.ApplicationEventPublisher events,
+                        Clock clock) {
+        this.events = events;
         this.ledger = ledger;
         this.stocks = stocks;
         this.lots = lots;
@@ -88,6 +91,7 @@ public class StockService {
         audit.record("STOCK_RECEIVED", "STOCK_LOT", lot.id(), Map.of(
                 "productId", productId.toString(), "lotNumber", lotNumber, "expiryDate", expiryDate.toString(),
                 "quantity", Integer.toString(quantity)));
+        events.publishEvent(new StockReceived(TenantContext.requireTenant().value(), productId, quantity));
         return lot.id();
     }
 

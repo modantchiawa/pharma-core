@@ -37,6 +37,8 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Annulation ou remboursement au-dessus d'un seuil (ou sur session fermée) soumis au **PIN d'un superviseur** | Partiel | ✅ |
 | Rapprochement des paiements **mobile money et carte** avec les relevés opérateurs (confirmation, rejet → vente en revue), référence de transaction unique | Rare | ✅ |
 | Ticket thermique **58 mm (type TPE) ou 80 mm** aux couleurs de la pharmacie, **facture A4** (montant en lettres, TVA, client, police) | Oui | ✅ impression navigateur ou ESC/POS direct (USB partagée, réseau 9100), réglages par poste, réimpression, tiroir-caisse |
+| **Vigilance au comptoir** : interactions médicamenteuses (par DCI et par classe ATC), doublon de substance caché dans deux boîtes, allergies déclarées, grossesse, allaitement, enfant, personne âgée, pathologies chroniques (rein, foie, G6PD, asthme, diabète, HTA, épilepsie, ulcère, glaucome, drépanocytose), produit déjà délivré au même client dans la semaine ; contre-indication bloquante levée par un pharmacien avec motif (auditée, signalée au titulaire) ; interactions et doublons vérifiés hors ligne sur le poste | Non (ou module payant sous licence) | ✅ référentiel amorcé (≈ 250 règles), maintenu par l'éditeur (JSON, CSV), profil santé du client |
+| **Posologie par pictogrammes** : saisie en un geste au comptoir (matin, midi, soir, coucher, durée, repas, consigne), imprimée sur le ticket et sur une **étiquette** lisible sans savoir lire (soleil levant, soleil, coucher, lune, nombre en gros), rappel de fin de traitement | Non | ✅ |
 | **Facture certifiée DGI (SECeF)** | Obligatoire au Niger pour les assujettis TVA | 🟡 port de certification, file de retry, QR/code sur ticket ; connecteur DGI à réaliser avec les spécifications SECeF |
 | Afficheur client, imprimante étiquettes | Oui | ⬜ phase 2 bis (étiquettes de prix) ; tiroir-caisse ✅ via ESC/POS |
 | Fidélité (points) | Souvent | 🟡 points stockés ; règles d'attribution : phase 2 |
@@ -49,6 +51,7 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Alertes de péremption, produits dormants, ruptures | Oui | ✅ péremptions, écarts hors-ligne · 🟡 dormants : phase 2 |
 | Seuils mini / quantité de réappro par produit | Oui | ✅ + jours de couverture et stock de sécurité |
 | **Fiche de commande du lendemain** calculée (vitesse de vente, délai fournisseur, en commande, péremptions, ventes perdues) | Oui (souvent sur seuils seuls) | ✅ |
+| **Saisonnalité** : les semaines à venir comparées à l'an dernier (paludisme en saison des pluies, Ramadan, rentrée) relèvent ou abaissent la quantité proposée, motif « saison haute » affiché | Non | ✅ dès un an d'historique |
 | Fournisseurs (grossistes-répartiteurs), références, prix d'achat, colisage, minimum de commande | Oui | ✅ |
 | Envoi de commande : texte WhatsApp / e-mail, impression, CSV | Oui | ✅ WhatsApp (wa.me), e-mail, bon de commande A4 imprimé · 🟡 PDF : phase 2 |
 | Génération directe d'une commande par fournisseur depuis la fiche, brouillons mis à jour sans doublon | Partiel | ✅ |
@@ -85,6 +88,8 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Journal d'audit inaltérable | Rare | ✅ chaîne SHA-256 |
 | **Contrôle interne anti-fraude** : recomptage tournant à l'aveugle tiré selon le risque, double validation (seconde personne et PIN) des sorties, retours et annulations encaissées, réception à l'aveugle et séparation des tâches, indicateurs par employé avec signalement expliqué, registre des stupéfiants, alertes en direct et webhook signé | Rare | ✅ Gestion › Contrôle interne |
 | **Sauvegardes** automatiques locales, USB et cloud | Oui | ✅ tâche planifiée + réplique cloud continue |
+| **Suivi patients WhatsApp / SMS** (opt-in) : fin de traitement, ordonnance à renouveler, « prévenez-moi quand ce produit revient », rappel de créance, message libre ; envoi WhatsApp en un geste (lien pré-rempli), SMS automatique par passerelle HTTPS ; modèles par pharmacie | Non | ✅ |
+| **Rapport du soir au titulaire** : chiffres du jour (CA et variation, ventes, panier, marge, encaissements par mode, écart de caisse, ruptures, péremptions, créances) à l'heure choisie, dans la cloche, le webhook et par SMS ; partage WhatsApp depuis le pilotage | Non | ✅ |
 | Supervision éditeur multi-pharmacies | — | ✅ |
 | Personnalisation : logo, couleurs, mentions, ticket ; densité, contraste, taille de texte, mode sombre par poste | Partiel | ✅ |
 | Réseau inter-pharmacies : disponibilité d'urgence, réservations, gardes, messagerie | Rare | ✅ (nécessite Internet) |
@@ -117,4 +122,5 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **2 (livrée)** | Bordereaux tiers payant, tableau de bord, inventaire à l'aveugle et contrôle d'intégrité, caisse à l'aveugle et approbations, rapprochement mobile money, registre des ordonnances, substitution par DCI, annuaire public et gardes partagées | Parité et avance sur les PGO installés |
 | **2 bis (livrée)** | Impression 58/80 mm et facture A4, ESC/POS direct et tiroir, importation de données et du référentiel | Migration des officines équipées |
 | **2 ter** | Connecteur SECeF certifié, étiquettes de prix, grand livre, avoirs sur bordereaux émis, export PDF | Conformité fiscale complète |
-| **3** | Multi-langue, application mobile du titulaire (chiffres du jour, alertes), commandes électroniques vers les grossistes (EDI/API), base d'interactions médicamenteuses sous licence, SMS clients (ordonnance prête, rappel de traitement) | Différenciation |
+| **3 (livrée)** | Vigilance au comptoir (interactions, allergies, profil du patient), posologie par pictogrammes, suivi patients WhatsApp/SMS, rapport du soir au titulaire, saisonnalité de la fiche de commande | Différenciation : ce que les PGO installés ne font pas |
+| **4** | Multi-langue, application mobile du titulaire, commandes électroniques vers les grossistes (EDI/API), bourse aux produits à péremption proche entre pharmacies du réseau, base d'interactions sous licence éditeur (en plus de l'amorce) | Réseau et écosystème |

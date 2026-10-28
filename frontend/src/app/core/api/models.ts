@@ -20,7 +20,13 @@ export type SaleAnomaly =
   | 'FUTURE_TIMESTAMP'
   | 'STOCK_SHORTFALL'
   | 'CREDIT_NOT_ALLOWED'
-  | 'CREDIT_LIMIT_EXCEEDED';
+  | 'CREDIT_LIMIT_EXCEEDED'
+  | 'INSURANCE_SHARE_MISMATCH'
+  | 'INSURANCE_POLICY_INVALID'
+  | 'PRESCRIPTION_RENEWAL_REFUSED'
+  | 'DUPLICATE_PAYMENT_REFERENCE'
+  | 'SAFETY_CONTRAINDICATION'
+  | 'SAFETY_OVERRIDE_NOT_ALLOWED';
 
 export interface Me {
   userId: string;
@@ -37,6 +43,8 @@ export interface PosCatalogItem {
   ean13: string | null;
   designation: string;
   dci: string | null;
+  /** ATC class of the product (WHO classification); null when the catalog does not know it. */
+  atcCode: string | null;
   listing: DrugListing;
   vatRate: number;
   unitPriceCents: number | null;
@@ -64,6 +72,18 @@ export interface SaleLineRequest {
   quantity: number;
   unitPriceCents: number;
   discountCents: number;
+  /** How the patient takes it, when the pharmacist typed it (see shared/posology.ts). */
+  posology?: PosologyRequest;
+}
+
+export interface PosologyRequest {
+  morning: number;
+  noon: number;
+  evening: number;
+  bedtime: number;
+  durationDays: number;
+  withFood: boolean;
+  instructions: string | null;
 }
 
 export interface SalePaymentRequest {
@@ -94,6 +114,13 @@ export interface SaleRequest {
   lines: SaleLineRequest[];
   payments: SalePaymentRequest[];
   prescription?: PrescriptionRequest;
+  /** Contraindications the pharmacist took on at the counter, with their reason. */
+  safetyOverrides?: SafetyOverrideRequest[];
+}
+
+export interface SafetyOverrideRequest {
+  alertKey: string;
+  reason: string;
 }
 
 export type SaleOutcome =
@@ -158,7 +185,12 @@ export interface Customer {
   loyaltyPoints: number;
   notes: string | null;
   active: boolean;
+  /** The customer agreed to receive the pharmacy's messages (WhatsApp or SMS). */
+  messagingConsent: boolean;
+  preferredChannel: MessageChannel;
 }
+
+export type MessageChannel = 'WHATSAPP' | 'SMS';
 
 export interface CashSessionReport {
   sessionId: string;
@@ -214,6 +246,8 @@ export interface ProposalLine {
   packSize: number;
   purchasePriceCents: number | null;
   reasons: string[];
+  /** The coming weeks last year against the yearly average; 1 when unknown. */
+  seasonalFactor: number;
 }
 
 export interface ProposalSheet {
@@ -921,6 +955,8 @@ export interface TerminalTicketRequest {
     unitPriceCents: number;
     discountCents: number;
     vatRate: number;
+    /** Posology summary printed under the line, null without. */
+    posology?: string | null;
   }[];
   discountCents: number;
   netCents: number;
@@ -1499,4 +1535,208 @@ export interface WebhookDelivery {
   lastError: string | null;
   createdAt: string;
   deliveredAt: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Counter vigilance (interactions, allergies, patient situations)
+// ---------------------------------------------------------------------------
+
+export type SafetySeverity = 'CONTRAINDICATED' | 'ADVISED_AGAINST' | 'PRECAUTION';
+
+export type SafetyAlertKind =
+  'INTERACTION' | 'DUPLICATE_SUBSTANCE' | 'ALLERGY' | 'CONTEXT' | 'RECENT_DISPENSING';
+
+export type HealthContext =
+  | 'PREGNANCY'
+  | 'BREASTFEEDING'
+  | 'CHILD'
+  | 'ELDERLY'
+  | 'RENAL'
+  | 'HEPATIC'
+  | 'G6PD'
+  | 'ASTHMA'
+  | 'DIABETES'
+  | 'HYPERTENSION'
+  | 'EPILEPSY'
+  | 'ULCER'
+  | 'GLAUCOMA'
+  | 'SICKLE_CELL';
+
+/** One line of the interaction referential, as the terminal caches it. */
+export interface SafetyRule {
+  kind: 'INTERACTION' | 'CONTEXT';
+  substance: string;
+  counterpart: string;
+  severity: SafetySeverity;
+  advice: string;
+}
+
+export interface SafetyRuleRow {
+  id: string;
+  rule: SafetyRule;
+  source: string | null;
+  active: boolean;
+  updatedAt: string;
+}
+
+export interface SafetyRulePage {
+  items: SafetyRuleRow[];
+  nextSince: string;
+  nextAfter: string | null;
+  hasMore: boolean;
+}
+
+export interface SafetyAlert {
+  kind: SafetyAlertKind;
+  severity: SafetySeverity;
+  title: string;
+  detail: string;
+  productIds: string[];
+  /** Stable key, identical on the terminal and the server for the same basket. */
+  key: string;
+}
+
+export interface SafetyCheckResult {
+  alerts: SafetyAlert[];
+  /** The customer has a health file; false without a customer or with an empty file. */
+  profileKnown: boolean;
+  blocking: number;
+}
+
+export interface HealthProfile {
+  customerId: string;
+  birthDate: string | null;
+  ageYears: number | null;
+  sex: 'F' | 'M' | null;
+  weightKg: number | null;
+  pregnant: boolean;
+  breastfeeding: boolean;
+  /** Allergy family codes (see the vocabulary) or substance names. */
+  allergies: string[];
+  conditions: HealthContext[];
+  notes: string | null;
+  updatedAt: string | null;
+  empty: boolean;
+}
+
+export interface HealthProfileRequest {
+  birthDate: string | null;
+  sex: 'F' | 'M' | null;
+  weightKg: number | null;
+  pregnant: boolean;
+  breastfeeding: boolean;
+  allergies: string[];
+  conditions: HealthContext[];
+  notes: string | null;
+}
+
+export interface HealthVocabulary {
+  allergyFamilies: { code: string; label: string }[];
+  conditions: { code: HealthContext; label: string }[];
+}
+
+export const SAFETY_SEVERITY_LABELS: Record<SafetySeverity, string> = {
+  CONTRAINDICATED: 'Contre-indication',
+  ADVISED_AGAINST: 'Déconseillé',
+  PRECAUTION: 'Précaution',
+};
+
+// ---------------------------------------------------------------------------
+// Patient follow-up (WhatsApp / SMS)
+// ---------------------------------------------------------------------------
+
+export type MessageKind =
+  'TREATMENT_END' | 'RENEWAL_DUE' | 'PRODUCT_AVAILABLE' | 'CREDIT_REMINDER' | 'CUSTOM';
+
+export type MessageStatus = 'PENDING' | 'SENT' | 'FAILED' | 'CANCELLED';
+
+export interface CustomerMessage {
+  id: string;
+  customerId: string;
+  customerName: string;
+  kind: MessageKind;
+  channel: MessageChannel;
+  phone: string;
+  body: string;
+  status: MessageStatus;
+  /** Pre-filled "click to chat" link; null for an SMS. */
+  whatsappLink: string | null;
+  createdAt: string;
+  sentAt: string | null;
+  sentBy: string | null;
+  attempts: number;
+  lastError: string | null;
+}
+
+export interface MessageQueue {
+  pending: number;
+  sentToday: number;
+  messages: CustomerMessage[];
+}
+
+export interface ProductWish {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string | null;
+  productId: string;
+  designation: string;
+  quantity: number;
+  status: 'WAITING' | 'NOTIFIED' | 'CANCELLED';
+  requestedAt: string;
+  notifiedAt: string | null;
+}
+
+export interface FollowUpValues {
+  enabled: boolean;
+  treatmentEndEnabled: boolean;
+  renewalEnabled: boolean;
+  renewalDaysAhead: number;
+  productWishEnabled: boolean;
+  creditReminderEnabled: boolean;
+  creditReminderAfterDays: number;
+  creditReminderEveryDays: number;
+  templates: Partial<Record<MessageKind, string>>;
+  smsGatewayUrl: string | null;
+  smsSender: string | null;
+  digestEnabled: boolean;
+  digestHour: number;
+  digestPhone: string | null;
+}
+
+export interface FollowUpSettings {
+  values: FollowUpValues;
+  defaultTemplates: Record<MessageKind, string>;
+  smsTokenSet: boolean;
+  updatedAt: string | null;
+  version: number;
+}
+
+export interface FollowUpSettingsRequest extends FollowUpValues {
+  /** null keeps the stored token, '' clears it */
+  smsGatewayToken: string | null;
+}
+
+export interface FollowUpReport {
+  treatmentEnds: number;
+  renewals: number;
+  creditReminders: number;
+  total: number;
+}
+
+export const MESSAGE_KIND_LABELS: Record<MessageKind, string> = {
+  TREATMENT_END: 'Fin de traitement',
+  RENEWAL_DUE: 'Renouvellement',
+  PRODUCT_AVAILABLE: 'Produit arrivé',
+  CREDIT_REMINDER: 'Rappel de créance',
+  CUSTOM: 'Message libre',
+};
+
+/** The owner's evening report, as text to read, copy or share on WhatsApp. */
+export interface DailyDigestView {
+  date: string;
+  summary: string;
+  message: string;
+  whatsappLink: string | null;
+  alreadyPublished: boolean;
 }

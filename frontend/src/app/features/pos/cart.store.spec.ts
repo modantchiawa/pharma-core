@@ -117,6 +117,48 @@ describe('CartStore', () => {
     expect(cart.lines()[1].place).toBeNull();
   });
 
+  it('blocks a contraindication until a pharmacist overrides it with a reason', () => {
+    const cart = TestBed.inject(CartStore);
+    cart.add(product());
+    cart.addPayment({ method: 'CASH', amountCents: 250 });
+    cart.setSafetyAlerts([
+      {
+        kind: 'ALLERGY',
+        severity: 'CONTRAINDICATED',
+        title: 'Allergie déclarée (Pénicillines) : AMOXICILLINE',
+        detail: '',
+        productIds: ['p-1'],
+        key: 'ALLERGY:PENICILLINS:p-1',
+      },
+      {
+        kind: 'INTERACTION',
+        severity: 'PRECAUTION',
+        title: 'Interaction : A + B',
+        detail: '',
+        productIds: ['p-1'],
+        key: 'INTERACTION:A|B:p-1',
+      },
+    ]);
+
+    expect(cart.blockingSafety()).toHaveLength(1);
+    expect(cart.canCheckout()).toBe(false);
+    // a cashier cannot take the responsibility
+    expect(cart.overrideSafety('ALLERGY:PENICILLINS:p-1', 'Allergie infirmée')).toBe(false);
+
+    permissions.add('SAFETY_OVERRIDE');
+    expect(cart.overrideSafety('ALLERGY:PENICILLINS:p-1', '  ')).toBe(false);
+    expect(cart.overrideSafety('ALLERGY:PENICILLINS:p-1', 'Allergie infirmée ')).toBe(true);
+    expect(cart.canCheckout()).toBe(true);
+    expect(cart.appliedSafetyOverrides()).toEqual([
+      { alertKey: 'ALLERGY:PENICILLINS:p-1', reason: 'Allergie infirmée' },
+    ]);
+
+    // the alert disappears (product removed): its override is forgotten, nothing is sent
+    cart.setSafetyAlerts([]);
+    expect(cart.appliedSafetyOverrides()).toEqual([]);
+    expect(cart.safetyOverrides().size).toBe(0);
+  });
+
   it('warns when the local stock is lower than the quantity sold', () => {
     const cart = TestBed.inject(CartStore);
     cart.add(product({ availableQuantity: 1 }), 3);
