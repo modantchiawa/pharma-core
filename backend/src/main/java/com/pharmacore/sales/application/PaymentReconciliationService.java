@@ -111,6 +111,43 @@ public class PaymentReconciliationService {
         return view(located);
     }
 
+    /**
+     * Confirmation by a notification received live (SMS of the operator, webhook, or typed by the
+     * team); the actor may be the system process that read the message.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PendingPayment confirmFromNotification(UUID paymentId, UUID notificationId) {
+        UUID by = TenantContext.actor() instanceof com.pharmacore.shared.context.Actor.TenantUser user
+                ? user.userId() : null;
+        var located = locate(paymentId);
+        located.payment().confirm(by, clock.instant(), SalePaymentEntity.ConfirmationSource.NOTIFICATION);
+        audit.record("PAYMENT_CONFIRMED", "SALE_PAYMENT", paymentId, Map.of(
+                "sale", located.sale().ticketNumber(),
+                "provider", String.valueOf(located.payment().provider()),
+                "reference", String.valueOf(located.payment().reference()),
+                "amountCents", Long.toString(located.payment().amountCents()),
+                "notification", notificationId.toString()));
+        return view(located);
+    }
+
+    /** Pending electronic payments of the window, oldest first, for the automatic match. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<com.pharmacore.sales.domain.PaymentMatching.Candidate> pendingCandidates(Instant since) {
+        return jdbc.sql("""
+                        SELECT p.id, p.provider, p.amount_cents, p.reference
+                        FROM sale_payment p
+                        JOIN sale s ON s.id = p.sale_id
+                        WHERE p.tenant_id = :tenant AND p.confirmation_status = 'PENDING' AND s.status = 'COMPLETED'
+                          AND p.method = 'MOBILE_MONEY' AND s.occurred_at >= :since
+                        ORDER BY s.occurred_at""")
+                .param("tenant", TenantContext.requireTenant().value())
+                .param("since", Timestamp.from(since))
+                .query((rs, rowNum) -> new com.pharmacore.sales.domain.PaymentMatching.Candidate(
+                        rs.getObject("id", UUID.class), rs.getString("provider"), rs.getLong("amount_cents"),
+                        rs.getString("reference")))
+                .list();
+    }
+
     @Transactional
     public PendingPayment reject(UUID paymentId, String reason) {
         var user = TenantContext.requireTenantUser();

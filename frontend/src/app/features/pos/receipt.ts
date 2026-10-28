@@ -362,6 +362,10 @@ export class Receipt {
   }
 
   /** A 58 mm ticket holds about 30 characters: long names are cut on a word boundary. */
+  protected referenceOf(payment: CartPayment): string {
+    return payment.reference ? ` ${payment.reference}` : '';
+  }
+
   protected summaryOf(posology: Posology): string {
     return posologySummary(posology);
   }

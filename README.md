@@ -10,8 +10,9 @@ partagées, impression de tickets 58 mm / 80 mm et factures A4 (navigateur ou ES
 importation de données depuis un autre logiciel (CSV, Excel) et du référentiel des médicaments,
 console de supervision éditeur, **vigilance au comptoir** (interactions, allergies, grossesse, profil du
 patient), **posologie par pictogrammes** sur ticket et étiquette, **suivi des patients par WhatsApp / SMS**
-(fin de traitement, renouvellement, produit attendu, créances), **rapport du soir au titulaire** et
-**saisonnalité** de la fiche de commande.
+(fin de traitement, renouvellement, produit attendu, créances), **rapport du soir au titulaire**,
+**saisonnalité** de la fiche de commande et **confirmations mobile money reçues en direct** (SMS du
+téléphone transférés au serveur local, diffusées à toutes les caisses sans Internet).
 
 | Dossier | Contenu |
 |---|---|

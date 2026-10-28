@@ -61,6 +61,16 @@ public class SalePaymentEntity {
 
     @Column(name = "rejection_reason", length = 255)
     private String rejectionReason;
+
+    /** Where the confirmation came from: the operator's statement, or a notification received live. */
+    public enum ConfirmationSource {
+        STATEMENT,
+        NOTIFICATION
+    }
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "confirmation_source", length = 12)
+    private ConfirmationSource confirmationSource;
     @Column(name = "insurer_id", updatable = false)
     private UUID insurerId;
 
@@ -95,10 +105,19 @@ public class SalePaymentEntity {
     }
 
     public void confirm(UUID userId, Instant now) {
+        confirm(userId, now, ConfirmationSource.STATEMENT);
+    }
+
+    public void confirm(UUID userId, Instant now, ConfirmationSource source) {
         requirePending();
         this.confirmationStatus = ConfirmationStatus.CONFIRMED;
         this.confirmedBy = userId;
         this.confirmedAt = now;
+        this.confirmationSource = source;
+    }
+
+    public ConfirmationSource confirmationSource() {
+        return confirmationSource;
     }
 
     public void reject(UUID userId, String reason, Instant now) {

@@ -43,6 +43,10 @@ export interface CartPayment {
   provider?: string;
   /** Insurance policy covering a THIRD_PARTY_PAYER share. */
   policyId?: string;
+  /** Operator transaction reference (mobile money, card), typed or taken from a received confirmation. */
+  reference?: string;
+  /** The confirmation received live that justifies this payment, when one was attached. */
+  notificationId?: string;
 }
 
 const DISPENSING_PERMISSION: Record<DrugListing, string | null> = {
@@ -326,6 +330,13 @@ export class CartStore {
 
   removePayment(index: number): void {
     this.payments.update((payments) => payments.filter((_, i) => i !== index));
+  }
+
+  /** Attaches a received confirmation (its reference) to the payment at {@code index}. */
+  attachConfirmation(index: number, reference: string, notificationId: string): void {
+    this.payments.update((payments) =>
+      payments.map((p, i) => (i === index ? { ...p, reference, notificationId } : p)),
+    );
   }
 
   /** Amounts applied to the sale: cash tendered beyond the total is change, not revenue. */

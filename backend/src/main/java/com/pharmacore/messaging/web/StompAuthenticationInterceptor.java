@@ -36,6 +36,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
     static final String CHAT_PERMISSION = "NETWORK_CHAT";
     static final String CONTROL_PERMISSION = "CONTROL_VIEW";
     static final String CONTROL_TOPIC_SUFFIX = ".control-alerts";
+    static final String PAYMENTS_TOPIC_SUFFIX = ".payments";
+    static final java.util.List<String> PAYMENT_PERMISSIONS = java.util.List.of("SALE_CREATE", "PAYMENT_RECONCILE",
+            "CASH_SESSION_MANAGE");
     static final Pattern SEND_DESTINATION = Pattern.compile("^/app/conversations\\.([0-9a-f-]{36})\\.messages$");
 
     private final BearerTokenAuthenticator authenticator;
@@ -89,8 +92,9 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
         }
         var token = authenticator.authenticate(header.substring("Bearer ".length()).trim());
         if (!(token.actor() instanceof Actor.TenantUser user)
-                || !(user.can(CHAT_PERMISSION) || user.can(CONTROL_PERMISSION))) {
-            throw new AccessDeniedException("NETWORK_CHAT or CONTROL_VIEW permission required");
+                || !(user.can(CHAT_PERMISSION) || user.can(CONTROL_PERMISSION)
+                     || PAYMENT_PERMISSIONS.stream().anyMatch(user::can))) {
+            throw new AccessDeniedException("NETWORK_CHAT, CONTROL_VIEW or a counter permission required");
         }
         return token;
     }
@@ -119,7 +123,14 @@ class StompAuthenticationInterceptor implements ChannelInterceptor {
             if (!tenant.equals(tenantTopic.group(1))) {
                 throw new AccessDeniedException("Cannot subscribe to another pharmacy's notifications");
             }
-            // Internal control alerts are for the owner's team, the other topics for the network users
+            // Internal control alerts are for the owner's team, payment confirmations for the counter,
+            // the other topics for the network users
+            if (destination.endsWith(PAYMENTS_TOPIC_SUFFIX)) {
+                if (!(token.actor() instanceof Actor.TenantUser user) || PAYMENT_PERMISSIONS.stream().noneMatch(user::can)) {
+                    throw new AccessDeniedException("A counter permission is required for payment confirmations");
+                }
+                return;
+            }
             requirePermission(token, destination.endsWith(CONTROL_TOPIC_SUFFIX) ? CONTROL_PERMISSION : CHAT_PERMISSION);
             return;
         }
