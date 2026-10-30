@@ -8,6 +8,7 @@ import { PaymentNotificationsService } from '../payments/payment-notifications.s
 import { ConnectivityService } from './connectivity.service';
 import { SaleOutboxService } from './sale-outbox.service';
 import { TerminalService } from './terminal.service';
+import { versionLabel } from '../update/build-info';
 
 const FLUSH_INTERVAL_MS = 15_000;
 const CATALOG_INTERVAL_MS = 5 * 60_000;
@@ -76,7 +77,7 @@ export class SyncOrchestratorService {
       await firstValueFrom(
         this.http.post(`${this.env.apiUrl}/v1/pos/heartbeat`, {
           terminalId: this.terminal.terminalId,
-          appVersion: this.env.appVersion,
+          appVersion: versionLabel(),
           pendingSales: this.outbox.pendingCount(),
           lastSyncAt: this.outbox.lastSyncAt()?.toISOString() ?? null,
           rejectedSales: this.outbox.rejectedCount(),

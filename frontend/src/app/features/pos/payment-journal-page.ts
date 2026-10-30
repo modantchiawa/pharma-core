@@ -15,6 +15,7 @@ import { PaymentCategoryTotal, PaymentJournal, PaymentJournalEntry } from '../..
 import { APP_ENVIRONMENT } from '../../core/config';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { TerminalLabelPipe } from '../../shared/terminal-label.pipe';
 import { Icon } from '../../shared/ui/icon';
 import { errorDetail, isoToday } from '../procurement/purchase-orders';
 import {
@@ -46,7 +47,7 @@ const STATUS_BADGES: Record<
  */
 @Component({
   selector: 'app-payment-journal-page',
-  imports: [FormsModule, DatePipe, MoneyPipe, Icon],
+  imports: [TerminalLabelPipe, FormsModule, DatePipe, MoneyPipe, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page animate-in">
@@ -147,7 +148,7 @@ const STATUS_BADGES: Record<
             >
               <option value="">Tous les postes</option>
               @for (t of journal()?.terminals ?? []; track t) {
-                <option [value]="t">{{ t }}</option>
+                <option [value]="t">{{ t | terminalLabel }}</option>
               }
             </select>
           </label>
@@ -155,7 +156,7 @@ const STATUS_BADGES: Record<
       </section>
 
       <p class="mb-3 hidden text-sm print:block">
-        {{ periodLabel() }} · {{ terminal() || 'Tous les postes' }}
+        {{ periodLabel() }} · {{ terminal() ? (terminal() | terminalLabel) : 'Tous les postes' }}
       </p>
 
       <div
@@ -258,7 +259,7 @@ const STATUS_BADGES: Record<
                       {{ e.occurredAt | date: (multiDay() ? 'dd/MM HH:mm' : 'HH:mm') }}
                     </td>
                     <td class="font-medium">{{ e.ticketNumber }}</td>
-                    <td>{{ e.terminalId }}</td>
+                    <td>{{ e.terminalId | terminalLabel: false }}</td>
                     <td>{{ e.cashierName ?? '—' }}</td>
                     <td>
                       <span class="inline-flex items-center gap-1.5">

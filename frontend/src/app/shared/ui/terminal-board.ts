@@ -1,4 +1,5 @@
 import { DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { TerminalBoard, TerminalSyncState, TerminalView } from '../../core/api/models';
 import {
@@ -21,10 +22,13 @@ type Filter = TerminalSyncState | 'ALL';
  * for the relative times and performs the forget actions it emits.
  *
  *   <app-terminal-board [board]="board" [now]="now()" [canForget]="true" (forget)="…" (forgetStale)="…" />
+ *
+ * Each register shows the name the pharmacy gave it above its unique id; with `canRename`, a
+ * "Nommer" action edits the name and place in place and emits `rename`.
  */
 @Component({
   selector: 'app-terminal-board',
-  imports: [DatePipe, Icon],
+  imports: [DatePipe, FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card overflow-hidden" aria-labelledby="terminal-board-title">
@@ -99,7 +103,7 @@ type Filter = TerminalSyncState | 'ALL';
                 <th>Dernier signal</th>
                 <th>Dernière synchro</th>
                 <th class="num">Rejets</th>
-                @if (canForget()) {
+                @if (canForget() || canRename()) {
                   <th><span class="sr-only">Actions</span></th>
                 }
               </tr>
@@ -108,13 +112,64 @@ type Filter = TerminalSyncState | 'ALL';
               @for (row of rows(); track row.terminal.terminalId) {
                 <tr [attr.data-state]="row.terminal.state">
                   <td>
-                    <span class="flex items-center gap-2 font-medium">
-                      <app-icon name="monitor" [size]="14" class="text-subtle" />
-                      <code class="text-[0.8125rem]">{{ row.terminal.terminalId }}</code>
-                      @if (row.terminal.terminalId === current()) {
-                        <span class="badge badge-brand">ce poste</span>
-                      }
-                    </span>
+                    @if (editing() === row.terminal.terminalId) {
+                      <form
+                        class="flex flex-wrap items-center gap-2"
+                        (ngSubmit)="save(row.terminal)"
+                      >
+                        <input
+                          class="input min-h-8 w-40"
+                          name="name"
+                          maxlength="60"
+                          placeholder="Nom : Caisse 1"
+                          aria-label="Nom du poste"
+                          [(ngModel)]="draftName"
+                          data-testid="terminal-name-input"
+                        />
+                        <input
+                          class="input min-h-8 w-44"
+                          name="location"
+                          maxlength="80"
+                          placeholder="Emplacement (facultatif)"
+                          aria-label="Emplacement du poste"
+                          [(ngModel)]="draftLocation"
+                        />
+                        <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy()">
+                          Enregistrer
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          (click)="editing.set(null)"
+                        >
+                          Annuler
+                        </button>
+                      </form>
+                      <p class="mt-1 text-xs text-subtle">
+                        Identifiant unique : <code>{{ row.terminal.terminalId }}</code> (préfixe des
+                        tickets)
+                      </p>
+                    } @else {
+                      <span class="flex items-center gap-2 font-medium">
+                        <app-icon name="monitor" [size]="14" class="text-subtle" />
+                        <span class="min-w-0">
+                          @if (row.terminal.name) {
+                            <span class="block">{{ row.terminal.name }}</span>
+                            <span class="block text-xs font-normal text-subtle">
+                              <code>{{ row.terminal.terminalId }}</code>
+                              @if (row.terminal.location) {
+                                · {{ row.terminal.location }}
+                              }
+                            </span>
+                          } @else {
+                            <code class="text-[0.8125rem]">{{ row.terminal.terminalId }}</code>
+                          }
+                        </span>
+                        @if (row.terminal.terminalId === current()) {
+                          <span class="badge badge-brand">ce poste</span>
+                        }
+                      </span>
+                    }
                   </td>
                   <td>
                     <span [class]="badgeClass(row.badge.tone)">
@@ -143,9 +198,22 @@ type Filter = TerminalSyncState | 'ALL';
                       <span class="text-subtle">0</span>
                     }
                   </td>
-                  @if (canForget()) {
-                    <td class="text-right">
-                      @if (row.terminal.state === 'STALE') {
+                  @if (canForget() || canRename()) {
+                    <td class="whitespace-nowrap text-right">
+                      @if (canRename() && editing() !== row.terminal.terminalId) {
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          [disabled]="busy()"
+                          (click)="edit(row.terminal)"
+                          [attr.aria-label]="'Nommer le poste ' + row.terminal.terminalId"
+                          [attr.data-testid]="'rename-' + row.terminal.terminalId"
+                        >
+                          <app-icon name="pencil" [size]="14" />
+                          {{ row.terminal.name ? 'Renommer' : 'Nommer' }}
+                        </button>
+                      }
+                      @if (canForget() && row.terminal.state === 'STALE') {
                         <button
                           type="button"
                           class="btn btn-ghost btn-sm"
@@ -170,9 +238,20 @@ type Filter = TerminalSyncState | 'ALL';
             <li class="space-y-2 px-4 py-3" [attr.data-state]="row.terminal.state">
               <div class="flex items-center justify-between gap-2">
                 <span class="flex min-w-0 items-center gap-2">
-                  <code class="min-w-0 truncate text-sm font-semibold">{{
-                    row.terminal.terminalId
-                  }}</code>
+                  @if (row.terminal.name) {
+                    <span class="min-w-0">
+                      <span class="block truncate text-sm font-semibold">{{
+                        row.terminal.name
+                      }}</span>
+                      <code class="block truncate text-xs text-subtle">{{
+                        row.terminal.terminalId
+                      }}</code>
+                    </span>
+                  } @else {
+                    <code class="min-w-0 truncate text-sm font-semibold">{{
+                      row.terminal.terminalId
+                    }}</code>
+                  }
                   @if (row.terminal.terminalId === current()) {
                     <span class="badge badge-brand">ce poste</span>
                   }
@@ -195,6 +274,50 @@ type Filter = TerminalSyncState | 'ALL';
                   </dd>
                 }
               </dl>
+              @if (canRename()) {
+                @if (editing() === row.terminal.terminalId) {
+                  <form class="grid gap-2" (ngSubmit)="save(row.terminal)">
+                    <input
+                      class="input"
+                      name="name"
+                      maxlength="60"
+                      placeholder="Nom : Caisse 1"
+                      aria-label="Nom du poste"
+                      [(ngModel)]="draftName"
+                    />
+                    <input
+                      class="input"
+                      name="location"
+                      maxlength="80"
+                      placeholder="Emplacement (facultatif)"
+                      aria-label="Emplacement du poste"
+                      [(ngModel)]="draftLocation"
+                    />
+                    <span class="flex gap-2">
+                      <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy()">
+                        Enregistrer
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        (click)="editing.set(null)"
+                      >
+                        Annuler
+                      </button>
+                    </span>
+                  </form>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm -ml-2"
+                    [disabled]="busy()"
+                    (click)="edit(row.terminal)"
+                  >
+                    <app-icon name="pencil" [size]="14" />
+                    {{ row.terminal.name ? 'Renommer ce poste' : 'Nommer ce poste' }}
+                  </button>
+                }
+              }
               @if (canForget() && row.terminal.state === 'STALE') {
                 <button
                   type="button"
@@ -241,8 +364,16 @@ export class TerminalBoardView {
   readonly current = input<string | null>(null);
   readonly canForget = input(false);
   readonly busy = input(false);
+  readonly canRename = input(false);
   readonly forget = output<TerminalView>();
   readonly forgetStale = output<void>();
+  /** A blank name takes the name away (the register shows its id alone). */
+  readonly rename = output<{ terminalId: string; name: string; location: string }>();
+
+  /** Register whose name is being edited. */
+  protected readonly editing = signal<string | null>(null);
+  protected draftName = '';
+  protected draftLocation = '';
 
   protected readonly states = SYNC_STATES;
   protected readonly plural = plural;
@@ -280,6 +411,21 @@ export class TerminalBoardView {
       case 'NEVER':
         return counts.never;
     }
+  }
+
+  protected edit(terminal: TerminalView): void {
+    this.draftName = terminal.name ?? '';
+    this.draftLocation = terminal.location ?? '';
+    this.editing.set(terminal.terminalId);
+  }
+
+  protected save(terminal: TerminalView): void {
+    this.rename.emit({
+      terminalId: terminal.terminalId,
+      name: this.draftName.trim(),
+      location: this.draftLocation.trim(),
+    });
+    this.editing.set(null);
   }
 
   protected ago(at: string | null): string {

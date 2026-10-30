@@ -10,6 +10,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
@@ -23,8 +24,13 @@ import { IdleService } from './core/session/idle.service';
 import { LockScreen } from './core/session/lock-screen';
 import { WhileUnlocked } from './core/session/while-unlocked';
 import { LicenseBanner } from './core/subscription/license-banner';
+import { TerminalNamesService } from './core/offline/terminal-names.service';
+import { AppUpdateService } from './core/update/app-update.service';
+import { BUILD_INFO, versionLabel } from './core/update/build-info';
+import { UpdateBanner } from './core/update/update-banner';
 import { LicenseStateService } from './core/subscription/license-state.service';
 import { Density, DisplayPreferencesService } from './core/ui/display-preferences.service';
+import { ToastService } from './core/ui/toast.service';
 import { Icon } from './shared/ui/icon';
 import { IconName } from './shared/ui/icons';
 import { DURATION, EASING, prefersReducedMotion } from './shared/ui/motion';
@@ -221,10 +227,12 @@ interface PaletteEntry {
   imports: [
     RouterOutlet,
     RouterLink,
+    DatePipe,
     RouterLinkActive,
     FormsModule,
     Icon,
     LicenseBanner,
+    UpdateBanner,
     LockScreen,
     WhileUnlocked,
   ],
@@ -357,6 +365,17 @@ interface PaletteEntry {
                 </span>
               }
             </div>
+          }
+          @if (expanded()) {
+            <p
+              class="mb-1 truncate px-3 text-[0.7rem] text-subtle"
+              [attr.title]="'Version ' + version"
+            >
+              @if (!auth.isPlatformOperator()) {
+                {{ station().name ?? station().terminalId }} ·
+              }
+              v{{ version }}
+            </p>
           }
           <button
             type="button"
@@ -571,6 +590,53 @@ interface PaletteEntry {
                       <app-icon name="image" [size]="16" /> Logo et couleurs
                     </a>
                   }
+                  <div class="divider my-1"></div>
+                  <div class="px-3 py-2 text-xs" data-testid="about-station">
+                    @if (!auth.isPlatformOperator()) {
+                      <p class="flex items-center gap-1.5 font-semibold text-ink">
+                        <app-icon name="monitor" [size]="13" />
+                        {{ station().name ?? 'Poste sans nom' }}
+                      </p>
+                      <p class="text-muted">
+                        Identifiant <code>{{ station().terminalId }}</code>
+                        @if (station().location) {
+                          · {{ station().location }}
+                        }
+                      </p>
+                      @if (!station().name && canNameStations()) {
+                        <a
+                          routerLink="/admin/hub"
+                          class="font-semibold text-brand underline"
+                          (click)="menu.set(null)"
+                          >Nommer ce poste</a
+                        >
+                      }
+                    }
+                    <p class="mt-1.5 text-muted">
+                      PharmaCore <span class="font-medium text-ink">{{ version }}</span>
+                      @if (build.builtAt) {
+                        <br />construit le {{ build.builtAt | date: 'dd/MM/yyyy HH:mm' }}
+                      }
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="menu-item w-full"
+                    [disabled]="updates.checking()"
+                    (click)="checkUpdate()"
+                  >
+                    <app-icon name="refresh" [size]="16" />
+                    {{ updates.checking() ? 'Recherche…' : 'Rechercher une mise à jour' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="menu-item w-full"
+                    (click)="forceUpdate()"
+                    data-testid="force-update"
+                  >
+                    <app-icon name="download" [size]="16" /> Forcer la mise à jour
+                  </button>
+                  <div class="divider my-1"></div>
                   <button type="button" class="menu-item w-full" (click)="openPalette()">
                     <app-icon name="command" [size]="16" /> Recherche rapide
                     <span class="kbd ml-auto whitespace-nowrap">{{ isMac ? '⌘' : 'Ctrl' }} K</span>
@@ -600,6 +666,8 @@ interface PaletteEntry {
             >
           </div>
         }
+
+        <app-update-banner />
 
         @if (license.notice(); as notice) {
           <app-license-banner [state]="notice" [link]="canSeeSubscription()" />
@@ -929,6 +997,13 @@ export class Shell {
   private readonly alertsBell = viewChild('alertsBell', { read: ViewContainerRef });
 
   protected readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  protected readonly updates = inject(AppUpdateService);
+  private readonly toast = inject(ToastService);
+  private readonly stations = inject(TerminalNamesService);
+  protected readonly station = this.stations.self;
+  protected readonly build = BUILD_INFO;
+  protected readonly version = versionLabel();
+  protected readonly canNameStations = computed(() => this.permissions.hasAny('HUB_ADMIN'));
   protected readonly canEditBranding = computed(() =>
     this.permissions.hasAny('CONFIG_BRANDING_MANAGE'),
   );
@@ -1075,9 +1150,11 @@ export class Shell {
 
   constructor() {
     const destroyRef = inject(DestroyRef);
+    this.updates.start();
     if (!this.auth.isPlatformOperator()) {
       this.license.start();
       this.idle.start(destroyRef);
+      void this.stations.refresh();
     }
     // The palette highlight glides to the selected entry, which is kept in view
     effect(() => {
@@ -1271,6 +1348,34 @@ export class Shell {
     if (container && !container.contains(target)) {
       this.menu.set(null);
     }
+  }
+
+  protected async checkUpdate(): Promise<void> {
+    const found = await this.updates.check();
+    if (!found) {
+      this.toast.success(`PharmaCore est à jour (${this.version})`);
+    }
+    this.menu.set(null);
+  }
+
+  /**
+   * Reloads from the server with the application caches emptied; pending sales, the basket and
+   * the station's settings are kept (IndexedDB, local storage).
+   */
+  protected async forceUpdate(): Promise<void> {
+    const pending = this.outbox.pendingCount();
+    const note =
+      pending > 0
+        ? `\n\n${pending} vente(s) en attente de synchronisation restent sur ce poste.`
+        : '';
+    if (
+      !confirm(
+        `Recharger PharmaCore depuis le serveur en vidant le cache de l'application ?${note}`,
+      )
+    ) {
+      return;
+    }
+    await this.updates.forceReload();
   }
 
   protected lock(): void {

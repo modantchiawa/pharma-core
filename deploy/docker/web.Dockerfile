@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN if [ "$BUILD_CONFIG" = "demo" ]; then \
       DEMO_API_URL=/api DEMO_WS_URL=/ws DEMO_VERSION="demo-$GIT_SHA" npm run build:demo; \
     else \
-      npx ng build --configuration production; \
+      GIT_SHA="$GIT_SHA" npm run build -- --configuration production; \
     fi
 
 FROM caddy:2-alpine

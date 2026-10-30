@@ -6,6 +6,9 @@ import { AuthService } from '../../core/auth/auth.service';
 import { BrandingService } from '../../core/branding/branding.service';
 import { SyncOrchestratorService } from '../../core/offline/sync-orchestrator.service';
 import { TerminalService } from '../../core/offline/terminal.service';
+import { TerminalNamesService } from '../../core/offline/terminal-names.service';
+import { AppUpdateService } from '../../core/update/app-update.service';
+import { versionLabel } from '../../core/update/build-info';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { closedSessionNotice } from '../../core/session/idle';
 import { Icon } from '../../shared/ui/icon';
@@ -307,6 +310,12 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
               <span class="divider flex-1"></span>
             </div>
           }
+          <p class="mt-6 text-center text-xs text-subtle" data-testid="login-version">
+            {{ stationName() }} · PharmaCore {{ version }} ·
+            <button type="button" class="underline hover:text-ink" (click)="forceUpdate()">
+              Forcer la mise à jour
+            </button>
+          </p>
         </div>
       </section>
     </main>
@@ -350,10 +359,23 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
   `,
 })
 export class LoginPage {
+  protected forceUpdate(): void {
+    if (confirm("Recharger PharmaCore depuis le serveur en vidant le cache de l'application ?")) {
+      void this.updates.forceReload();
+    }
+  }
+
   protected readonly branding = inject(BrandingService);
   protected readonly auth = inject(AuthService);
   protected readonly node = inject(NodeInfoService);
   protected readonly terminal = inject(TerminalService);
+  private readonly updates = inject(AppUpdateService);
+  private readonly stations = inject(TerminalNamesService);
+  protected readonly version = versionLabel();
+  /** The station's name as last known here (names are kept on the station), else its id. */
+  protected readonly stationName = computed(
+    () => this.stations.self().name ?? `Poste ${this.terminal.terminalId}`,
+  );
   private readonly sync = inject(SyncOrchestratorService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
