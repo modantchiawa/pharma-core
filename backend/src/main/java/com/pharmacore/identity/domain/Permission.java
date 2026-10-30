@@ -49,5 +49,11 @@ public enum Permission {
     SUBSCRIPTION_VIEW,
     CONTROL_VIEW,
     CONTROL_APPROVE,
-    CONTROL_SETTINGS
+    CONTROL_SETTINGS,
+    /** Dispense despite a contraindication found at the counter, with a reason (V20). */
+    SAFETY_OVERRIDE,
+    /** See and send the patient follow-up messages (V22). */
+    FOLLOWUP_VIEW,
+    /** Settings of the patient follow-up and of the evening digest (V22). */
+    FOLLOWUP_SETTINGS
 }
