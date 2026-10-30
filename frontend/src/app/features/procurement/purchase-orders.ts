@@ -149,6 +149,67 @@ export function generationPreview(
   };
 }
 
+/**
+ * A product the pharmacist put on the sheet by hand (exceptional need, bulk purchase):
+ * {@code supplierId} null means its preferred supplier.
+ */
+export interface ManualAddition {
+  line: ProposalLine;
+  quantity: number;
+  supplierId: string | null;
+}
+
+/**
+ * The sheet as the server will group it: the proposal lines, then the products added by hand,
+ * routed to the supplier chosen for them (the preferred supplier's price is only an estimate
+ * when another supplier is chosen; that supplier's own price applies on the order).
+ */
+export function withAdditions(
+  lines: ProposalLine[],
+  quantities: Record<string, number>,
+  additions: ManualAddition[],
+  suppliers: Supplier[],
+): { lines: ProposalLine[]; quantities: Record<string, number> } {
+  const added = new Map(additions.map((a) => [a.line.productId, a]));
+  const merged = lines.filter((l) => !added.has(l.productId));
+  const mergedQuantities = { ...quantities };
+  for (const addition of added.values()) {
+    const supplierId = addition.supplierId ?? addition.line.supplierId;
+    const rerouted = supplierId !== addition.line.supplierId;
+    merged.push({
+      ...addition.line,
+      supplierId,
+      supplierName: rerouted
+        ? (suppliers.find((s) => s.id === supplierId)?.details.name ?? null)
+        : addition.line.supplierName,
+    });
+    mergedQuantities[addition.line.productId] = addition.quantity;
+  }
+  return { lines: merged, quantities: mergedQuantities };
+}
+
+/** Lower case without accents, so "ampiciline" finds "AMPICILINE" and "éfferalgan" "EFFERALGAN". */
+export function normalizeSearch(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/** Does a sheet line match what was typed (every word in the designation, or the code)? */
+export function matchesProduct(
+  line: Pick<ProposalLine, 'designation' | 'cip13'>,
+  term: string,
+): boolean {
+  const words = normalizeSearch(term).split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return true;
+  }
+  const designation = normalizeSearch(line.designation);
+  return words.every((w) => designation.includes(w)) || line.cip13.startsWith(term.trim());
+}
+
 /** One editable line of a delivery, pre-filled with what is still awaited. */
 export interface ReceiptLineDraft {
   productId: string;

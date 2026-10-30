@@ -60,6 +60,12 @@ const PHARMACY_NAV: NavGroup[] = [
         permissions: ['CASH_SESSION_MANAGE', 'REPORT_VIEW'],
       },
       {
+        path: '/cash/journal',
+        label: 'Encaissements',
+        icon: 'coins',
+        permissions: ['PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW'],
+      },
+      {
         path: '/cash/payments',
         label: 'Paiements',
         icon: 'mobileMoney',

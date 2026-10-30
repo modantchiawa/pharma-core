@@ -86,6 +86,13 @@ export const routes: Routes = [
           import('./features/pos/cash-session-page').then((m) => m.CashSessionPage),
       },
       {
+        path: 'cash/journal',
+        title: 'Encaissements par caisse',
+        canActivate: [permissionGuard('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')],
+        loadComponent: () =>
+          import('./features/pos/payment-journal-page').then((m) => m.PaymentJournalPage),
+      },
+      {
         path: 'cash/payments',
         title: 'Rapprochement des paiements',
         canActivate: [permissionGuard('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE')],

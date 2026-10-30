@@ -2,14 +2,19 @@ package com.pharmacore.sales.web;
 
 import com.pharmacore.sales.application.CashPolicyService;
 import com.pharmacore.sales.application.CashPolicyService.CashPolicy;
+import com.pharmacore.sales.application.PaymentJournalService;
+import com.pharmacore.sales.application.PaymentJournalService.DayJournal;
+import com.pharmacore.sales.application.PaymentJournalService.JournalEntry;
 import com.pharmacore.sales.application.PaymentReconciliationService;
 import com.pharmacore.sales.application.PaymentReconciliationService.PendingPayment;
+import com.pharmacore.sales.domain.PaymentMethod;
 import com.pharmacore.sales.persistence.SalePaymentEntity.ConfirmationStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -29,10 +34,35 @@ class PaymentReconciliationController {
 
     private final PaymentReconciliationService payments;
     private final CashPolicyService policy;
+    private final PaymentJournalService journal;
 
-    PaymentReconciliationController(PaymentReconciliationService payments, CashPolicyService policy) {
+    PaymentReconciliationController(PaymentReconciliationService payments, CashPolicyService policy,
+                                    PaymentJournalService journal) {
         this.payments = payments;
         this.policy = policy;
+        this.journal = journal;
+    }
+
+    /** Receipts of the days {@code from}..{@code to} (today by default) by category, for one station or all. */
+    @GetMapping("/api/v1/payments/journal")
+    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')")
+    DayJournal journal(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+                       @RequestParam(required = false) String terminalId) {
+        return journal.journal(from, to, terminalId);
+    }
+
+    /** The transactions behind a category of the journal: {@code method} and, for an operator, {@code provider}. */
+    @GetMapping("/api/v1/payments/journal/entries")
+    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')")
+    List<JournalEntry> journalEntries(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) PaymentMethod method,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String terminalId,
+            @RequestParam(defaultValue = "500") int limit) {
+        return journal.entries(from, to, method == null ? null : method.name(), provider, terminalId, limit);
     }
 
     @GetMapping("/api/v1/payments/pending")

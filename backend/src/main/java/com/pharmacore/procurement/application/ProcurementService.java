@@ -286,6 +286,79 @@ public class ProcurementService {
         return new ProposalSheet(today.plusDays(1), VELOCITY_PERIOD_DAYS, lines, total);
     }
 
+    /**
+     * Products the pharmacist can add to the sheet by hand, from the whole catalogue (a product
+     * never stocked can be ordered for the first time), with the figures that help choose the
+     * quantity: shelf stock, units awaited from suppliers, sales of the last period.
+     * {@code term} matches the designation, the DCI or a code; {@code ids} restricts to products.
+     */
+    @Transactional(readOnly = true)
+    public List<ProposalLine> orderableProducts(String term, Set<UUID> ids, int limit) {
+        boolean byIds = ids != null && !ids.isEmpty();
+        String search = term == null ? "" : term.trim();
+        if (!byIds && search.length() < 2) {
+            return List.of();
+        }
+        LocalDate today = calendar.today();
+        Instant since = today.minusDays(VELOCITY_PERIOD_DAYS).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        UUID tenant = TenantContext.requireTenant().value();
+        return jdbc.sql("""
+                        SELECT p.id AS product_id, p.cip13, p.designation,
+                               pref.supplier_id, pref.supplier_name, coalesce(pref.pack_size, 1) AS pack_size,
+                               pref.purchase_price_cents,
+                               greatest(coalesce(lots.sellable, 0) - coalesce(st.reserved_quantity, 0), 0) AS available,
+                               coalesce(ordered.qty, 0) AS on_order, coalesce(sold.qty, 0) AS sold
+                        FROM product p
+                        LEFT JOIN stock st ON st.tenant_id = :tenant AND st.product_id = p.id
+                        LEFT JOIN LATERAL (
+                            SELECT sp.supplier_id, s.name AS supplier_name, sp.pack_size, sp.purchase_price_cents
+                            FROM supplier_product sp JOIN supplier s ON s.id = sp.supplier_id AND s.active
+                            WHERE sp.product_id = p.id
+                            ORDER BY sp.preferred DESC, sp.last_purchase_at DESC NULLS LAST
+                            LIMIT 1
+                        ) pref ON true
+                        LEFT JOIN LATERAL (
+                            SELECT sum(quantity) AS sellable FROM stock_lot
+                            WHERE stock_id = st.id AND quantity > 0 AND expiry_date > :today::date
+                        ) lots ON true
+                        LEFT JOIN LATERAL (
+                            SELECT sum(l.quantity_ordered - l.quantity_received) AS qty
+                            FROM purchase_order_line l JOIN purchase_order o ON o.id = l.purchase_order_id
+                            WHERE l.tenant_id = :tenant AND l.product_id = p.id
+                              AND o.status IN ('SENT', 'PARTIALLY_RECEIVED')
+                        ) ordered ON true
+                        LEFT JOIN LATERAL (
+                            SELECT sum(l.quantity) AS qty
+                            FROM sale_line l JOIN sale s ON s.id = l.sale_id
+                            WHERE l.tenant_id = :tenant AND l.product_id = p.id
+                              AND s.status = 'COMPLETED' AND s.occurred_at >= :since
+                        ) sold ON true
+                        WHERE p.active
+                          AND (CASE WHEN :byIds THEN p.id = ANY(:ids)
+                                    ELSE p.cip13 = :term OR p.ean13 = :term
+                                         OR p.designation ILIKE '%' || :term || '%'
+                                         OR p.dci ILIKE '%' || :term || '%' END)
+                        ORDER BY similarity(p.designation, :term) DESC, p.designation
+                        LIMIT :limit""")
+                .param("tenant", tenant)
+                .param("today", Date.valueOf(today))
+                .param("since", Timestamp.from(since))
+                .param("byIds", byIds)
+                .param("ids", byIds ? ids.toArray(UUID[]::new) : new UUID[0])
+                .param("term", search)
+                .param("limit", Math.clamp(limit, 1, 1000))
+                .query((rs, rowNum) -> {
+                    long sold = rs.getLong("sold");
+                    return new ProposalLine(rs.getObject("product_id", UUID.class), rs.getString("cip13"),
+                            rs.getString("designation"), rs.getObject("supplier_id", UUID.class),
+                            rs.getString("supplier_name"), rs.getInt("available"), rs.getInt("on_order"), 0, sold, 0,
+                            (double) sold / VELOCITY_PERIOD_DAYS, 0, 0, rs.getInt("pack_size"),
+                            (Long) rs.getObject("purchase_price_cents"),
+                            List.of(OrderProposalCalculator.Reason.MANUAL), 1.0);
+                })
+                .list();
+    }
+
     // ------------------------------------------------------------------ orders
 
     public record OrderLineCommand(UUID productId, int quantity, Long unitCostCents, Integer suggestedQuantity,
@@ -368,20 +441,66 @@ public class ProcurementService {
      * has a draft gets its lines replaced rather than a second draft, so generating twice gives
      * the same drafts. The supplier minimum is checked when sending, not here.
      */
+    /**
+     * A product the pharmacist puts on the sheet by hand, whether the proposal suggested it or not:
+     * an exceptional need, a bulk purchase. {@code supplierId} null routes it to its preferred supplier.
+     */
+    public record ManualAddition(UUID productId, int quantity, UUID supplierId) {
+    }
+
     @Transactional
     public GenerationView generate(UUID supplierId, Map<UUID, Integer> overrides) {
+        return generate(supplierId, overrides, List.of());
+    }
+
+    @Transactional
+    public GenerationView generate(UUID supplierId, Map<UUID, Integer> overrides, List<ManualAddition> additions) {
         UUID tenant = TenantContext.requireTenant().value();
         // Two pharmacists generating at the same time must not each create a draft for the same supplier
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 7342))")
                 .param("key", tenant + ":purchase-order-generation")
                 .query((RowCallbackHandler) rs -> { });
         ProposalSheet sheet = proposal(supplierId);
-        Map<UUID, ProposalLine> proposed = sheet.lines().stream()
-                .collect(Collectors.toMap(ProposalLine::productId, line -> line));
-        OrderGrouping.Result grouping = OrderGrouping.group(sheet.lines().stream()
-                .map(line -> new OrderGrouping.Candidate(line.productId(), line.supplierId(), line.suggestedQuantity(),
-                        line.purchasePriceCents(), reasonText(line.reasons())))
-                .toList(), overrides);
+        Map<UUID, ProposalLine> proposed = new LinkedHashMap<>();
+        sheet.lines().forEach(line -> proposed.put(line.productId(), line));
+        Map<UUID, ManualAddition> manual = new LinkedHashMap<>();
+        additions.forEach(addition -> manual.put(addition.productId(), addition));
+        Set<UUID> chosenSuppliers = manual.values().stream().map(ManualAddition::supplierId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        if (!chosenSuppliers.isEmpty()) {
+            Set<UUID> known = suppliers.findAllById(chosenSuppliers).stream()
+                    .filter(SupplierEntity::active).map(SupplierEntity::id).collect(Collectors.toSet());
+            chosenSuppliers.stream().filter(id -> !known.contains(id)).findFirst().ifPresent(id -> {
+                throw new NotFoundException("Supplier", id);
+            });
+        }
+        Map<UUID, ProposalLine> added = new HashMap<>();
+        orderableProducts(null, manual.keySet(), manual.size())
+                .forEach(line -> added.put(line.productId(), line));
+        manual.keySet().stream().filter(id -> !added.containsKey(id)).findFirst().ifPresent(id -> {
+            throw new NotFoundException("Product", id);
+        });
+        Map<UUID, Integer> quantities = new HashMap<>(overrides);
+        List<OrderGrouping.Candidate> candidates = new ArrayList<>();
+        for (ProposalLine line : proposed.values()) {
+            if (!manual.containsKey(line.productId())) {
+                candidates.add(new OrderGrouping.Candidate(line.productId(), line.supplierId(),
+                        line.suggestedQuantity(), line.purchasePriceCents(), reasonText(line.reasons())));
+            }
+        }
+        for (ManualAddition addition : manual.values()) {
+            ProposalLine line = proposed.getOrDefault(addition.productId(), added.get(addition.productId()));
+            UUID routed = addition.supplierId() != null ? addition.supplierId() : line.supplierId();
+            // the price of another supplier than the preferred one comes from that supplier's catalog
+            Long unitCost = Objects.equals(routed, line.supplierId()) ? line.purchasePriceCents() : null;
+            String reason = proposed.containsKey(addition.productId())
+                    ? reasonText(line.reasons()) : reasonText(List.of(OrderProposalCalculator.Reason.MANUAL));
+            candidates.add(new OrderGrouping.Candidate(addition.productId(), routed, line.suggestedQuantity(),
+                    unitCost, reason));
+            quantities.put(addition.productId(), addition.quantity());
+            proposed.putIfAbsent(addition.productId(), line);
+        }
+        OrderGrouping.Result grouping = OrderGrouping.group(candidates, quantities);
         List<UUID> supplierIds = grouping.groups().stream().map(OrderGrouping.Group::supplierId).toList();
         Map<UUID, PurchaseOrderEntity> drafts = new HashMap<>();
         Map<UUID, String> supplierNames = new HashMap<>();
@@ -746,6 +865,7 @@ public class ProcurementService {
             case EXPIRING_REPLACEMENT -> "péremption proche";
             case LOST_SALES -> "ventes perdues";
             case SEASONAL_UPTURN -> "saison haute";
+            case MANUAL -> "ajout manuel";
         }).collect(Collectors.joining(", "));
     }
 

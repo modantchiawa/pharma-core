@@ -244,6 +244,106 @@ class ProcurementIT extends IntegrationTest {
                 .andExpect(jsonPath("$[0].id").value(copharniOrder));
     }
 
+    @Test
+    void productsAreSearchedAndAddedByHandToTheGeneratedOrders() throws Exception {
+        var pharmacy = onboardPharmacy("Commandes Agadez");
+        String owner = pharmacy.ownerToken();
+        String tag = shortId().toUpperCase();
+
+        UUID doliprane = productBelowThreshold(pharmacy, "DOLIPRANE 1000MG CPR B/8 " + tag);
+        // well stocked: the proposal never suggests it, the pharmacist buys it in bulk
+        UUID gauze = createProduct("COMPRESSES STERILES 10X10 B/50 " + tag, "NONE", 1_200);
+        receiveLot(pharmacy, gauze, "G-" + shortId(), LocalDate.now().plusYears(3).toString(), 400);
+        // never stocked here: an exceptional request of a patient
+        UUID vaccine = createProduct("VACCIN ANTIRABIQUE INJ " + tag, "LIST_I", 25_000);
+        UUID orphan = createProduct("ATTELLE POIGNET T2 " + tag, "NONE", 9_000);
+
+        String laborex = supplier(owner, "Laborex Niger", 2, 0);
+        String copharni = supplier(owner, "Copharni", 3, 0);
+        link(owner, laborex, doliprane, 900, 1, true);
+        link(owner, laborex, gauze, 650, 10, true);
+        link(owner, copharni, gauze, 600, 10, false);
+        link(owner, copharni, vaccine, 18_000, 1, true);
+
+        // --- search in the whole catalogue, with the figures that help choose the quantity
+        call(get(API + "/proposal/products").param("q", "compresses steriles 10x10 b/50 " + tag), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].productId").value(gauze.toString()))
+                .andExpect(jsonPath("$[0].available").value(400))
+                .andExpect(jsonPath("$[0].supplierId").value(laborex))
+                .andExpect(jsonPath("$[0].purchasePriceCents").value(650))
+                .andExpect(jsonPath("$[0].packSize").value(10))
+                .andExpect(jsonPath("$[0].reasons[0]").value("MANUAL"));
+        call(get(API + "/proposal/products").param("q", "VACCIN ANTIRABIQUE INJ " + tag), owner, null)
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].available").value(0))
+                .andExpect(jsonPath("$[0].supplierName").value("Copharni"));
+        call(get(API + "/proposal/products").param("q", "x"), owner, null)
+                .andExpect(jsonPath("$.length()").value(0));
+
+        // --- generation: the proposal plus the products added by hand
+        var generated = call(post(API + "/orders/generate"), owner, """
+                {"additions":[{"productId":"%s","quantity":300},
+                              {"productId":"%s","quantity":2},
+                              {"productId":"%s","quantity":5},
+                              {"productId":"%s","quantity":60}]}
+                """.formatted(gauze, vaccine, orphan, doliprane))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.created").value(2))
+                .andExpect(jsonPath("$.unassigned.length()").value(1))
+                .andExpect(jsonPath("$.unassigned[0].productId").value(orphan.toString()));
+        String laborexOrder = orderOf(generated, laborex);
+        String copharniOrder = orderOf(generated, copharni);
+        call(get(API + "/orders/" + laborexOrder), owner, null)
+                .andExpect(jsonPath("$.lines.length()").value(2))
+                // added in bulk to a product the proposal already suggested: the typed quantity wins
+                .andExpect(jsonPath("$.lines[?(@.productId == '" + doliprane + "')].quantityOrdered").value(60))
+                .andExpect(jsonPath("$.lines[?(@.productId == '" + doliprane + "')].reason").value("sous le seuil"))
+                .andExpect(jsonPath("$.lines[?(@.productId == '" + gauze + "')].quantityOrdered").value(300))
+                .andExpect(jsonPath("$.lines[?(@.productId == '" + gauze + "')].reason").value("ajout manuel"))
+                .andExpect(jsonPath("$.totalCents").value(60 * 900 + 300 * 650));
+        call(get(API + "/orders/" + copharniOrder), owner, null)
+                .andExpect(jsonPath("$.lines.length()").value(1))
+                .andExpect(jsonPath("$.lines[0].productId").value(vaccine.toString()))
+                .andExpect(jsonPath("$.lines[0].quantityOrdered").value(2))
+                .andExpect(jsonPath("$.totalCents").value(2 * 18_000));
+
+        // --- another supplier than the usual one: the line goes there, at that supplier's price
+        call(post(API + "/orders/generate"), owner, """
+                {"additions":[{"productId":"%s","quantity":200,"supplierId":"%s"}]}
+                """.formatted(gauze, copharni))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updated").value(2));
+        call(get(API + "/orders/" + copharniOrder), owner, null)
+                .andExpect(jsonPath("$.lines.length()").value(1))
+                .andExpect(jsonPath("$.lines[0].productId").value(gauze.toString()))
+                .andExpect(jsonPath("$.lines[0].unitCostCents").value(600))
+                .andExpect(jsonPath("$.totalCents").value(200 * 600));
+        call(get(API + "/orders/" + laborexOrder), owner, null)
+                .andExpect(jsonPath("$.lines.length()").value(1))
+                .andExpect(jsonPath("$.lines[0].productId").value(doliprane.toString()));
+
+        // --- unknown supplier or product, zero quantity: refused
+        call(post(API + "/orders/generate"), owner, """
+                {"additions":[{"productId":"%s","quantity":5,"supplierId":"%s"}]}
+                """.formatted(gauze, UUID.randomUUID()))
+                .andExpect(status().isNotFound());
+        call(post(API + "/orders/generate"), owner, """
+                {"additions":[{"productId":"%s","quantity":5}]}""".formatted(UUID.randomUUID()))
+                .andExpect(status().isNotFound());
+        call(post(API + "/orders/generate"), owner, """
+                {"additions":[{"productId":"%s","quantity":0}]}""".formatted(gauze))
+                .andExpect(status().isBadRequest());
+
+        // --- another pharmacy cannot route a line to this pharmacy's supplier
+        var other = onboardPharmacy("Commandes Diffa");
+        call(post(API + "/orders/generate"), other.ownerToken(), """
+                {"additions":[{"productId":"%s","quantity":5,"supplierId":"%s"}]}
+                """.formatted(gauze, laborex))
+                .andExpect(status().isNotFound());
+    }
+
     /** A product with 10 units on the shelf under a minimum of 50: the proposal orders 30. */
     private UUID productBelowThreshold(Pharmacy pharmacy, String designation) throws Exception {
         UUID product = createProduct(designation, "NONE", 1_500);

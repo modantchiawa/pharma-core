@@ -705,6 +705,44 @@ export interface PendingPayment {
   rejectionReason: string | null;
 }
 
+/** Receipts of one category over the period: {@code provider} is the operator (mobile money, card). */
+export interface PaymentCategoryTotal {
+  method: string;
+  provider: string | null;
+  count: number;
+  totalCents: number;
+  /** Electronic receipts not yet found on the operator's statement. */
+  pendingCents: number;
+  /** Rejected on the statement: outside {@code count} and {@code totalCents}. */
+  rejectedCount: number;
+  rejectedCents: number;
+}
+
+export interface PaymentJournal {
+  from: string;
+  to: string;
+  terminalId: string | null;
+  count: number;
+  totalCents: number;
+  categories: PaymentCategoryTotal[];
+  /** Checkout stations that sold during the period. */
+  terminals: string[];
+}
+
+export interface PaymentJournalEntry {
+  paymentId: string;
+  saleId: string;
+  ticketNumber: string;
+  occurredAt: string;
+  terminalId: string;
+  cashierName: string | null;
+  method: string;
+  provider: string | null;
+  reference: string | null;
+  amountCents: number;
+  confirmationStatus: 'NOT_REQUIRED' | 'PENDING' | 'CONFIRMED' | 'REJECTED';
+}
+
 export type StorageLocationKind =
   'SHELF' | 'DRAWER' | 'FRIDGE' | 'SAFE' | 'RESERVE' | 'COUNTER' | 'OTHER';
 
