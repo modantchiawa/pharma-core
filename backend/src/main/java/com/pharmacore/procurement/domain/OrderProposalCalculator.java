@@ -62,7 +62,12 @@ public final class OrderProposalCalculator {
         EXPIRING_REPLACEMENT,
         LOST_SALES,
         /** Last year, the coming weeks sold markedly more than the yearly average (malaria season, Ramadan…). */
-        SEASONAL_UPTURN
+        SEASONAL_UPTURN,
+        /**
+         * Added to the sheet by the pharmacist (exceptional need, bulk purchase, special order);
+         * never produced by the calculator.
+         */
+        MANUAL
     }
 
     public record Proposal(int quantity, double dailyDemand, int targetStock, int projectedStock, List<Reason> reasons) {

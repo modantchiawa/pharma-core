@@ -5,6 +5,7 @@ import {
   applyGs1,
   daysLate,
   generationPreview,
+  matchesProduct,
   mailtoLink,
   orderStatus,
   orderTimeline,
@@ -13,6 +14,7 @@ import {
   receiptOutcome,
   receivedPercent,
   whatsappLink,
+  withAdditions,
 } from './purchase-orders';
 
 /** Receiving form of the order below: blind mode withholds what remains (and the full line). */
@@ -335,5 +337,41 @@ describe('purchase order helpers', () => {
     expect(receivedPercent(50, 30)).toBe(60);
     expect(receivedPercent(0, 0)).toBe(0);
     expect(receivedPercent(10, 12)).toBe(100);
+  });
+
+  it('adds hand-picked products to the sheet, routed to the chosen supplier', () => {
+    const sheet = [proposalLine('a', 's1', 10, 1_000), proposalLine('b', 's2', 5, 300)];
+    const merged = withAdditions(
+      sheet,
+      { a: 12 },
+      [
+        // bulk purchase of a product the proposal already suggests: the typed quantity wins
+        { line: proposalLine('b', 's2', 0, 300), quantity: 200, supplierId: null },
+        // exceptional product never stocked, bought from another supplier than the usual one
+        { line: proposalLine('x', 's1', 0, 2_000), quantity: 3, supplierId: 's2' },
+      ],
+      [supplier('s1', 0), supplier('s2', 0)],
+    );
+    expect(merged.lines.map((l) => [l.productId, l.supplierId])).toEqual([
+      ['a', 's1'],
+      ['b', 's2'],
+      ['x', 's2'],
+    ]);
+    expect(merged.lines[2].supplierName).toBe('Fournisseur s2');
+    expect(merged.quantities).toEqual({ a: 12, b: 200, x: 3 });
+    const preview = generationPreview(merged.lines, merged.quantities, [
+      supplier('s1', 0),
+      supplier('s2', 0),
+    ]);
+    expect(preview.suppliers.find((p) => p.supplierId === 's2')?.units).toBe(203);
+  });
+
+  it('finds sheet lines by words of the designation, without accents, or by code', () => {
+    const line = { designation: 'EFFERALGAN 1G CPR EFF B/8', cip13: '3400935294856' };
+    expect(matchesProduct(line, '')).toBe(true);
+    expect(matchesProduct(line, 'éfferalgan')).toBe(true);
+    expect(matchesProduct(line, 'eff 1g')).toBe(true);
+    expect(matchesProduct(line, 'doliprane')).toBe(false);
+    expect(matchesProduct(line, '34009352')).toBe(true);
   });
 });

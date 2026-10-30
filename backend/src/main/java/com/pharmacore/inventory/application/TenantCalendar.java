@@ -20,9 +20,13 @@ public class TenantCalendar {
     }
 
     public LocalDate today() {
-        var zone = tenants.findById(TenantContext.requireTenant().value())
+        return LocalDate.now(clock.withZone(zone()));
+    }
+
+    /** The pharmacy's time zone: a business day starts and ends at its local midnight. */
+    public ZoneId zone() {
+        return tenants.findById(TenantContext.requireTenant().value())
                 .map(tenant -> ZoneId.of(tenant.timeZone()))
                 .orElse(ZoneId.of("Europe/Paris"));
-        return LocalDate.now(clock.withZone(zone));
     }
 }

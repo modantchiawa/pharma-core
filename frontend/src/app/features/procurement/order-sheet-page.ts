@@ -9,8 +9,17 @@ import {
   linkedSignal,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  firstValueFrom,
+  of,
+  Subject,
+  switchMap,
+} from 'rxjs';
 import {
   ProposalLine,
   ProposalSheet,
@@ -26,7 +35,15 @@ import { MoneyPipe } from '../../shared/money.pipe';
 import { Icon } from '../../shared/ui/icon';
 import { OrderDetail } from './order-detail';
 import { OrderTracking } from './order-tracking';
-import { errorDetail, generationPreview, isoToday, SCOPES } from './purchase-orders';
+import {
+  errorDetail,
+  generationPreview,
+  isoToday,
+  ManualAddition,
+  matchesProduct,
+  SCOPES,
+  withAdditions,
+} from './purchase-orders';
 
 const REASON_LABELS: Record<string, string> = {
   BELOW_TARGET: 'sous la couverture',
@@ -34,6 +51,7 @@ const REASON_LABELS: Record<string, string> = {
   EXPIRING_REPLACEMENT: 'péremption proche',
   LOST_SALES: 'ventes perdues',
   SEASONAL_UPTURN: 'saison haute',
+  MANUAL: 'ajout manuel',
 };
 
 const REASON_BADGE: Record<string, string> = {
@@ -41,6 +59,7 @@ const REASON_BADGE: Record<string, string> = {
   EXPIRING_REPLACEMENT: 'badge-info',
   LOST_SALES: 'badge-danger',
   SEASONAL_UPTURN: 'badge-warning',
+  MANUAL: 'badge-brand',
 };
 
 type Tab = 'proposal' | 'orders';
@@ -48,7 +67,8 @@ type Tab = 'proposal' | 'orders';
 /**
  * Tomorrow's order sheet and the follow-up of purchase orders: the system proposes, the
  * pharmacist adjusts quantities and generates one order per supplier, sends them (WhatsApp,
- * e-mail, print), then tracks deliveries and receives them lot by lot.
+ * e-mail, print), then tracks deliveries and receives them lot by lot. Products the proposal
+ * does not suggest (exceptional need, bulk purchase) are searched in the catalogue and added by hand.
  * Query parameters: {@code tab=orders}, {@code scope=OVERDUE}, {@code order=<id>}.
  */
 @Component({
@@ -136,7 +156,12 @@ type Tab = 'proposal' | 'orders';
                   Lignes proposées
                 </div>
                 <div class="kpi-value">{{ sheet.lines.length }}</div>
-                <div class="kpi-foot">{{ selectedCount() }} retenue(s)</div>
+                <div class="kpi-foot">
+                  {{ selectedCount() }} retenue(s)
+                  @if (additions().length > 0) {
+                    · {{ additions().length }} ajoutée(s)
+                  }
+                </div>
               </div>
               <div class="card kpi col-span-2 max-sm:order-last sm:col-span-1">
                 <div class="kpi-label">
@@ -210,7 +235,7 @@ type Tab = 'proposal' | 'orders';
                     <div class="min-w-0 flex-1 basis-48">
                       <p class="truncate text-sm font-medium">{{ line.designation }}</p>
                       <p class="text-xs text-subtle">
-                        {{ quantities()[line.productId] }} à commander
+                        {{ merged().quantities[line.productId] }} à commander
                       </p>
                     </div>
                     <ng-container *appHasPermission="'PROCUREMENT_MANAGE'">
@@ -239,9 +264,178 @@ type Tab = 'proposal' | 'orders';
             </section>
           }
 
+          <section
+            class="card"
+            aria-label="Ajouter des produits"
+            *appHasPermission="'PROCUREMENT_MANAGE'"
+            data-testid="manual-additions"
+          >
+            <div class="card-header flex-wrap">
+              <div>
+                <h2 class="card-title">Ajouter des produits</h2>
+                <p class="text-sm text-muted">
+                  Produit exceptionnel, commande spéciale ou achat en grande quantité : cherchez-le
+                  dans tout le catalogue
+                </p>
+              </div>
+            </div>
+            <div class="space-y-3 p-4">
+              <label class="relative block">
+                <span class="sr-only">Rechercher un produit à ajouter</span>
+                <app-icon
+                  name="search"
+                  [size]="16"
+                  class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle"
+                />
+                <input
+                  type="search"
+                  class="input w-full pl-9"
+                  placeholder="Nom, DCI ou code CIP / EAN (2 caractères minimum)"
+                  autocomplete="off"
+                  [ngModel]="addTerm()"
+                  (ngModelChange)="searchToAdd($event)"
+                  (keydown.escape)="searchToAdd('')"
+                  data-testid="add-product-search"
+                />
+              </label>
+              @if (addTerm().trim().length >= 2) {
+                <ul
+                  class="max-h-80 divide-y divide-line overflow-y-auto rounded-[var(--radius)] border"
+                  aria-label="Produits trouvés"
+                >
+                  @for (found of addResults(); track found.productId) {
+                    <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
+                      <div class="min-w-0 flex-1 basis-56">
+                        <p class="truncate text-sm font-medium">{{ found.designation }}</p>
+                        <p class="text-xs text-subtle tabular-nums">
+                          {{ found.cip13 }} · {{ found.supplierName ?? 'sans fournisseur' }}
+                          @if (found.purchasePriceCents !== null) {
+                            · {{ found.purchasePriceCents | money }}
+                          }
+                        </p>
+                      </div>
+                      <p class="text-xs text-muted tabular-nums">
+                        Dispo {{ found.available }} · En cmd {{ found.onOrder }} ·
+                        {{ found.dailyDemand | number: '1.1-1' }}/j
+                      </p>
+                      @if (isOnSheet(found.productId)) {
+                        <span class="badge">Déjà sur la fiche</span>
+                      } @else {
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          (click)="addProduct(found)"
+                          [attr.data-testid]="'add-' + found.productId"
+                        >
+                          <app-icon name="plus" [size]="14" />
+                          Ajouter
+                        </button>
+                      }
+                    </li>
+                  } @empty {
+                    <li class="px-3 py-3 text-sm text-muted">
+                      {{ searching() ? 'Recherche…' : 'Aucun produit trouvé' }}
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+            @if (additions().length > 0) {
+              <div class="overflow-x-auto border-t">
+                <table class="data-table">
+                  <thead class="whitespace-nowrap">
+                    <tr>
+                      <th>Produit ajouté</th>
+                      <th class="num text-right">Dispo</th>
+                      <th class="num text-right">En cmd</th>
+                      <th class="num text-right">Vente/j</th>
+                      <th>Fournisseur</th>
+                      <th class="num text-right">Quantité</th>
+                      <th class="num text-right">Estimation</th>
+                      <th class="w-10"><span class="sr-only">Retirer</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (a of additions(); track a.line.productId) {
+                      <tr [attr.data-testid]="'addition-' + a.line.productId">
+                        <td class="min-w-56">
+                          <p class="font-medium">{{ a.line.designation }}</p>
+                          <p class="text-xs text-subtle tabular-nums">{{ a.line.cip13 }}</p>
+                        </td>
+                        <td class="num">{{ a.line.available }}</td>
+                        <td class="num">{{ a.line.onOrder }}</td>
+                        <td class="num">{{ a.line.dailyDemand | number: '1.1-1' }}</td>
+                        <td>
+                          <select
+                            class="select min-h-8 w-full sm:w-52"
+                            [attr.aria-label]="'Fournisseur pour ' + a.line.designation"
+                            [ngModel]="a.supplierId ?? a.line.supplierId"
+                            (ngModelChange)="updateAddition(a, { supplierId: $event })"
+                          >
+                            <option [ngValue]="null">Choisir un fournisseur</option>
+                            @for (s of suppliers(); track s.id) {
+                              <option [ngValue]="s.id">
+                                {{ s.details.name
+                                }}{{ s.id === a.line.supplierId ? ' (habituel)' : '' }}
+                              </option>
+                            }
+                          </select>
+                        </td>
+                        <td class="num">
+                          <input
+                            type="number"
+                            min="1"
+                            [step]="a.line.packSize"
+                            class="input num ml-auto min-h-8 w-24"
+                            [attr.aria-label]="'Quantité à commander, ' + a.line.designation"
+                            [ngModel]="a.quantity"
+                            (ngModelChange)="updateAddition(a, { quantity: $event })"
+                          />
+                        </td>
+                        <td class="num whitespace-nowrap">
+                          @if (a.line.purchasePriceCents !== null) {
+                            {{ a.line.purchasePriceCents * a.quantity | money }}
+                          } @else {
+                            <span class="text-subtle">—</span>
+                          }
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-icon btn-sm"
+                            [attr.aria-label]="'Retirer ' + a.line.designation"
+                            (click)="removeAddition(a)"
+                          >
+                            <app-icon name="x" [size]="14" />
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </section>
+
           <section class="card">
             <div class="card-header flex-wrap">
               <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <label class="relative w-full sm:w-72">
+                  <span class="sr-only">Rechercher dans la fiche</span>
+                  <app-icon
+                    name="search"
+                    [size]="16"
+                    class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle"
+                  />
+                  <input
+                    type="search"
+                    class="input w-full pl-9"
+                    placeholder="Rechercher dans la fiche"
+                    [ngModel]="filter()"
+                    (ngModelChange)="filter.set($event)"
+                    data-testid="sheet-filter"
+                  />
+                </label>
                 <select
                   class="select w-full sm:w-64"
                   aria-label="Fournisseur"
@@ -276,7 +470,7 @@ type Tab = 'proposal' | 'orders';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (line of sheet()?.lines ?? []; track line.productId) {
+                  @for (line of visibleLines(); track line.productId) {
                     <tr>
                       <td>
                         <input
@@ -345,7 +539,11 @@ type Tab = 'proposal' | 'orders';
                       <td colspan="10">
                         <div class="empty-state">
                           <app-icon name="checkCircle" [size]="22" />
-                          <p>Rien à commander : le stock couvre la demande prévue.</p>
+                          @if (filter().trim() && (sheet()?.lines?.length ?? 0) > 0) {
+                            <p>Aucune ligne de la fiche ne correspond à « {{ filter() }} ».</p>
+                          } @else {
+                            <p>Rien à commander : le stock couvre la demande prévue.</p>
+                          }
                         </div>
                       </td>
                     </tr>
@@ -404,8 +602,22 @@ export class OrderSheetPage {
   protected readonly selectedCount = computed(
     () => Object.values(this.quantities()).filter((q) => q > 0).length,
   );
+  /** Products added by hand, kept across recalculations until the orders are generated. */
+  protected readonly additions = signal<ManualAddition[]>([]);
+  protected readonly filter = signal('');
+  protected readonly visibleLines = computed(() =>
+    (this.sheet()?.lines ?? []).filter((l) => matchesProduct(l, this.filter())),
+  );
+  protected readonly addTerm = signal('');
+  protected readonly addResults = signal<ProposalLine[]>([]);
+  protected readonly searching = signal(false);
+  private readonly addSearch = new Subject<string>();
+  /** The sheet with the products added by hand, as the server will group it. */
+  protected readonly merged = computed(() =>
+    withAdditions(this.sheet()?.lines ?? [], this.quantities(), this.additions(), this.suppliers()),
+  );
   protected readonly preview = computed(() =>
-    generationPreview(this.sheet()?.lines ?? [], this.quantities(), this.suppliers()),
+    generationPreview(this.merged().lines, this.merged().quantities, this.suppliers()),
   );
   protected supplierId: string | null = null;
   /** Supplier chosen for each product that has none yet. */
@@ -413,6 +625,79 @@ export class OrderSheetPage {
 
   constructor() {
     void this.init();
+    this.addSearch
+      .pipe(
+        debounceTime(250),
+        distinctUntilChanged(),
+        switchMap((term) => {
+          if (term.length < 2) {
+            return of([]);
+          }
+          this.searching.set(true);
+          return this.http
+            .get<ProposalLine[]>(`${this.api}/proposal/products`, { params: { q: term } })
+            .pipe(catchError(() => of([])));
+        }),
+        takeUntilDestroyed(),
+      )
+      .subscribe((found) => {
+        this.searching.set(false);
+        this.addResults.set(found);
+      });
+  }
+
+  protected searchToAdd(term: string): void {
+    this.addTerm.set(term ?? '');
+    if ((term ?? '').trim().length < 2) {
+      this.addResults.set([]);
+    }
+    this.addSearch.next((term ?? '').trim());
+  }
+
+  protected isOnSheet(productId: string): boolean {
+    return (
+      this.additions().some((a) => a.line.productId === productId) ||
+      (this.sheet()?.lines ?? []).some((l) => l.productId === productId)
+    );
+  }
+
+  /** Adds a product found in the catalogue, one pack by default, to its usual supplier. */
+  protected addProduct(line: ProposalLine): void {
+    if (this.isOnSheet(line.productId)) {
+      return;
+    }
+    this.additions.update((list) => [
+      ...list,
+      { line, quantity: Math.max(line.packSize, 1), supplierId: line.supplierId },
+    ]);
+    this.toast.success(`${line.designation} ajouté à la fiche`);
+    this.searchToAdd('');
+  }
+
+  protected updateAddition(
+    addition: ManualAddition,
+    change: { quantity?: number; supplierId?: string | null },
+  ): void {
+    this.additions.update((list) =>
+      list.map((a) =>
+        a.line.productId !== addition.line.productId
+          ? a
+          : {
+              ...a,
+              quantity:
+                change.quantity === undefined
+                  ? a.quantity
+                  : Math.max(Number(change.quantity) || 0, 0),
+              supplierId: change.supplierId === undefined ? a.supplierId : change.supplierId,
+            },
+      ),
+    );
+  }
+
+  protected removeAddition(addition: ManualAddition): void {
+    this.additions.update((list) =>
+      list.filter((a) => a.line.productId !== addition.line.productId),
+    );
   }
 
   protected reasonLabel(reason: string): string {
@@ -456,6 +741,13 @@ export class OrderSheetPage {
     if (!sheet || this.generating()) {
       return;
     }
+    const additions = this.additions()
+      .filter((a) => a.quantity > 0)
+      .map((a) => ({
+        productId: a.line.productId,
+        quantity: a.quantity,
+        supplierId: a.supplierId ?? a.line.supplierId,
+      }));
     const overrides = sheet.lines
       .filter(
         (l) => (this.quantities()[l.productId] ?? l.suggestedQuantity) !== l.suggestedQuantity,
@@ -467,8 +759,12 @@ export class OrderSheetPage {
         this.http.post<PurchaseOrderGeneration>(`${this.api}/orders/generate`, {
           supplierId: this.supplierId,
           overrides,
+          additions,
         }),
       );
+      // a product added without any supplier stays on the sheet until it is linked to one
+      const unlinked = new Set(result.unassigned.map((l) => l.productId));
+      this.additions.update((list) => list.filter((a) => unlinked.has(a.line.productId)));
       const parts = [];
       if (result.created > 0) {
         parts.push(`${result.created} créée(s)`);
@@ -511,6 +807,9 @@ export class OrderSheetPage {
       const name = this.suppliers().find((s) => s.id === supplierId)?.details.name ?? '';
       this.toast.success(`${line.designation} associé à ${name}`);
       delete this.links[line.productId];
+      this.additions.update((list) =>
+        list.map((a) => (a.line.productId === line.productId ? { ...a, supplierId } : a)),
+      );
       await this.loadProposal(true);
     } catch (error) {
       this.toast.error(errorDetail(error, 'Association refusée'));

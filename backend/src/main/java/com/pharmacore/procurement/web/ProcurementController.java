@@ -3,10 +3,12 @@ package com.pharmacore.procurement.web;
 import com.pharmacore.control.application.ReceivingControlService;
 import com.pharmacore.procurement.application.ProcurementService;
 import com.pharmacore.procurement.application.ProcurementService.GenerationView;
+import com.pharmacore.procurement.application.ProcurementService.ManualAddition;
 import com.pharmacore.procurement.application.ProcurementService.OrderLineCommand;
 import com.pharmacore.procurement.application.ProcurementService.OrderReceiptView;
 import com.pharmacore.procurement.application.ProcurementService.OrderSummary;
 import com.pharmacore.procurement.application.ProcurementService.OrderView;
+import com.pharmacore.procurement.application.ProcurementService.ProposalLine;
 import com.pharmacore.procurement.application.ProcurementService.ProposalSheet;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptCommand;
 import com.pharmacore.procurement.application.ProcurementService.ReceiptLineCommand;
@@ -35,6 +37,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -111,6 +114,13 @@ class ProcurementController {
         return procurement.proposal(supplierId);
     }
 
+    /** Products to add to the sheet by hand (exceptional need, bulk purchase), searched in the whole catalogue. */
+    @GetMapping("/proposal/products")
+    @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
+    List<ProposalLine> orderableProducts(@RequestParam String q, @RequestParam(defaultValue = "20") int limit) {
+        return procurement.orderableProducts(q, Set.of(), Math.clamp(limit, 1, 50));
+    }
+
     /** Tracking list: {@code scope} DRAFTS, OPEN, OVERDUE, CLOSED or ALL; {@code status} narrows to one status. */
     @GetMapping("/orders")
     @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
@@ -131,7 +141,7 @@ class ProcurementController {
     @PostMapping("/orders/generate")
     @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
     GenerationView generate(@Valid @RequestBody GenerateRequest request) {
-        return procurement.generate(request.supplierId(), request.overridesByProduct());
+        return procurement.generate(request.supplierId(), request.overridesByProduct(), request.manualAdditions());
     }
 
     @GetMapping("/orders/{orderId}")
@@ -253,12 +263,25 @@ class ProcurementController {
     }
 
     record GenerateRequest(UUID supplierId,
-                           @Size(max = 1000) List<@Valid QuantityOverride> overrides) {
+                           @Size(max = 1000) List<@Valid QuantityOverride> overrides,
+                           @Size(max = 500) List<@Valid AdditionRequest> additions) {
 
         Map<UUID, Integer> overridesByProduct() {
             return overrides == null ? Map.of() : overrides.stream()
                     .collect(Collectors.toMap(QuantityOverride::productId, QuantityOverride::quantity, (a, b) -> b));
         }
+
+        List<ManualAddition> manualAdditions() {
+            return additions == null ? List.of() : additions.stream()
+                    .map(a -> new ManualAddition(a.productId(), a.quantity(), a.supplierId()))
+                    .toList();
+        }
+    }
+
+    /** A product added by hand to the sheet; {@code supplierId} null means its preferred supplier. */
+    record AdditionRequest(@NotNull UUID productId,
+                           @Positive @Max(100_000) int quantity,
+                           UUID supplierId) {
     }
 
     /** Quantity to order instead of the suggestion; 0 leaves the product out. */
