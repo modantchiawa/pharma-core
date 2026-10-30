@@ -420,6 +420,16 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
                           [ngModel]="edits()[line.productId]"
                           (ngModelChange)="setEdit(line.productId, $event)"
                         />
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-icon btn-sm text-danger"
+                          [attr.aria-label]="'Supprimer ' + line.designation + ' de la commande'"
+                          title="Supprimer de la commande (quantité 0)"
+                          [disabled]="edits()[line.productId] === 0"
+                          (click)="setEdit(line.productId, 0)"
+                        >
+                          <app-icon name="trash" [size]="15" />
+                        </button>
                       } @else if (o.status === 'DRAFT') {
                         <span class="num text-sm font-medium">{{ line.quantityOrdered }}</span>
                       } @else {

@@ -4,10 +4,10 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "ng build",
+    "build": "node scripts/build.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "build:demo": "node scripts/write-demo-env.mjs && ng build --configuration demo",
+    "build:demo": "node scripts/write-demo-env.mjs && node scripts/build.mjs --configuration demo",
     "start:demo": "node scripts/write-demo-env.mjs && ng serve --configuration demo --port 4200"
   },
   "private": true,

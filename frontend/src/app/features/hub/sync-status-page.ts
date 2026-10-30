@@ -14,6 +14,7 @@ import { NodeInfoService } from '../../core/api/node-info.service';
 import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { SaleOutboxService } from '../../core/offline/sale-outbox.service';
+import { TerminalNamesService } from '../../core/offline/terminal-names.service';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { plural } from '../../shared/terminal-sync';
@@ -209,7 +210,9 @@ interface SyncStatus {
             [now]="now()"
             [current]="terminal.terminalId"
             [canForget]="canForget()"
+            [canRename]="canForget()"
             [busy]="busy()"
+            (rename)="rename($event)"
             (forget)="forget($event)"
             (forgetStale)="forgetStale()"
           />
@@ -248,6 +251,7 @@ export class SyncStatusPage {
   protected readonly terminal = inject(TerminalService);
   private readonly permissions = inject(PermissionService);
   private readonly toast = inject(ToastService);
+  private readonly names = inject(TerminalNamesService);
   protected readonly status = signal<SyncStatus | null>(null);
   protected readonly terminals = signal<TerminalBoard | null>(null);
   protected readonly now = signal(Date.now());
@@ -265,6 +269,30 @@ export class SyncStatusPage {
     destroyRef.onDestroy(() => clearInterval(timer));
     whileVisible(() => void this.refreshTerminals(), 30_000, destroyRef);
     whileVisible(() => this.now.set(Date.now()), 15_000, destroyRef);
+  }
+
+  /** Names a register; the names list of this station is refreshed with it. */
+  protected async rename(change: {
+    terminalId: string;
+    name: string;
+    location: string;
+  }): Promise<void> {
+    this.busy.set(true);
+    try {
+      await this.names.rename(change.terminalId, change.name, change.location);
+      this.toast.success(
+        change.name
+          ? `Poste ${change.terminalId} nommé « ${change.name} »`
+          : `Poste ${change.terminalId} : nom retiré`,
+      );
+      await this.refreshTerminals();
+    } catch (error) {
+      this.toast.error(
+        (error as { error?: { detail?: string } })?.error?.detail ?? 'Nom refusé par le serveur',
+      );
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   protected async forget(terminal: TerminalView): Promise<void> {

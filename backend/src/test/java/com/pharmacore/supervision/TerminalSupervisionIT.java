@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -225,6 +226,81 @@ class TerminalSupervisionIT extends IntegrationTest {
     }
 
     // ------------------------------------------------------------------ fixtures
+
+    @Test
+    void registersGetANameOnTopOfTheirUniqueId() throws Exception {
+        var niamey = onboardPharmacy("Postes Niamey");
+        var dosso = onboardPharmacy("Postes Dosso");
+        String owner = niamey.ownerToken();
+        beat(niamey, "T7K2MX9", 0, Instant.now(), 0);
+        beat(niamey, "TQ4HB2C", 0, Instant.now(), 0);
+
+        call(put("/api/v1/pos/terminals/T7K2MX9/name"), owner, """
+                {"name":"  Caisse 1 ","location":"Comptoir d'entrée"}""")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.terminalId").value("T7K2MX9"))
+                .andExpect(jsonPath("$.name").value("Caisse 1"))
+                .andExpect(jsonPath("$.location").value("Comptoir d'entrée"));
+        // a register can be named before it ever reported
+        call(put("/api/v1/pos/terminals/TNEWPC1/name"), owner, """
+                {"name":"Bureau du titulaire"}""")
+                .andExpect(status().isOk());
+        // two registers never share a name, whatever the case
+        call(put("/api/v1/pos/terminals/TQ4HB2C/name"), owner, """
+                {"name":"caisse 1"}""")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("terminal-name-taken"));
+        // renaming a register to its own name is fine
+        call(put("/api/v1/pos/terminals/T7K2MX9/name"), owner, """
+                {"name":"CAISSE 1","location":"Comptoir d'entrée"}""")
+                .andExpect(status().isOk());
+
+        call(get("/api/v1/pos/terminals/names"), owner, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].name").value("Bureau du titulaire"))
+                .andExpect(jsonPath("$[1].name").value("CAISSE 1"));
+        String board = call(get("/api/v1/pos/terminals"), owner, null)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(board, "$.terminals[?(@.terminalId == 'T7K2MX9')].name"))
+                .containsExactly("CAISSE 1");
+        assertThat(JsonPath.<List<String>>read(board, "$.terminals[?(@.terminalId == 'TQ4HB2C')].name"))
+                .containsExactly((String) null);
+
+        // a cashier reads the names (the counter shows its own) but cannot rename
+        String cashier = staff(niamey, "CAISSIER", "caissier-postes");
+        call(get("/api/v1/pos/terminals/names"), cashier, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+        call(put("/api/v1/pos/terminals/TQ4HB2C/name"), cashier, """
+                {"name":"Caisse 2"}""")
+                .andExpect(status().isForbidden());
+
+        // blank name: back to the id alone
+        call(put("/api/v1/pos/terminals/TNEWPC1/name"), owner, """
+                {"name":" "}""")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").doesNotExist());
+        call(get("/api/v1/pos/terminals/names"), owner, null)
+                .andExpect(jsonPath("$.length()").value(1));
+
+        // forgetting a register drops its name too
+        silence(niamey.tenantId(), "T7K2MX9", Duration.ofDays(1));
+        call(delete("/api/v1/pos/terminals/T7K2MX9"), owner, null).andExpect(status().isNoContent());
+        call(get("/api/v1/pos/terminals/names"), owner, null)
+                .andExpect(jsonPath("$.length()").value(0));
+
+        // another pharmacy sees none of these names
+        call(put("/api/v1/pos/terminals/TQ4HB2C/name"), owner, """
+                {"name":"Caisse 2"}""")
+                .andExpect(status().isOk());
+        call(get("/api/v1/pos/terminals/names"), dosso.ownerToken(), null)
+                .andExpect(jsonPath("$.length()").value(0));
+        call(put("/api/v1/pos/terminals/TQ4HB2C/name"), dosso.ownerToken(), """
+                {"name":"Caisse 2"}""")
+                .andExpect(status().isOk());
+    }
 
     private void beat(Pharmacy pharmacy, String terminalId, int pending, Instant lastSync, Integer rejected)
             throws Exception {

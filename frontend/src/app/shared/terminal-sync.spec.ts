@@ -23,6 +23,8 @@ function ago(ms: number): string {
 function terminal(overrides: Partial<TerminalView>): TerminalView {
   return {
     terminalId: 'DEMO-1',
+    name: null,
+    location: null,
     appVersion: 'demo',
     lastSeenAt: ago(30_000),
     lastSyncAt: ago(2 * MIN),

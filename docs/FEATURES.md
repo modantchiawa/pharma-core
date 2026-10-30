@@ -94,6 +94,8 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Suivi patients WhatsApp / SMS** (opt-in) : fin de traitement, ordonnance à renouveler, « prévenez-moi quand ce produit revient », rappel de créance, message libre ; envoi WhatsApp en un geste (lien pré-rempli), SMS automatique par passerelle HTTPS ; modèles par pharmacie | Non | ✅ |
 | **Rapport du soir au titulaire** : chiffres du jour (CA et variation, ventes, panier, marge, encaissements par mode, écart de caisse, ruptures, péremptions, créances) à l'heure choisie, dans la cloche, le webhook et par SMS ; partage WhatsApp depuis le pilotage | Non | ✅ |
 | Supervision éditeur multi-pharmacies | — | ✅ |
+| **Postes nominatifs** : chaque poste de caisse garde son identifiant unique (préfixe des tickets) et reçoit un nom et un emplacement (« Caisse 1 · comptoir d'entrée »), affichés partout (menu, caisse, encaissements, serveur local, console), conservés sur le poste hors ligne | Oui | ✅ |
+| **Version et mise à jour** : version affichée (numéro, commit, date de construction) dans le menu et à la connexion ; bandeau « nouvelle version disponible » dès qu'une version est publiée (service worker et `version.json`), mise à jour en un clic ; « Forcer la mise à jour » vide le cache de l'application sans toucher aux ventes en attente | Oui | ✅ |
 | Personnalisation : logo, couleurs, mentions, ticket ; densité, contraste, taille de texte, mode sombre par poste | Partiel | ✅ |
 | Réseau inter-pharmacies : disponibilité d'urgence, réservations, gardes, messagerie | Rare | ✅ (nécessite Internet) |
 | **« Qui a ce produit ? »** sur plusieurs produits à la fois et **« qu'a cette pharmacie ? »** chez les partenaires | Non | ✅ |

@@ -151,15 +151,82 @@ public class TerminalSupervisionService {
         return forgetAllStale(TenantContext.requireTenant().value());
     }
 
+    /** Names of the caller's registers, for the counter and the screens that list registers. */
+    @Transactional(readOnly = true)
+    public List<TerminalName> names() {
+        return jdbc.sql("""
+                        SELECT terminal_id, name, location FROM terminal_profile
+                        WHERE tenant_id = :tenant ORDER BY lower(name)""")
+                .param("tenant", TenantContext.requireTenant().value())
+                .query((rs, rowNum) -> new TerminalName(rs.getString("terminal_id"), rs.getString("name"),
+                        rs.getString("location")))
+                .list();
+    }
+
+    /**
+     * Gives a register a name (and a place) on top of its unique id, which stays the ticket prefix;
+     * a blank name takes the name away. A register may be named before its first heartbeat.
+     */
+    @Transactional
+    public TerminalName rename(String terminalId, String name, String location) {
+        var user = TenantContext.requireTenantUser();
+        UUID tenantId = user.tenant().value();
+        requireOwnedHere(tenantId);
+        String trimmed = name == null ? "" : name.strip();
+        String place = location == null || location.isBlank() ? null : location.strip();
+        if (trimmed.isEmpty()) {
+            int removed = jdbc.sql("DELETE FROM terminal_profile WHERE tenant_id = :tenant AND terminal_id = :terminal")
+                    .param("tenant", tenantId)
+                    .param("terminal", terminalId)
+                    .update();
+            if (removed > 0) {
+                audit.record("TERMINAL_UNNAMED", "TERMINAL", terminalId, Map.of());
+            }
+            return new TerminalName(terminalId, null, null);
+        }
+        boolean taken = jdbc.sql("""
+                        SELECT exists(SELECT 1 FROM terminal_profile
+                                      WHERE tenant_id = :tenant AND lower(name) = lower(:name)
+                                        AND terminal_id <> :terminal)""")
+                .param("tenant", tenantId)
+                .param("name", trimmed)
+                .param("terminal", terminalId)
+                .query(Boolean.class)
+                .single();
+        if (taken) {
+            throw new BusinessRuleException("terminal-name-taken",
+                    "Un autre poste s'appelle déjà « " + trimmed + " »");
+        }
+        jdbc.sql("""
+                        INSERT INTO terminal_profile (id, tenant_id, terminal_id, name, location, updated_by, updated_at)
+                        VALUES (:id, :tenant, :terminal, :name, :location, :user, :now)
+                        ON CONFLICT (tenant_id, terminal_id) DO UPDATE SET
+                            name = EXCLUDED.name, location = EXCLUDED.location, updated_by = EXCLUDED.updated_by,
+                            updated_at = EXCLUDED.updated_at, version = terminal_profile.version + 1""")
+                .param("id", UUID.randomUUID())
+                .param("tenant", tenantId)
+                .param("terminal", terminalId)
+                .param("name", trimmed)
+                .param("location", place)
+                .param("user", user.userId())
+                .param("now", Timestamp.from(clock.instant()))
+                .update();
+        audit.record("TERMINAL_NAMED", "TERMINAL", terminalId, place == null
+                ? Map.of("name", trimmed) : Map.of("name", trimmed, "location", place));
+        return new TerminalName(terminalId, trimmed, place);
+    }
+
     // ------------------------------------------------------------------ internals
 
     private TerminalBoard board(UUID tenantId, boolean relayed, Instant hubLastContact, Instant now) {
         Instant reference = SyncSupervision.reference(relayed, hubLastContact, now);
         List<TerminalView> terminals = jdbc.sql("""
-                        SELECT terminal_id, app_version, pending_sales, rejected_sales, last_sync_at, last_seen_at
-                        FROM terminal_heartbeat
-                        WHERE tenant_id = :tenant
-                        ORDER BY last_seen_at DESC, terminal_id""")
+                        SELECT h.terminal_id, h.app_version, h.pending_sales, h.rejected_sales, h.last_sync_at,
+                               h.last_seen_at, p.name, p.location
+                        FROM terminal_heartbeat h
+                        LEFT JOIN terminal_profile p ON p.tenant_id = h.tenant_id AND p.terminal_id = h.terminal_id
+                        WHERE h.tenant_id = :tenant
+                        ORDER BY h.last_seen_at DESC, h.terminal_id""")
                 .param("tenant", tenantId)
                 .query((rs, rowNum) -> {
                     Instant lastSeen = instant(rs.getTimestamp("last_seen_at"));
@@ -167,6 +234,8 @@ public class TerminalSupervisionService {
                     int pending = rs.getInt("pending_sales");
                     return new TerminalView(
                             rs.getString("terminal_id"),
+                            rs.getString("name"),
+                            rs.getString("location"),
                             rs.getString("app_version"),
                             lastSeen,
                             lastSync,
@@ -273,6 +342,10 @@ public class TerminalSupervisionService {
                 .param("tenant", tenantId)
                 .param("terminal", terminalId)
                 .update();
+        jdbc.sql("DELETE FROM terminal_profile WHERE tenant_id = :tenant AND terminal_id = :terminal")
+                .param("tenant", tenantId)
+                .param("terminal", terminalId)
+                .update();
         audit.record("TERMINAL_FORGOTTEN", "TERMINAL", terminalId, Map.of("tenant", tenantId.toString()));
     }
 
@@ -290,6 +363,10 @@ public class TerminalSupervisionService {
                 .query(String.class)
                 .list();
         if (!forgotten.isEmpty()) {
+            jdbc.sql("DELETE FROM terminal_profile WHERE tenant_id = :tenant AND terminal_id = ANY(:terminals)")
+                    .param("tenant", tenantId)
+                    .param("terminals", forgotten.toArray(String[]::new))
+                    .update();
             audit.record("TERMINALS_FORGOTTEN", "TENANT", tenantId, Map.of(
                     "count", Integer.toString(forgotten.size()),
                     "terminals", String.join(",", forgotten.stream().sorted().toList())));
@@ -342,8 +419,12 @@ public class TerminalSupervisionService {
     }
 
     /** @param rejectedSales sales the server refused, awaiting the pharmacist; {@code null} if not reported */
-    public record TerminalView(String terminalId, String appVersion, Instant lastSeenAt, Instant lastSyncAt,
+    public record TerminalView(String terminalId, String name, String location, String appVersion, Instant lastSeenAt, Instant lastSyncAt,
                                int pendingSales, Integer rejectedSales, TerminalSyncState state) {
+    }
+
+    /** A register's name and place; both {@code null} when it only has its unique id. */
+    public record TerminalName(String terminalId, String name, String location) {
     }
 
     public record HubView(String nodeId, String appVersion, Instant pairedAt, Instant lastContactAt,

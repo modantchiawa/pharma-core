@@ -15,6 +15,7 @@ import { APP_ENVIRONMENT } from '../../core/config';
 import { TerminalService } from '../../core/offline/terminal.service';
 import { CurrencyService } from '../../core/ui/currency.service';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { TerminalLabelPipe } from '../../shared/terminal-label.pipe';
 import { PaperFormat } from '../../core/api/models';
 import { PosDatabaseService } from '../../core/offline/pos-database.service';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
@@ -96,6 +97,7 @@ interface SessionSale {
 @Component({
   selector: 'app-cash-session-page',
   imports: [
+    TerminalLabelPipe,
     FormsModule,
     DatePipe,
     MoneyPipe,
@@ -121,7 +123,7 @@ interface SessionSale {
         </div>
         <span class="badge h-7 px-3">
           <app-icon name="store" [size]="14" />
-          Poste {{ terminal.terminalId }}
+          Poste {{ terminal.terminalId | terminalLabel }}
         </span>
       </header>
 
@@ -209,7 +211,7 @@ interface SessionSale {
                   <div class="flex flex-wrap items-center gap-2">
                     <h2 class="card-title">
                       Session {{ s.status === 'OPEN' ? 'en cours' : 'clôturée' }} · poste
-                      {{ s.terminalId }}
+                      {{ s.terminalId | terminalLabel }}
                     </h2>
                     @if (s.status === 'OPEN') {
                       <span class="badge badge-success"><span class="dot"></span>Ouverte</span>
@@ -496,7 +498,7 @@ interface SessionSale {
               <div class="empty-state">
                 <app-icon name="cash" [size]="22" />
                 <p class="font-medium text-ink">
-                  Aucune session ouverte sur le poste {{ terminal.terminalId }}.
+                  Aucune session ouverte sur le poste {{ terminal.terminalId | terminalLabel }}.
                 </p>
                 <p class="text-subtle">Ouvrez la caisse avec un fond pour commencer à encaisser.</p>
               </div>
@@ -529,7 +531,7 @@ interface SessionSale {
                         [class.bg-brand-soft]="session()?.sessionId === r.sessionId"
                         (click)="select(r)"
                       >
-                        <td class="font-medium">{{ r.terminalId }}</td>
+                        <td class="font-medium">{{ r.terminalId | terminalLabel }}</td>
                         <td class="tabular-nums">{{ r.openedAt | date: 'dd/MM HH:mm' }}</td>
                         <td class="tabular-nums">
                           @if (r.closedAt) {

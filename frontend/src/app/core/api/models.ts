@@ -1011,6 +1011,9 @@ export type TerminalSyncState = 'SYNCED' | 'PENDING' | 'STALE' | 'NEVER';
 
 export interface TerminalView {
   terminalId: string;
+  /** Name given by the pharmacy ("Caisse 1"); null when the register only has its id. */
+  name: string | null;
+  location: string | null;
   appVersion: string;
   lastSeenAt: string;
   lastSyncAt: string | null;
@@ -1018,6 +1021,13 @@ export interface TerminalView {
   /** Sales refused by the server awaiting the pharmacist; null when the register does not report it. */
   rejectedSales: number | null;
   state: TerminalSyncState;
+}
+
+/** A register's name and place, on top of its unique id. */
+export interface TerminalName {
+  terminalId: string;
+  name: string | null;
+  location: string | null;
 }
 
 export interface TerminalCounts {
