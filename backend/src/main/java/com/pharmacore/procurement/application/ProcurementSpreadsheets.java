@@ -20,11 +20,13 @@ import com.pharmacore.importing.domain.XlsxWriter.Cell;
 import com.pharmacore.inventory.application.TenantCalendar;
 import com.pharmacore.procurement.application.ProcurementService.OrderLineView;
 import com.pharmacore.procurement.application.ProcurementService.OrderView;
+import com.pharmacore.procurement.domain.InvoiceMatching;
 import com.pharmacore.shared.context.TenantContext;
 import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import java.sql.Date;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -205,6 +207,13 @@ public class ProcurementSpreadsheets {
             order.lines().forEach(line -> lineByProduct.putIfAbsent(line.productId(), line.lineNo()));
         }
         Map<String, Optional<ProductEntity>> byCode = new HashMap<>();
+        // the wholesaler's own article code ("Article"), known when the supplier's references were recorded
+        Integer articleColumn = articleColumn(file.headers(), mapping);
+        Map<String, UUID> bySupplierReference = order == null ? Map.of() : supplierReferences(order.supplierId());
+        List<InvoiceMatching.Ordered> ordered = order == null ? List.of() : order.lines().stream()
+                .map(line -> new InvoiceMatching.Ordered(line.productId(), line.designation())).toList();
+        Map<UUID, String> orderedNames = new HashMap<>();
+        ordered.forEach(o -> orderedNames.putIfAbsent(o.productId(), o.designation()));
         List<InvoiceLine> lines = new ArrayList<>();
         int matched = 0;
         int unknown = 0;
@@ -223,13 +232,24 @@ public class ProcurementSpreadsheets {
             Long price = ValueParsers.cents(mapping.value(file, row, "sellingPrice"), scale).orElse(null);
             Optional<ProductEntity> product = code.isEmpty() ? Optional.empty()
                     : byCode.computeIfAbsent(code, c -> products.findByAnyCode(c).stream().findFirst());
+            UUID productId = product.map(ProductEntity::id).orElse(null);
+            String name = product.map(ProductEntity::designation).orElse(designation);
+            if (productId == null && articleColumn != null) {
+                productId = bySupplierReference.get(clean(file.cell(row, articleColumn)).toUpperCase());
+            }
+            if (productId == null) {
+                productId = InvoiceMatching.byDesignation(designation, ordered).orElse(null);
+            }
+            if (product.isEmpty() && productId != null) {
+                name = orderedNames.getOrDefault(productId, designation);
+            }
             String issue = null;
             Integer orderLine = null;
-            if (product.isEmpty()) {
+            if (productId == null) {
                 issue = "Code inconnu du référentiel : rapprochez le produit à la main";
                 unknown++;
             } else {
-                orderLine = lineByProduct.get(product.get().id());
+                orderLine = lineByProduct.get(productId);
                 if (order != null && orderLine == null) {
                     issue = "Produit livré mais absent de la commande";
                     notOrdered++;
@@ -241,11 +261,40 @@ public class ProcurementSpreadsheets {
             if (issue == null) {
                 matched++;
             }
-            lines.add(new InvoiceLine(row + 1, product.map(ProductEntity::id).orElse(null), code,
-                    product.map(ProductEntity::designation).orElse(designation), lot.isEmpty() ? null : lot, expiry,
+            lines.add(new InvoiceLine(row + 1, productId, code, name, lot.isEmpty() ? null : lot, expiry,
                     quantity, cost, price, orderLine, issue));
         }
         return new InvoiceImport(file.format(), file.headers(), List.of(), lines, matched, unknown, notOrdered);
+    }
+
+    private static final List<String> ARTICLE_HEADERS = List.of("article", "code article", "ref article",
+            "ref fournisseur", "reference fournisseur", "code fournisseur");
+
+    /** The column of the wholesaler's article code, when the file has one not already read as another field. */
+    static Integer articleColumn(List<String> headers, ColumnMapping mapping) {
+        var taken = mapping.columnByField().values();
+        for (int column = 0; column < headers.size(); column++) {
+            if (!taken.contains(column) && ARTICLE_HEADERS.contains(ColumnMapping.normalize(headers.get(column)))) {
+                return column;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, UUID> supplierReferences(UUID supplierId) {
+        Map<String, UUID> references = new HashMap<>();
+        jdbc.sql("""
+                        SELECT supplier_reference, product_id FROM supplier_product
+                        WHERE supplier_id = :supplier AND supplier_reference IS NOT NULL""")
+                .param("supplier", supplierId)
+                .query((ResultSet rs) -> {
+                    while (rs.next()) {
+                        references.putIfAbsent(rs.getString("supplier_reference").trim().toUpperCase(),
+                                rs.getObject("product_id", UUID.class));
+                    }
+                    return null;
+                });
+        return references;
     }
 
     private static String clean(String raw) {

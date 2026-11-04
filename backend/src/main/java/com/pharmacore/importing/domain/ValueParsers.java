@@ -33,7 +33,11 @@ public final class ValueParsers {
             DateTimeFormatter.ofPattern("yyyy-MM"),
             DateTimeFormatter.ofPattern("MM-yyyy"),
             DateTimeFormatter.ofPattern("yyyyMM"),
-            DateTimeFormatter.ofPattern("MM/yy"));
+            DateTimeFormatter.ofPattern("MM/yy"),
+            // wholesaler invoices: "08-28" is August 2028
+            DateTimeFormatter.ofPattern("MM-yy"),
+            DateTimeFormatter.ofPattern("M-yy"),
+            DateTimeFormatter.ofPattern("MM.yy"));
     private static final LocalDate EXCEL_EPOCH = LocalDate.of(1899, 12, 30);
 
     private ValueParsers() {

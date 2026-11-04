@@ -45,6 +45,9 @@ class ValueParsersTest {
         assertThat(ValueParsers.date("09/2027")).contains(LocalDate.of(2027, 9, 30));
         assertThat(ValueParsers.date("202709")).contains(LocalDate.of(2027, 9, 30));
         assertThat(ValueParsers.date("46660")).contains(LocalDate.of(2027, 9, 30));
+        // wholesaler invoices write the expiry as month-year: "08-28" is the end of August 2028
+        assertThat(ValueParsers.date("08-28")).contains(LocalDate.of(2028, 8, 31));
+        assertThat(ValueParsers.date("1-29")).contains(LocalDate.of(2029, 1, 31));
         assertThat(ValueParsers.date("n/a")).isEmpty();
     }
 

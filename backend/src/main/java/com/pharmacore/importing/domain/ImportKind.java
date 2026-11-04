@@ -61,14 +61,17 @@ public enum ImportKind {
                     "batch", "lot number"),
             Field.optional("expiry", "Date de péremption", "peremption", "péremption", "date peremption", "date de peremption",
                     "date de péremption", "expiration", "date expiration", "dlu", "dluo", "ddp", "exp", "expiry", "expiry date",
-                    "perime le", "périme le"),
-            Field.required("quantity", "Quantité", "quantite", "quantité", "qte", "qté", "stock", "qty", "quantity",
-                    "stock actuel", "en stock", "qte stock", "qté stock"),
-            Field.optional("unitCost", "Prix d'achat unitaire HT", "prix achat", "prix d'achat", "prix achat ht",
+                    "perime le", "périme le", "perempt", "per"),
+            // wholesaler invoices give the delivered quantity ("Qt/Lv") beside the ordered one ("Qt/Cd")
+            Field.required("quantity", "Quantité", "qt lv", "qte lv", "qté lv", "qt livree", "qte livree", "qté livrée",
+                    "quantite livree", "quantité livrée", "livree", "livrée", "qt liv", "quantite", "quantité", "qte",
+                    "qté", "stock", "qty", "quantity", "stock actuel", "en stock", "qte stock", "qté stock"),
+            Field.optional("unitCost", "Prix d'achat unitaire HT", "pu net", "p u net", "prix net", "pu ht", "p u ht",
+                    "prix achat", "prix d'achat", "prix achat ht",
                     "pa", "p a", "pa ht", "p a ht", "pamp", "cout", "coût", "prix unitaire achat", "pu achat", "cost",
                     "unit cost", "cump", "pump", "prix revient"),
             Field.optional("sellingPrice", "Prix de vente TTC", "prix de vente", "prix vente", "pv", "pvp", "prix ttc",
-                    "prix public", "prix", "price", "pu vente", "p v", "pv ttc", "p v ttc"))),
+                    "prix public", "public", "pu public", "prix", "price", "pu vente", "p v", "pv ttc", "p v ttc"))),
 
     /** Customer file with credit accounts carried over. */
     CUSTOMERS(List.of(
