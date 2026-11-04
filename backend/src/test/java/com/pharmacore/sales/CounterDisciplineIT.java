@@ -150,7 +150,7 @@ class CounterDisciplineIT extends IntegrationTest {
                  "lines":[{"productId":"%s","quantity":2,"unitPriceCents":2000,"discountCents":0,"customerOrderId":"%s"}],
                  "payments":[{"method":"CASH","amountCents":4000}]}"""
                 .formatted(UUID.randomUUID(), Instant.now(), rare, special))
-                .andExpect(status().isCreated());
+                .andExpect(created());
         call(get("/api/v1/customer-orders/" + special), pharmacy.ownerToken(), null)
                 .andExpect(jsonPath("$.status").value("DELIVERED"));
         assertThat(available(pharmacy, rare)).isEqualTo(3);
@@ -227,6 +227,13 @@ class CounterDisciplineIT extends IntegrationTest {
                  "payments":[{"method":"CASH","amountCents":%d}]}
                 """.formatted(id, id.toString().substring(0, 6), Instant.now(),
                 customerId == null ? "" : "\"customerId\":\"" + customerId + "\",", product, quantity, 500 * quantity);
+    }
+
+    /** 201, else the refusal the server gave (rule, violations) in the failure message. */
+    private static org.springframework.test.web.servlet.ResultMatcher created() {
+        return result -> assertThat(result.getResponse().getStatus())
+                .as(result.getResponse().getContentAsString())
+                .isEqualTo(201);
     }
 
     private static String body(org.springframework.test.web.servlet.ResultActions result) throws Exception {
