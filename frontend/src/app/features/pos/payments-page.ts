@@ -10,12 +10,14 @@ import {
   PaymentChannelSettings,
   PaymentNotification,
   PaymentNotificationFeed,
+  MobileMoneyWallet,
   PendingPayment,
 } from '../../core/api/models';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { NodeInfoService } from '../../core/api/node-info.service';
 import { PaymentNotificationsService } from '../../core/payments/payment-notifications.service';
+import { CurrencyService } from '../../core/ui/currency.service';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { Icon } from '../../shared/ui/icon';
@@ -71,6 +73,84 @@ const STATUS_LABELS: Record<PaymentStatus, string> = {
           <span>{{ text }}</span>
         </div>
       }
+
+      <section class="card mb-5" data-testid="mobile-money-wallets">
+        <div class="card-header flex-wrap">
+          <div class="flex items-center gap-2">
+            <app-icon name="mobileMoney" [size]="18" class="text-brand" />
+            <h2 class="card-title">Solde externe des portefeuilles mobile money</h2>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" (click)="loadWallets()">
+            <app-icon name="refresh" [size]="14" />Actualiser
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table w-full whitespace-nowrap">
+            <thead>
+              <tr>
+                <th>Opérateur</th>
+                <th class="num">Dernier solde relevé</th>
+                <th>Relevé</th>
+                <th class="num">Encaissé depuis</th>
+                <th class="num">Solde attendu</th>
+                <th class="num">Encaissé aujourd'hui</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (wallet of wallets(); track wallet.provider) {
+                <tr>
+                  <td class="font-medium">{{ wallet.provider.replace('_', ' ') }}</td>
+                  <td class="num">
+                    {{ wallet.lastBalanceCents === null ? '—' : (wallet.lastBalanceCents | money) }}
+                  </td>
+                  <td class="text-xs text-muted">
+                    @if (wallet.observedAt) {
+                      {{ wallet.observedAt | date: 'dd/MM HH:mm' }} ·
+                      {{ wallet.source === 'SMS' ? 'SMS opérateur' : 'saisi' }}
+                    } @else {
+                      jamais relevé
+                    }
+                  </td>
+                  <td class="num">
+                    {{ wallet.receivedSinceCents | money }}
+                    <span class="text-xs text-subtle">({{ wallet.paymentsSince }})</span>
+                  </td>
+                  <td class="num font-semibold">
+                    {{
+                      wallet.expectedBalanceCents === null
+                        ? '—'
+                        : (wallet.expectedBalanceCents | money)
+                    }}
+                  </td>
+                  <td class="num">{{ wallet.receivedTodayCents | money }}</td>
+                  <td class="text-right">
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      *appHasPermission="'PAYMENT_RECONCILE'"
+                      (click)="recordBalance(wallet.provider)"
+                    >
+                      Saisir le solde
+                    </button>
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="7" class="py-6 text-center text-muted">
+                    Aucun encaissement mobile money récent.
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <p class="px-4 py-3 text-xs text-muted">
+          Le solde est relevé dans les SMS des opérateurs (« Nouveau solde : … ») transférés par le
+          téléphone, ou saisi depuis l'application de l'opérateur. Comparez le solde réel au solde
+          attendu : un écart signale un paiement non crédité ou un retrait non enregistré.
+        </p>
+      </section>
 
       <section class="card mb-5" data-testid="payment-confirmations">
         <div class="card-header flex-wrap">
@@ -448,6 +528,7 @@ export class PaymentsPage {
   protected readonly notifications = inject(PaymentNotificationsService);
   private readonly toasts = inject(ToastService);
   private readonly env = inject(APP_ENVIRONMENT);
+  private readonly currency = inject(CurrencyService);
   private readonly node = inject(NodeInfoService);
   protected readonly feedStatus = signal<'UNMATCHED' | 'ALL'>('UNMATCHED');
   protected readonly feed = signal<PaymentNotification[]>([]);
@@ -455,11 +536,49 @@ export class PaymentsPage {
   protected readonly claimTarget = signal<Record<string, string>>({});
   protected readonly channel = signal<PaymentChannelSettings | null>(null);
   protected readonly issued = signal<IssuedIngestToken | null>(null);
+  protected readonly wallets = signal<MobileMoneyWallet[]>([]);
   protected channelForm: PaymentChannelSettings['values'] | null = null;
   protected readonly smsEndpoint = computed(() => this.endpoint('sms'));
   protected readonly webhookEndpoint = computed(() => this.endpoint('webhook'));
 
+  /** External balance of each operator wallet, against what the counter booked since. */
+  protected async loadWallets(): Promise<void> {
+    try {
+      this.wallets.set(
+        await firstValueFrom(
+          this.http.get<MobileMoneyWallet[]>(`${this.env.apiUrl}/v1/payments/wallets`),
+        ),
+      );
+    } catch {
+      this.wallets.set([]);
+    }
+  }
+
+  protected async recordBalance(provider: string): Promise<void> {
+    const answer = prompt(
+      `Solde ${provider.replace('_', ' ')} lu sur l'application de l'opérateur`,
+    );
+    if (answer === null || !answer.trim()) {
+      return;
+    }
+    const cents = this.currency.parse(answer);
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.env.apiUrl}/v1/payments/wallets/${provider}/balance`, {
+          balanceCents: cents,
+        }),
+      );
+      this.toasts.success('Solde enregistré');
+      await this.loadWallets();
+    } catch (error) {
+      this.toasts.error(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Solde non enregistré',
+      );
+    }
+  }
+
   constructor() {
+    void this.loadWallets();
     void this.load();
     this.notifications.start();
     void this.showFeed('UNMATCHED');

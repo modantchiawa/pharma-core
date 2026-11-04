@@ -60,6 +60,18 @@ const PHARMACY_NAV: NavGroup[] = [
         hint: 'F2 pour scanner',
       },
       {
+        path: '/sales/mine',
+        label: 'Mes ventes',
+        icon: 'receipt',
+        permissions: ['SALE_VIEW'],
+      },
+      {
+        path: '/customer-orders',
+        label: 'Bons et commandes',
+        icon: 'boxes',
+        permissions: ['SALE_CREATE', 'SALE_VIEW', 'PROCUREMENT_VIEW'],
+      },
+      {
         path: '/cash',
         label: 'Caisse',
         icon: 'cash',
@@ -69,7 +81,7 @@ const PHARMACY_NAV: NavGroup[] = [
         path: '/cash/journal',
         label: 'Encaissements',
         icon: 'coins',
-        permissions: ['PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW'],
+        permissions: ['PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW', 'SALE_VIEW'],
       },
       {
         path: '/cash/payments',

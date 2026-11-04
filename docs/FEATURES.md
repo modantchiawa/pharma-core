@@ -44,6 +44,13 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | **Facture certifiée DGI (SECeF)** | Obligatoire au Niger pour les assujettis TVA | 🟡 port de certification, file de retry, QR/code sur ticket ; connecteur DGI à réaliser avec les spécifications SECeF |
 | Afficheur client, imprimante étiquettes | Oui | ⬜ phase 2 bis (étiquettes de prix) ; tiroir-caisse ✅ via ESC/POS |
 | Fidélité (points) | Souvent | 🟡 points stockés ; règles d'attribution : phase 2 |
+| **Vente interdite sans session de caisse** ouverte sur le poste : page de vente verrouillée, vente en ligne refusée par le serveur, vente hors ligne mise en revue (réglable) | Oui | ✅ |
+| **Caissier cloisonné** : n'ouvre ni ne clôture la caisse par défaut, ne voit que ses ventes et ses encaissements (« Mes ventes », « Mes encaissements ») ; permission `SALES_VIEW_ALL` pour tout voir | Oui | ✅ |
+| **Archive de clôture** : toutes les opérations de la session (ventes, règlements, annulations, retours, mouvements, créances encaissées) figées à la clôture avec empreinte SHA-256, export Excel | Partiel | ✅ |
+| **Tiers payant au comptoir** : la liste des assureurs de la pharmacie s'ouvre, la prise en charge du client s'enregistre au taux par défaut de l'assureur | Oui | ✅ |
+| **Bons** : produit vendu et payé alors qu'il manque en rayon, remis à l'arrivée (réservé à la réception, client prévenu, remis sans nouveau ticket) ; remboursé par un retour du ticket | Oui | ✅ |
+| **Commandes spéciales** : produit commandé pour un client, ajouté à la fiche de commande, réservé à la réception, réglé au retrait en caisse | Oui | ✅ |
+| **Solde externe des portefeuilles mobile money** : relevé dans les SMS opérateur (« Nouveau solde ») ou saisi, comparé aux encaissements depuis le relevé | Rare | ✅ |
 
 ### Stocks et approvisionnement
 
@@ -56,7 +63,9 @@ Référentiel des fonctions attendues d'un progiciel de gestion d'officine sur l
 | Fiche de commande : **recherche** dans la fiche et **ajout de produits à la main** (produit exceptionnel, commande spéciale, achat en grande quantité) depuis tout le catalogue, fournisseur au choix | Oui | ✅ |
 | **Saisonnalité** : les semaines à venir comparées à l'an dernier (paludisme en saison des pluies, Ramadan, rentrée) relèvent ou abaissent la quantité proposée, motif « saison haute » affiché | Non | ✅ dès un an d'historique |
 | Fournisseurs (grossistes-répartiteurs), références, prix d'achat, colisage, minimum de commande | Oui | ✅ |
-| Envoi de commande : texte WhatsApp / e-mail, impression, CSV | Oui | ✅ WhatsApp (wa.me), e-mail, bon de commande A4 imprimé · 🟡 PDF : phase 2 |
+| Envoi de commande : texte WhatsApp / e-mail, impression, Excel | Oui | ✅ WhatsApp (wa.me), e-mail, bon de commande A4 imprimé, **classeur Excel** · 🟡 PDF : phase 2 |
+| **Commande par centrale** : chaque produit vers son fournisseur préféré, ou vers la **centrale qui a livré le stock écoulé** (provenance des lots vendus) | Partiel | ✅ |
+| **Factures fournisseurs en Excel** : facture du grossiste (.xlsx, CSV) lue pour pré-remplir la réception (quantités, lots, péremptions, prix), facture réceptionnée exportée en Excel pour le comptable | Partiel | ✅ |
 | Génération directe d'une commande par fournisseur depuis la fiche, brouillons mis à jour sans doublon | Partiel | ✅ |
 | Suivi des commandes : retards, livraisons du jour, montant en attente, report de date, solde des reliquats | Partiel | ✅ |
 | Réception de livraison lot par lot, mise à jour des prix, suivi des reliquats | Oui | ✅ depuis la commande, pré-remplie, scan GS1 |

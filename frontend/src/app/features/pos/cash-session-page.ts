@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
+import { downloadFile } from '../../shared/download';
 import {
   CashPolicy,
   CashSessionReport,
@@ -554,6 +555,17 @@ interface SessionSale {
                           @if (r.approvalStatus === 'PENDING') {
                             <span class="badge badge-warning">à approuver</span>
                           }
+                          @if (r.status === 'CLOSED') {
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-sm"
+                              title="Archive de toutes les opérations de la session (Excel)"
+                              data-testid="session-archive"
+                              (click)="$event.stopPropagation(); downloadArchive(r)"
+                            >
+                              <app-icon name="spreadsheet" [size]="15" />Archive
+                            </button>
+                          }
                         </td>
                       </tr>
                     }
@@ -757,6 +769,18 @@ interface SessionSale {
                   name="policyCancel"
                 />
               </label>
+              <label class="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  class="mt-0.5"
+                  [(ngModel)]="policySessionRequired"
+                  name="policySessionRequired"
+                />
+                <span
+                  >Interdire toute vente (et tout ticket) sur un poste dont la caisse n'est pas
+                  ouverte</span
+                >
+              </label>
               <button type="submit" class="btn btn-secondary w-full">Enregistrer les seuils</button>
             </div>
           </form>
@@ -863,6 +887,7 @@ export class CashSessionPage {
   protected readonly policy = signal<CashPolicy>({
     cashDifferenceThresholdCents: 0,
     cancelApprovalThresholdCents: 0,
+    sessionRequired: true,
   });
   protected readonly cancelling = signal<SessionSale | null>(null);
   protected readonly returning = signal<SessionSale | null>(null);
@@ -901,6 +926,7 @@ export class CashSessionPage {
   protected reason = '';
   protected policyDifference = '';
   protected policyCancel = '';
+  protected policySessionRequired = true;
   protected cancelReason = '';
   protected supervisorEmail = '';
   protected supervisorPin = '';
@@ -1095,6 +1121,22 @@ export class CashSessionPage {
     });
   }
 
+  /** Every operation of a closed session, frozen at its closing, as a workbook. */
+  protected async downloadArchive(report: CashSessionReport): Promise<void> {
+    try {
+      await downloadFile(
+        this.http,
+        `${this.apiBase}/v1/cash/sessions/${report.sessionId}/archive/xlsx`,
+        `session-${report.terminalId}-${(report.closedAt ?? report.openedAt).slice(0, 10)}.xlsx`,
+      );
+    } catch (error) {
+      this.error.set(
+        (error as { error?: { detail?: string } }).error?.detail ??
+          'Archive indisponible pour cette session (clôturée avant la mise à jour ?)',
+      );
+    }
+  }
+
   protected async savePolicy(): Promise<void> {
     this.error.set(null);
     try {
@@ -1103,6 +1145,7 @@ export class CashSessionPage {
           this.http.put<CashPolicy>(`${this.apiBase}/v1/cash/policy`, {
             cashDifferenceThresholdCents: this.currency.parse(this.policyDifference),
             cancelApprovalThresholdCents: this.currency.parse(this.policyCancel),
+            sessionRequired: this.policySessionRequired,
           }),
         ),
       );
@@ -1224,6 +1267,7 @@ export class CashSessionPage {
         this.http.get<CashPolicy>(`${this.apiBase}/v1/cash/policy`),
       );
       this.policy.set(policy);
+      this.policySessionRequired = policy.sessionRequired ?? true;
       this.policyDifference = String(
         policy.cashDifferenceThresholdCents / this.currency.minorUnitsPerUnit(),
       );

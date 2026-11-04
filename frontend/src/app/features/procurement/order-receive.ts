@@ -14,6 +14,7 @@ import { firstValueFrom } from 'rxjs';
 import {
   GoodsReceiptRequest,
   GoodsReceiptResult,
+  InvoiceImport,
   PurchaseOrder,
   ReceivingView,
 } from '../../core/api/models';
@@ -28,6 +29,7 @@ import { LocationChip } from '../../shared/ui/location-chip';
 import { ProductThumb } from '../../shared/ui/product-thumb';
 import {
   applyGs1,
+  applyInvoice,
   errorDetail,
   isoToday,
   ReceiptLineDraft,
@@ -74,6 +76,30 @@ import {
           <input class="input" type="date" name="invoiceDate" [(ngModel)]="invoiceDate" />
         </label>
       </div>
+
+      <div
+        class="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-dashed border-line px-3 py-2 text-sm"
+      >
+        <app-icon name="spreadsheet" [size]="16" class="text-muted" />
+        <span class="min-w-0 flex-1">Facture ou bon de livraison du grossiste (Excel, CSV)</span>
+        <label class="btn btn-secondary btn-sm cursor-pointer">
+          <app-icon name="import" [size]="14" />Importer
+          <input
+            type="file"
+            class="sr-only"
+            accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            (change)="importInvoice($event)"
+            data-testid="receive-invoice"
+          />
+        </label>
+      </div>
+      @if (invoiceNotes().length > 0) {
+        <ul class="alert alert-warning list-inside list-disc text-xs" role="status">
+          @for (note of invoiceNotes(); track $index) {
+            <li>{{ note }}</li>
+          }
+        </ul>
+      }
 
       <label class="block">
         <span class="label">Scanner une boîte (DataMatrix GS1)</span>
@@ -235,6 +261,7 @@ export class OrderReceive implements OnInit {
   protected invoiceNumber = '';
   protected invoiceDate = this.today;
   protected scan = '';
+  protected readonly invoiceNotes = signal<string[]>([]);
 
   /** Where each delivered product goes, for whoever puts the boxes away. */
   protected readonly places = computed(() => {
@@ -289,6 +316,41 @@ export class OrderReceive implements OnInit {
 
   protected touch(): void {
     this.revision.update((n) => n + 1);
+  }
+
+  /** Reads the wholesaler's invoice and pre-fills quantities, lots, expiries and prices to check. */
+  protected async importInvoice(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) {
+      return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    this.busy.set(true);
+    try {
+      const invoice = await firstValueFrom(
+        this.http.post<InvoiceImport>(
+          `${this.api}/orders/${this.order().id}/receiving/invoice`,
+          form,
+        ),
+      );
+      if (invoice.missingColumns.length > 0) {
+        this.invoiceNotes.set([`Colonnes introuvables : ${invoice.missingColumns.join(', ')}`]);
+        return;
+      }
+      const result = applyInvoice(this.lines(), invoice, (minor) => this.currency.toUnits(minor));
+      this.invoiceNotes.set(result.notes);
+      this.touch();
+      this.toast.success(
+        `${result.applied} ligne(s) reprise(s) de la facture : vérifiez avant de valider`,
+      );
+    } catch (error) {
+      this.toast.error(errorDetail(error, 'Facture illisible'));
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   protected applyScan(event: Event): void {

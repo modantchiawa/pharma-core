@@ -13,6 +13,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, Observable } from 'rxjs';
 import { PurchaseOrder, PurchaseOrderReceipt } from '../../core/api/models';
+import { downloadFile } from '../../shared/download';
 import { HasPermissionDirective } from '../../core/auth/has-permission.directive';
 import { BrandingService } from '../../core/branding/branding.service';
 import { APP_ENVIRONMENT } from '../../core/config';
@@ -331,6 +332,14 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
                     <button type="button" class="btn btn-secondary btn-sm" (click)="copyText()">
                       <app-icon name="copy" [size]="14" />Copier le texte
                     </button>
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      (click)="downloadWorkbook(o)"
+                      data-testid="order-xlsx"
+                    >
+                      <app-icon name="spreadsheet" [size]="14" />Excel
+                    </button>
                     <button type="button" class="btn btn-secondary btn-sm" (click)="print()">
                       <app-icon name="printer" [size]="14" />Imprimer
                     </button>
@@ -486,11 +495,20 @@ type Mode = 'view' | 'edit' | 'receive' | 'reschedule' | 'close' | 'cancel';
                             · {{ r.lines }} ligne(s) · {{ r.receivedBy ?? '—' }}</span
                           >
                         </span>
-                        <span class="num font-medium">
+                        <span class="num flex items-center gap-2 font-medium">
                           {{ r.totalExclVatCents | money }} HT
                           @if (r.vatCents > 0) {
                             <span class="text-xs text-muted">+ TVA {{ r.vatCents | money }}</span>
                           }
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-icon btn-sm"
+                            title="Facture au format Excel"
+                            aria-label="Facture au format Excel"
+                            (click)="downloadReceipt(r)"
+                          >
+                            <app-icon name="spreadsheet" [size]="15" />
+                          </button>
                         </span>
                       </li>
                     }
@@ -766,6 +784,32 @@ export class OrderDetail {
     const order = await this.load(this.orderId());
     if (order) {
       this.changed.emit(order);
+    }
+  }
+
+  /** The order as an Excel workbook, to send to the wholesaler. */
+  protected async downloadWorkbook(order: PurchaseOrder): Promise<void> {
+    try {
+      await downloadFile(
+        this.http,
+        `${this.api}/orders/${order.id}/xlsx`,
+        `commande-${order.number}.xlsx`,
+      );
+    } catch (error) {
+      this.toast.error(errorDetail(error, 'Export Excel indisponible'));
+    }
+  }
+
+  /** A delivery booked against the order (supplier invoice), for the accountant. */
+  protected async downloadReceipt(receipt: PurchaseOrderReceipt): Promise<void> {
+    try {
+      await downloadFile(
+        this.http,
+        `${this.api}/receipts/${receipt.id}/xlsx`,
+        `facture-${receipt.supplierInvoiceNumber ?? receipt.id.slice(0, 8)}.xlsx`,
+      );
+    } catch (error) {
+      this.toast.error(errorDetail(error, 'Export Excel indisponible'));
     }
   }
 

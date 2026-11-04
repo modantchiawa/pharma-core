@@ -86,9 +86,24 @@ export const routes: Routes = [
           import('./features/pos/cash-session-page').then((m) => m.CashSessionPage),
       },
       {
+        path: 'sales/mine',
+        title: 'Mes ventes',
+        canActivate: [permissionGuard('SALE_VIEW')],
+        loadComponent: () => import('./features/pos/my-sales-page').then((m) => m.MySalesPage),
+      },
+      {
+        path: 'customer-orders',
+        title: 'Bons et commandes clients',
+        canActivate: [permissionGuard('SALE_CREATE', 'SALE_VIEW', 'PROCUREMENT_VIEW')],
+        loadComponent: () =>
+          import('./features/customers/customer-orders-page').then((m) => m.CustomerOrdersPage),
+      },
+      {
         path: 'cash/journal',
         title: 'Encaissements par caisse',
-        canActivate: [permissionGuard('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')],
+        canActivate: [
+          permissionGuard('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW', 'SALE_VIEW'),
+        ],
         loadComponent: () =>
           import('./features/pos/payment-journal-page').then((m) => m.PaymentJournalPage),
       },

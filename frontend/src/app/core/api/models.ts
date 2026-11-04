@@ -74,6 +74,10 @@ export interface SaleLineRequest {
   discountCents: number;
   /** How the patient takes it, when the pharmacist typed it (see shared/posology.ts). */
   posology?: PosologyRequest;
+  /** Units sold and paid now but handed over when the product arrives (a "bon"). */
+  deferredQuantity?: number;
+  /** Special order this line collects (its reserved units go to the sale). */
+  customerOrderId?: string;
 }
 
 export interface PosologyRequest {
@@ -116,6 +120,8 @@ export interface SaleRequest {
   prescription?: PrescriptionRequest;
   /** Contraindications the pharmacist took on at the counter, with their reason. */
   safetyOverrides?: SafetyOverrideRequest[];
+  /** Who to call when the owed units of a bon arrive, for a sale without a customer file. */
+  voucherHolder?: { name: string | null; phone: string | null };
 }
 
 export interface SafetyOverrideRequest {
@@ -690,6 +696,8 @@ export interface ReconciliationLine {
 export interface CashPolicy {
   cashDifferenceThresholdCents: number;
   cancelApprovalThresholdCents: number;
+  /** No sale on a terminal whose drawer is not open (on by default). */
+  sessionRequired: boolean;
 }
 
 export interface PendingPayment {
@@ -1847,4 +1855,113 @@ export interface IssuedIngestToken {
   token: string;
   hint: string;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------- commandes clients (bons, commandes spéciales)
+
+export type CustomerOrderKind = 'VOUCHER' | 'SPECIAL';
+export type CustomerOrderStatus = 'OPEN' | 'READY' | 'DELIVERED' | 'CANCELLED';
+
+export interface CustomerOrder {
+  id: string;
+  number: number;
+  kind: CustomerOrderKind;
+  status: CustomerOrderStatus;
+  customerId: string | null;
+  customerName: string | null;
+  holderName: string | null;
+  holderPhone: string | null;
+  productId: string;
+  designation: string;
+  cip13: string;
+  quantity: number;
+  unitPriceCents: number | null;
+  saleId: string | null;
+  saleTicket: string | null;
+  deliveredSaleId: string | null;
+  purchaseOrderId: string | null;
+  purchaseOrderNumber: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  readyAt: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+}
+
+export interface CustomerOrderSummary {
+  open: number;
+  ready: number;
+  vouchersOpen: number;
+  specialOpen: number;
+}
+
+// ---------------------------------------------------------------- portefeuilles mobile money
+
+export interface MobileMoneyWallet {
+  provider: string;
+  lastBalanceCents: number | null;
+  observedAt: string | null;
+  source: 'SMS' | 'MANUAL' | null;
+  receivedSinceCents: number;
+  paymentsSince: number;
+  expectedBalanceCents: number | null;
+  receivedTodayCents: number;
+}
+
+export interface MobileMoneyBalanceReading {
+  id: string;
+  provider: string;
+  balanceCents: number;
+  source: 'SMS' | 'MANUAL';
+  note: string | null;
+  recordedBy: string | null;
+  observedAt: string;
+}
+
+// ---------------------------------------------------------------- archive de session
+
+export interface SessionArchiveView {
+  contentHash: string;
+  archivedAt: string;
+  intact: boolean;
+  archive: {
+    sessionId: string;
+    terminalId: string;
+    salesCount: number;
+    cancelledCount: number;
+    salesNetCents: number;
+    refundsCents: number;
+    sales: unknown[];
+    returns: unknown[];
+    movements: unknown[];
+    collections: unknown[];
+  };
+}
+
+// ---------------------------------------------------------------- facture fournisseur lue (Excel)
+
+export interface InvoiceImportLine {
+  row: number;
+  productId: string | null;
+  code: string;
+  designation: string;
+  lotNumber: string | null;
+  expiryDate: string | null;
+  quantity: number | null;
+  unitCostCents: number | null;
+  sellingPriceCents: number | null;
+  orderLineNo: number | null;
+  issue: string | null;
+}
+
+export interface InvoiceImport {
+  format: string;
+  headers: string[];
+  missingColumns: string[];
+  lines: InvoiceImportLine[];
+  matched: number;
+  unknown: number;
+  notOrdered: number;
 }
