@@ -13,10 +13,13 @@ import {
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
   Customer,
+  CustomerOrder,
   InsurancePolicy,
+  Insurer,
   MOBILE_MONEY_PROVIDERS,
   PaymentMethod,
   Prescription,
@@ -36,7 +39,7 @@ import { uuidv7 } from '../../core/util/uuid';
 import { parseGs1 } from '../../shared/gs1';
 import { MoneyPipe } from '../../shared/money.pipe';
 import { ToastService } from '../../core/ui/toast.service';
-import { CartStore, discountPercent } from './cart.store';
+import { CartStore, discountPercent, owedQuantity } from './cart.store';
 import { PaperFormat, TerminalTicketRequest } from '../../core/api/models';
 import { PrintSettingsService } from '../../core/printing/print-settings.service';
 import { PAYMENT_LABELS, Receipt, ReceiptData } from './receipt';
@@ -97,10 +100,38 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
     EmptyState,
     MotionFeedback,
     PosologyLabels,
+    RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown)': 'onShortcut($event)' },
+  host: { class: 'relative block lg:h-full', '(document:keydown)': 'onShortcut($event)' },
   template: `
+    @if (saleBlocked()) {
+      <div
+        class="absolute inset-0 z-30 grid place-items-center bg-[var(--surface)]/85 p-4 backdrop-blur-sm print:hidden"
+        role="alertdialog"
+        aria-labelledby="pos-locked-title"
+        data-testid="pos-no-session"
+      >
+        <div class="card max-w-md space-y-4 p-6 text-center">
+          <span class="kpi-icon mx-auto !h-12 !w-12"><app-icon name="lock" [size]="24" /></span>
+          <h2 id="pos-locked-title" class="text-lg font-semibold">Caisse fermée sur ce poste</h2>
+          <p class="text-sm text-muted">
+            Aucune vente ni ticket sans session de caisse ouverte. Demandez à un responsable
+            d'ouvrir la caisse de ce poste avec son fond de caisse.
+          </p>
+          <div class="flex flex-wrap justify-center gap-2">
+            @if (canManageCash()) {
+              <a class="btn btn-primary" routerLink="/cash">
+                <app-icon name="cash" [size]="16" />Ouvrir la caisse
+              </a>
+            }
+            <button type="button" class="btn btn-secondary" (click)="checkCashSession()">
+              <app-icon name="refresh" [size]="16" />Revérifier
+            </button>
+          </div>
+        </div>
+      </div>
+    }
     <div
       class="grid grid-cols-1 gap-4 p-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_400px] lg:p-5 print:hidden"
     >
@@ -174,6 +205,16 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                     >
                       <app-icon name="bellRing" [size]="14" />
                       Prévenir à l'arrivée
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-soft btn-sm"
+                      (mousedown)="$event.stopPropagation(); createSpecialOrder(product)"
+                      title="Commander le produit pour ce client : il sera réservé à la livraison"
+                      data-testid="pos-special-order"
+                    >
+                      <app-icon name="boxes" [size]="14" />
+                      Commande spéciale
                     </button>
                   }
                   <span
@@ -622,6 +663,34 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
                             <app-icon name="pill" [size]="12" />
                             {{ line.posology ? summaryOf(line.posology) : 'Posologie' }}
                           </button>
+                          @if (line.customerOrderId) {
+                            <span class="badge badge-success" data-testid="line-special-order">
+                              <app-icon name="boxes" [size]="12" />Commande spéciale réservée
+                            </span>
+                          } @else if (line.quantity > line.availableQuantity) {
+                            <button
+                              type="button"
+                              class="badge cursor-pointer"
+                              [class.badge-warning]="!line.deferred"
+                              [class.badge-brand]="line.deferred"
+                              (click)="cart.setDeferred(line.productId, !line.deferred)"
+                              [attr.aria-pressed]="!!line.deferred"
+                              data-testid="line-voucher"
+                              [title]="
+                                line.deferred
+                                  ? 'Retirer le bon'
+                                  : 'Vendre les unités manquantes, remises à la livraison'
+                              "
+                            >
+                              <app-icon name="receipt" [size]="12" />
+                              @if (line.deferred) {
+                                Bon : {{ owed(line) }} à livrer
+                              } @else {
+                                {{ line.quantity - line.availableQuantity }} manquant(s) · faire un
+                                bon
+                              }
+                            </button>
+                          }
                         </div>
                       </td>
                       <td>
@@ -855,43 +924,190 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
             }
           </div>
 
-          @if (policies().length > 0) {
-            <fieldset class="panel panel-brand space-y-2 text-sm">
+          @if (policies().length > 0 || insurerPicker()) {
+            <fieldset class="panel panel-brand space-y-2 text-sm" data-testid="pos-third-party">
               <legend class="panel-title">
                 <app-icon name="insurance" [size]="16" />
                 Tiers payant
               </legend>
-              <select
-                class="select"
-                [ngModel]="cart.policy()?.id ?? ''"
-                (ngModelChange)="pickPolicy($event)"
-                aria-label="Police d'assurance"
-              >
-                <option value="">Sans tiers payant</option>
-                @for (p of policies(); track p.id) {
-                  <option [value]="p.id">
-                    {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
-                  </option>
-                }
-              </select>
-              @if (cart.policy(); as policy) {
-                <p class="flex justify-between">
-                  <span class="text-muted"
-                    >Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span
+              @if (insurerPicker()) {
+                <div class="space-y-2" data-testid="insurer-picker">
+                  <p class="text-xs text-muted">Assureurs et mutuelles de la pharmacie</p>
+                  @if (insurers().length === 0) {
+                    <p class="text-xs text-subtle">
+                      Aucun assureur actif : enregistrez-les dans Tiers payant.
+                    </p>
+                  }
+                  @if (!pickedInsurer()) {
+                    <ul class="max-h-48 divide-y overflow-auto rounded-[var(--radius-sm)] border">
+                      @for (insurer of insurers(); track insurer.id) {
+                        <li>
+                          <button
+                            type="button"
+                            class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-[var(--surface-2)]"
+                            (click)="chooseInsurer(insurer)"
+                          >
+                            <span class="font-medium">{{ insurer.details.name }}</span>
+                            <span class="text-xs text-muted"
+                              >{{ insurer.details.defaultCoverageRate }} %</span
+                            >
+                          </button>
+                        </li>
+                      }
+                    </ul>
+                  } @else if (pickedInsurer(); as insurer) {
+                    <p class="font-medium">
+                      {{ insurer.details.name }} · {{ insurer.details.defaultCoverageRate }} %
+                    </p>
+                    <input
+                      class="input"
+                      placeholder="N° d'assuré / de police"
+                      [(ngModel)]="newPolicyNumber"
+                      aria-label="Numéro de police"
+                    />
+                    <input
+                      class="input"
+                      placeholder="Bénéficiaire"
+                      [(ngModel)]="newBeneficiary"
+                      aria-label="Bénéficiaire"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-primary btn-sm w-full"
+                      [disabled]="!newPolicyNumber.trim() || busy()"
+                      (click)="registerPolicy(insurer)"
+                    >
+                      <app-icon name="check" [size]="16" />Enregistrer la prise en charge
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm w-full"
+                    (click)="closeInsurerPicker()"
                   >
-                  <strong class="num">{{ cart.insuredShareCents() | money }}</strong>
-                </p>
-                @if (policy.remainingCeilingCents !== null) {
-                  <p class="text-xs text-subtle">
-                    Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
+                    Fermer
+                  </button>
+                </div>
+              }
+              @if (policies().length > 0) {
+                <select
+                  class="select"
+                  [ngModel]="cart.policy()?.id ?? ''"
+                  (ngModelChange)="pickPolicy($event)"
+                  aria-label="Police d'assurance"
+                >
+                  <option value="">Sans tiers payant</option>
+                  @for (p of policies(); track p.id) {
+                    <option [value]="p.id">
+                      {{ p.insurerName }} · {{ p.coverageRate }} % · {{ p.policyNumber }}
+                    </option>
+                  }
+                </select>
+                @if (cart.policy(); as policy) {
+                  <p class="flex justify-between">
+                    <span class="text-muted"
+                      >Part {{ policy.insurerName }} ({{ policy.coverageRate }} %)</span
+                    >
+                    <strong class="num">{{ cart.insuredShareCents() | money }}</strong>
+                  </p>
+                  @if (policy.remainingCeilingCents !== null) {
+                    <p class="text-xs text-subtle">
+                      Plafond mensuel restant : {{ policy.remainingCeilingCents | money }}
+                    </p>
+                  }
+                  <p class="flex justify-between">
+                    <span class="text-muted">Reste à charge du patient</span>
+                    <strong class="num">{{
+                      cart.netCents() - cart.insuredShareCents() | money
+                    }}</strong>
                   </p>
                 }
-                <p class="flex justify-between">
-                  <span class="text-muted">Reste à charge du patient</span>
-                  <strong class="num">{{
-                    cart.netCents() - cart.insuredShareCents() | money
-                  }}</strong>
+              }
+              @if (!insurerPicker()) {
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm w-full"
+                  (click)="openInsurerPicker()"
+                >
+                  <app-icon name="plus" [size]="14" />Autre assureur
+                </button>
+              }
+            </fieldset>
+          }
+
+          @if (cart.owedLines().length > 0) {
+            <fieldset class="panel space-y-2 text-sm" data-testid="pos-voucher">
+              <legend class="panel-title">
+                <app-icon name="receipt" [size]="16" />
+                Bon : produit dû au client
+              </legend>
+              @for (line of cart.owedLines(); track line.productId) {
+                <p class="flex justify-between gap-2">
+                  <span class="min-w-0 truncate">{{ line.designation }}</span>
+                  <strong class="num">{{ owed(line) }} à livrer</strong>
                 </p>
+              }
+              @if (!cart.customer()) {
+                <input
+                  class="input"
+                  placeholder="Nom sur le bon"
+                  [ngModel]="cart.voucherHolder().name"
+                  (ngModelChange)="
+                    cart.voucherHolder.set({ name: $event, phone: cart.voucherHolder().phone })
+                  "
+                  aria-label="Nom sur le bon"
+                />
+                <input
+                  class="input"
+                  type="tel"
+                  placeholder="Téléphone (obligatoire)"
+                  [ngModel]="cart.voucherHolder().phone"
+                  (ngModelChange)="
+                    cart.voucherHolder.set({ name: cart.voucherHolder().name, phone: $event })
+                  "
+                  aria-label="Téléphone sur le bon"
+                />
+              } @else {
+                <p class="text-xs text-muted">
+                  {{ cart.customer()?.displayName }} sera prévenu(e) à l'arrivée du produit.
+                </p>
+              }
+            </fieldset>
+          }
+
+          @if (readyOrders().length > 0) {
+            <fieldset class="panel panel-brand space-y-2 text-sm" data-testid="pos-ready-orders">
+              <legend class="panel-title">
+                <app-icon name="boxes" [size]="16" />
+                Commandes du client prêtes
+              </legend>
+              @for (order of readyOrders(); track order.id) {
+                <div class="flex items-center justify-between gap-2">
+                  <span class="min-w-0">
+                    <span class="block truncate font-medium">{{ order.designation }}</span>
+                    <span class="text-xs text-muted"
+                      >n° {{ order.number }} · {{ order.quantity }} unité(s) ·
+                      {{ order.kind === 'VOUCHER' ? 'bon déjà payé' : 'commande spéciale' }}</span
+                    >
+                  </span>
+                  @if (order.kind === 'SPECIAL') {
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      (click)="collectOrder(order)"
+                    >
+                      Ajouter
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      (click)="deliverVoucher(order)"
+                    >
+                      Remettre
+                    </button>
+                  }
+                </div>
               }
             </fieldset>
           }
@@ -983,7 +1199,7 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
             </div>
           }
 
-          @if (!cashSessionOpen()) {
+          @if (cashSessionOpen() === false && !sessionRequired()) {
             <div class="alert alert-warning text-xs">
               <app-icon name="alert" [size]="16" />
               <span
@@ -1077,7 +1293,7 @@ const BURST = [0, 45, 90, 135, 180, 225, 270, 315];
           <button
             type="button"
             class="btn btn-primary btn-lg w-full"
-            [disabled]="!cart.canCheckout() || busy() || license.blocked()"
+            [disabled]="!cart.canCheckout() || busy() || license.blocked() || saleBlocked()"
             (click)="checkout()"
           >
             <app-icon name="check" [size]="20" [stroke]="2.25" />
@@ -1432,8 +1648,22 @@ export class PosPage {
   protected readonly customerResults = signal<Customer[]>([]);
   /** Covers and renewable prescriptions of the selected customer. */
   protected readonly policies = signal<InsurancePolicy[]>([]);
+  protected readonly insurers = signal<Insurer[]>([]);
+  protected readonly insurerPicker = signal(false);
+  protected readonly pickedInsurer = signal<Insurer | null>(null);
+  protected newPolicyNumber = '';
+  protected newBeneficiary = '';
+  /** Orders of the selected customer whose product is in and reserved for them. */
+  protected readonly readyOrders = signal<CustomerOrder[]>([]);
   protected readonly prescriptionsOnFile = signal<Prescription[]>([]);
-  protected readonly cashSessionOpen = signal(true);
+  /** Null until known (first check pending, or never checked on this terminal). */
+  protected readonly cashSessionOpen = signal<boolean | null>(null);
+  protected readonly sessionRequired = signal(true);
+  /** No ticket without an open drawer: the whole sale page is locked. */
+  protected readonly saleBlocked = computed(
+    () => this.sessionRequired() && this.cashSessionOpen() === false,
+  );
+  protected readonly canManageCash = computed(() => this.permissions.has('CASH_SESSION_MANAGE'));
   protected readonly results = signal<CachedProduct[]>([]);
   protected readonly placeOf = placeOf;
   protected readonly highlighted = signal(0);
@@ -1567,6 +1797,7 @@ export class PosPage {
   }
 
   private async loadCustomerFiles(customer: Customer, applySingleCover = true): Promise<void> {
+    void this.loadCustomerOrders(customer.id);
     try {
       const [policies, prescriptions] = await Promise.all([
         firstValueFrom(
@@ -1612,23 +1843,46 @@ export class PosPage {
 
   protected clearCustomer(): void {
     this.cart.customer.set(null);
+    this.readyOrders.set([]);
+    this.closeInsurerPicker();
     this.policies.set([]);
     this.prescriptionsOnFile.set([]);
     this.pickPolicy('');
     this.cart.usePrescriptionOnFile(null);
   }
 
-  private async checkCashSession(): Promise<void> {
+  /**
+   * Whether the drawer of this terminal is open, and whether the pharmacy requires it to sell.
+   * The answer is kept on the terminal: offline, the last known state still applies (the
+   * server refuses a live sale without session, and flags a replayed one).
+   */
+  protected async checkCashSession(): Promise<void> {
+    const key = `pharmacore.cash.${this.terminal.terminalId}`;
     try {
-      const response = await firstValueFrom(
-        this.http.get(`${this.env.apiUrl}/v1/cash/sessions/open`, {
-          params: { terminalId: this.terminal.terminalId },
-          observe: 'response',
-        }),
-      );
-      this.cashSessionOpen.set(response.status === 200);
+      const [response, policy] = await Promise.all([
+        firstValueFrom(
+          this.http.get(`${this.env.apiUrl}/v1/cash/sessions/open`, {
+            params: { terminalId: this.terminal.terminalId },
+            observe: 'response',
+          }),
+        ),
+        firstValueFrom(
+          this.http.get<{ sessionRequired?: boolean }>(`${this.env.apiUrl}/v1/cash/policy`),
+        ).catch(() => null),
+      ]);
+      const open = response.status === 200;
+      const required = policy?.sessionRequired ?? this.sessionRequired();
+      this.cashSessionOpen.set(open);
+      this.sessionRequired.set(required);
+      storeSafely(key, JSON.stringify({ open, required }));
     } catch {
-      // Offline: cannot tell, do not nag.
+      // Offline: the last state known on this terminal
+      const cached = readSafely(key);
+      if (cached) {
+        const state = JSON.parse(cached) as { open: boolean; required: boolean };
+        this.cashSessionOpen.set(state.open);
+        this.sessionRequired.set(state.required);
+      }
     }
   }
 
@@ -1693,6 +1947,173 @@ export class PosPage {
       this.message.set(
         (error as { error?: { detail?: string } }).error?.detail ??
           'Demande non enregistrée (serveur injoignable)',
+      );
+    }
+  }
+
+  /** Orders the product for the customer in front of the counter; the next delivery reserves it. */
+  protected async createSpecialOrder(product: CachedProduct): Promise<void> {
+    const customer = this.cart.customer();
+    if (!customer) {
+      return;
+    }
+    const answer = prompt(
+      `Quantité de ${product.designation} à commander pour ${customer.displayName}`,
+      '1',
+    );
+    const quantity = Number(answer);
+    if (!answer || !Number.isInteger(quantity) || quantity <= 0) {
+      return;
+    }
+    try {
+      const order = await firstValueFrom(
+        this.http.post<CustomerOrder>(`${this.env.apiUrl}/v1/customer-orders`, {
+          customerId: customer.id,
+          productId: product.productId,
+          quantity,
+          unitPriceCents: product.unitPriceCents,
+        }),
+      );
+      this.toasts.success(
+        order.status === 'READY'
+          ? `Commande n° ${order.number} : le produit est déjà là et réservé`
+          : `Commande spéciale n° ${order.number} enregistrée : elle s'ajoute à la fiche de commande`,
+      );
+      this.results.set([]);
+      this.term = '';
+      void this.loadCustomerOrders(customer.id);
+    } catch (error) {
+      this.message.set(
+        (error as { error?: { detail?: string } }).error?.detail ??
+          'Commande non enregistrée (serveur injoignable)',
+      );
+    }
+  }
+
+  /** Bons and special orders of the customer whose product has arrived (reserved for them). */
+  private async loadCustomerOrders(customerId: string): Promise<void> {
+    try {
+      const orders = await firstValueFrom(
+        this.http.get<CustomerOrder[]>(`${this.env.apiUrl}/v1/customer-orders`, {
+          params: { customerId, status: 'READY', limit: 20 },
+        }),
+      );
+      this.readyOrders.set(orders);
+    } catch {
+      this.readyOrders.set([]);
+    }
+  }
+
+  /** The customer collects a special order: the reserved units join the basket at today's price. */
+  protected async collectOrder(order: CustomerOrder): Promise<void> {
+    const product = await this.databases.db().products.get(order.productId);
+    if (!product) {
+      this.message.set(
+        `${order.designation} n'est pas encore dans le catalogue de ce poste : resynchronisez`,
+      );
+      return;
+    }
+    try {
+      this.cart.addCustomerOrder(product, order.id, order.quantity);
+      this.readyOrders.update((orders) => orders.filter((o) => o.id !== order.id));
+    } catch (error) {
+      this.message.set((error as Error).message);
+    }
+  }
+
+  /** A bon already paid: the units are handed over now, no new sale. */
+  protected async deliverVoucher(order: CustomerOrder): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.env.apiUrl}/v1/customer-orders/${order.id}/delivery`, {}),
+      );
+      this.toasts.success(
+        `Bon n° ${order.number} remis : ${order.quantity} × ${order.designation}`,
+      );
+      this.readyOrders.update((orders) => orders.filter((o) => o.id !== order.id));
+    } catch (error) {
+      this.message.set(
+        (error as { error?: { detail?: string } }).error?.detail ?? 'Remise non enregistrée',
+      );
+    }
+  }
+
+  protected owed(line: CartLine): number {
+    return owedQuantity(line);
+  }
+
+  // ------------------------------------------------------------------ third-party payers
+
+  /** Lists the pharmacy's insurers when the cashier picks third-party payer. */
+  protected async openInsurerPicker(): Promise<void> {
+    this.pickedInsurer.set(null);
+    this.insurerPicker.set(true);
+    if (this.insurers().length > 0) {
+      return;
+    }
+    try {
+      this.insurers.set(
+        await firstValueFrom(
+          this.http.get<Insurer[]>(`${this.env.apiUrl}/v1/insurers`, {
+            params: { activeOnly: true },
+          }),
+        ),
+      );
+    } catch {
+      this.message.set('Liste des assureurs indisponible (serveur injoignable)');
+    }
+  }
+
+  protected closeInsurerPicker(): void {
+    this.insurerPicker.set(false);
+    this.pickedInsurer.set(null);
+  }
+
+  /** The customer's own cover with this insurer applies at once; otherwise it is registered here. */
+  protected chooseInsurer(insurer: Insurer): void {
+    const existing = this.policies().find((p) => p.insurerId === insurer.id && p.usable);
+    if (existing) {
+      this.pickPolicy(existing.id);
+      this.closeInsurerPicker();
+      return;
+    }
+    const customer = this.cart.customer();
+    if (!customer) {
+      this.message.set(
+        `Tiers payant ${insurer.details.name} : choisissez d'abord le client assuré`,
+      );
+      return;
+    }
+    this.newPolicyNumber = '';
+    this.newBeneficiary = customer.displayName;
+    this.pickedInsurer.set(insurer);
+  }
+
+  protected async registerPolicy(insurer: Insurer): Promise<void> {
+    const customer = this.cart.customer();
+    if (!customer) {
+      return;
+    }
+    try {
+      const policy = await firstValueFrom(
+        this.http.post<InsurancePolicy>(`${this.env.apiUrl}/v1/insurers/${insurer.id}/policies`, {
+          customerId: customer.id,
+          policyNumber: this.newPolicyNumber.trim(),
+          beneficiaryName: this.newBeneficiary.trim() || customer.displayName,
+          coverageRate: insurer.details.defaultCoverageRate,
+          validFrom: new Date().toISOString().slice(0, 10),
+        }),
+      );
+      this.policies.update((list) => [...list.filter((p) => p.id !== policy.id), policy]);
+      this.pickPolicy(policy.id);
+      this.closeInsurerPicker();
+      this.toasts.success(
+        `Prise en charge ${insurer.details.name} enregistrée pour ${customer.displayName}`,
+      );
+    } catch (error) {
+      this.message.set(
+        (error as { error?: { detail?: string } }).error?.detail ??
+          'Prise en charge non enregistrée',
       );
     }
   }
@@ -1767,13 +2188,18 @@ export class PosPage {
       this.cart.applyPolicy(policy);
       return;
     }
+    if (method === 'THIRD_PARTY_PAYER') {
+      // the share is computed from a cover: the list of the pharmacy's insurers opens
+      void this.openInsurerPicker();
+      return;
+    }
     const typed = this.currency.parse(this.amount);
     const cents = typed > 0 ? typed : this.cart.remainingCents();
     const reference = method === 'MOBILE_MONEY' || method === 'CARD' ? this.reference.trim() : '';
     this.cart.addPayment({
       method,
       amountCents: cents,
-      thirdPartyCode: method === 'THIRD_PARTY_PAYER' ? 'AMO' : undefined,
+      thirdPartyCode: undefined,
       provider: method === 'MOBILE_MONEY' ? this.provider : undefined,
       reference: reference || undefined,
     });
@@ -2087,6 +2513,10 @@ export class PosPage {
       this.message.set(refusal);
       return;
     }
+    if (this.saleBlocked()) {
+      this.message.set('Caisse fermée sur ce poste : aucune vente sans session ouverte');
+      return;
+    }
     this.busy.set(true);
     const release = this.idle.hold();
     try {
@@ -2115,6 +2545,8 @@ export class PosPage {
             unitPriceCents: l.unitPriceCents,
             discountCents: l.discountCents,
             posology: l.posology ?? undefined,
+            deferredQuantity: owedQuantity(l) > 0 ? owedQuantity(l) : undefined,
+            customerOrderId: l.customerOrderId ?? undefined,
           })),
           payments: applied.map((p) => ({
             method: p.method,
@@ -2126,6 +2558,13 @@ export class PosPage {
           })),
           prescription: this.cart.requiresPrescription() && prescription ? prescription : undefined,
           safetyOverrides: overrides.length > 0 ? overrides : undefined,
+          voucherHolder:
+            this.cart.owedLines().length > 0 && !this.cart.customer()
+              ? {
+                  name: this.cart.voucherHolder().name.trim() || null,
+                  phone: this.cart.voucherHolder().phone.trim() || null,
+                }
+              : undefined,
         });
       });
       const customer = this.cart.customer();
@@ -2159,6 +2598,8 @@ export class PosPage {
         }
       }
       this.cart.clear();
+      this.readyOrders.set([]);
+      this.closeInsurerPicker();
       this.celebrate({
         ticketNumber,
         netCents: data.netCents,
@@ -2180,5 +2621,21 @@ export class PosPage {
       this.busy.set(false);
       this.searchInput().nativeElement.focus();
     }
+  }
+}
+
+function storeSafely(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // private browsing or storage full: the next check asks the server again
+  }
+}
+
+function readSafely(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
   }
 }

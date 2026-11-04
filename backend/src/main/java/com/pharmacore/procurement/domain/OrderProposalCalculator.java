@@ -63,6 +63,8 @@ public final class OrderProposalCalculator {
         LOST_SALES,
         /** Last year, the coming weeks sold markedly more than the yearly average (malaria season, Ramadan…). */
         SEASONAL_UPTURN,
+        /** Customers wait for the product: bons to hand over and special orders (V25). */
+        CUSTOMER_ORDER,
         /**
          * Added to the sheet by the pharmacist (exceptional need, bulk purchase, special order);
          * never produced by the calculator.

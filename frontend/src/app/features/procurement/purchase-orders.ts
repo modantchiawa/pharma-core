@@ -1,5 +1,6 @@
 import {
   GoodsReceiptResult,
+  InvoiceImport,
   ProposalLine,
   PurchaseOrder,
   PurchaseOrderReceipt,
@@ -393,4 +394,61 @@ export function receivedPercent(ordered: number, received: number): number {
 /** Server error detail (Problem Details) or a fallback sentence. */
 export function errorDetail(error: unknown, fallback: string): string {
   return (error as { error?: { detail?: string } })?.error?.detail ?? fallback;
+}
+
+/** What reading the wholesaler's invoice changed on the receiving form. */
+export interface InvoiceApplication {
+  applied: number;
+  /** Lines of the file left aside, with why (unknown code, not ordered, several lots). */
+  notes: string[];
+}
+
+/**
+ * Pre-fills the receiving form from the wholesaler's invoice read by the server: each matched
+ * product takes the delivered quantity, lot, expiry and purchase price. A product delivered in
+ * several lots keeps the first and adds the quantities (the form holds one lot per product): the
+ * pharmacist is told to check. Lines are changed in place, like the form does.
+ */
+export function applyInvoice(
+  lines: ReceiptLineDraft[],
+  invoice: InvoiceImport,
+  toUnits: (minor: number) => number,
+): InvoiceApplication {
+  const notes: string[] = [];
+  const seen = new Set<string>();
+  let applied = 0;
+  for (const row of invoice.lines) {
+    const line = row.productId ? lines.find((l) => l.productId === row.productId) : undefined;
+    if (!line) {
+      notes.push(
+        `Ligne ${row.row} (${row.designation || row.code}) : ${row.issue ?? 'absente de la commande'}`,
+      );
+      continue;
+    }
+    if (row.quantity === null || row.quantity <= 0) {
+      notes.push(`Ligne ${row.row} (${line.designation}) : quantité illisible`);
+      continue;
+    }
+    if (seen.has(line.productId)) {
+      line.quantity = Number(line.quantity) + row.quantity;
+      notes.push(`${line.designation} : plusieurs lots livrés, vérifiez le lot retenu`);
+      continue;
+    }
+    seen.add(line.productId);
+    line.quantity = row.quantity;
+    if (row.lotNumber) {
+      line.lotNumber = row.lotNumber;
+    }
+    if (row.expiryDate) {
+      line.expiryDate = row.expiryDate;
+    }
+    if (row.unitCostCents !== null) {
+      line.unitCost = String(toUnits(row.unitCostCents));
+    }
+    if (row.sellingPriceCents !== null) {
+      line.sellingPrice = String(toUnits(row.sellingPriceCents));
+    }
+    applied++;
+  }
+  return { applied, notes };
 }

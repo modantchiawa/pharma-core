@@ -2,6 +2,8 @@ package com.pharmacore.procurement.web;
 
 import com.pharmacore.control.application.ReceivingControlService;
 import com.pharmacore.procurement.application.ProcurementService;
+import com.pharmacore.procurement.application.ProcurementSpreadsheets;
+import com.pharmacore.procurement.application.ProcurementSpreadsheets.InvoiceImport;
 import com.pharmacore.procurement.application.ProcurementService.GenerationView;
 import com.pharmacore.procurement.application.ProcurementService.ManualAddition;
 import com.pharmacore.procurement.application.ProcurementService.OrderLineCommand;
@@ -16,6 +18,7 @@ import com.pharmacore.procurement.application.ProcurementService.ReceiptView;
 import com.pharmacore.procurement.application.ProcurementService.ReceivingView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierProductView;
 import com.pharmacore.procurement.application.ProcurementService.SupplierView;
+import com.pharmacore.procurement.domain.OrderRouting;
 import com.pharmacore.procurement.domain.OrderTracking;
 import com.pharmacore.procurement.persistence.PurchaseOrderEntity;
 import com.pharmacore.procurement.persistence.SupplierEntity;
@@ -33,6 +36,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -40,7 +44,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,20 +58,25 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/procurement")
 class ProcurementController {
 
+    static final String XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
     private final ProcurementService procurement;
     private final BrandingService branding;
     private final ReceivingControlService receivingControl;
+    private final ProcurementSpreadsheets spreadsheets;
 
     ProcurementController(ProcurementService procurement, BrandingService branding,
-                          ReceivingControlService receivingControl) {
+                          ReceivingControlService receivingControl, ProcurementSpreadsheets spreadsheets) {
         this.procurement = procurement;
         this.branding = branding;
         this.receivingControl = receivingControl;
+        this.spreadsheets = spreadsheets;
     }
 
     /** Blind receiving: quantities stay with the buyers, so a receiver cannot copy them. */
@@ -110,8 +121,9 @@ class ProcurementController {
     /** The next-day order sheet, computed live from sales velocity, stock, orders and expiries. */
     @GetMapping("/proposal")
     @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
-    ProposalSheet proposal(@RequestParam(required = false) UUID supplierId) {
-        return procurement.proposal(supplierId);
+    ProposalSheet proposal(@RequestParam(required = false) UUID supplierId,
+                           @RequestParam(defaultValue = "PREFERRED") OrderRouting routing) {
+        return procurement.proposal(supplierId, routing);
     }
 
     /** Products to add to the sheet by hand (exceptional need, bulk purchase), searched in the whole catalogue. */
@@ -141,7 +153,8 @@ class ProcurementController {
     @PostMapping("/orders/generate")
     @PreAuthorize("hasAuthority('PROCUREMENT_MANAGE')")
     GenerationView generate(@Valid @RequestBody GenerateRequest request) {
-        return procurement.generate(request.supplierId(), request.overridesByProduct(), request.manualAdditions());
+        return procurement.generate(request.supplierId(), request.overridesByProduct(), request.manualAdditions(),
+                request.routing() == null ? OrderRouting.PREFERRED : request.routing());
     }
 
     @GetMapping("/orders/{orderId}")
@@ -165,6 +178,50 @@ class ProcurementController {
                     "Réception à l'aveugle : seuls les acheteurs voient le détail des quantités commandées");
         }
         return procurement.orderAsText(orderId, branding.current().branding().displayName());
+    }
+
+    /** The order as an Excel workbook, to send to the wholesaler or keep. */
+    @GetMapping(value = "/orders/{orderId}/xlsx", produces = XLSX)
+    @PreAuthorize("hasAuthority('PROCUREMENT_VIEW')")
+    ResponseEntity<byte[]> orderWorkbook(@PathVariable UUID orderId) {
+        if (receivingControl.hideQuantitiesFrom(TenantContext.actor())) {
+            throw new BusinessRuleException("blind-receiving",
+                    "Réception à l'aveugle : seuls les acheteurs voient le détail des quantités commandées");
+        }
+        OrderView order = procurement.order(orderId);
+        return workbook(spreadsheets.orderWorkbook(orderId, branding.current().branding().displayName()),
+                "commande-" + order.number() + ".xlsx");
+    }
+
+    /** A booked delivery (supplier invoice) as an Excel workbook, for the accountant. */
+    @GetMapping(value = "/receipts/{receiptId}/xlsx", produces = XLSX)
+    @PreAuthorize("hasAnyAuthority('PROCUREMENT_VIEW', 'ACCOUNTING_VIEW')")
+    ResponseEntity<byte[]> receiptWorkbook(@PathVariable UUID receiptId) {
+        return workbook(spreadsheets.receiptWorkbook(receiptId), "facture-" + receiptId.toString().substring(0, 8) + ".xlsx");
+    }
+
+    /**
+     * The wholesaler's invoice or delivery note (Excel or CSV) read and matched against the
+     * order; nothing is booked, the receiving form is pre-filled for the pharmacist to check.
+     */
+    @PostMapping(value = "/orders/{orderId}/receiving/invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyAuthority('PROCUREMENT_MANAGE', 'STOCK_RECEIVE')")
+    InvoiceImport readInvoice(@PathVariable UUID orderId, @RequestParam("file") MultipartFile file) throws IOException {
+        return spreadsheets.readInvoice(orderId, file.getBytes(), file.getOriginalFilename());
+    }
+
+    /** Same, for a delivery that came without an order. */
+    @PostMapping(value = "/receiving/invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyAuthority('PROCUREMENT_MANAGE', 'STOCK_RECEIVE')")
+    InvoiceImport readLooseInvoice(@RequestParam("file") MultipartFile file) throws IOException {
+        return spreadsheets.readInvoice(null, file.getBytes(), file.getOriginalFilename());
+    }
+
+    private static ResponseEntity<byte[]> workbook(byte[] content, String fileName) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(XLSX))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(content);
     }
 
     @PostMapping("/orders")
@@ -262,9 +319,11 @@ class ProcurementController {
                             @Size(max = 255) String reason) {
     }
 
+    /** @param routing PREFERRED (default) or ORIGIN: each product back to the wholesaler its sold stock came from */
     record GenerateRequest(UUID supplierId,
                            @Size(max = 1000) List<@Valid QuantityOverride> overrides,
-                           @Size(max = 500) List<@Valid AdditionRequest> additions) {
+                           @Size(max = 500) List<@Valid AdditionRequest> additions,
+                           OrderRouting routing) {
 
         Map<UUID, Integer> overridesByProduct() {
             return overrides == null ? Map.of() : overrides.stream()

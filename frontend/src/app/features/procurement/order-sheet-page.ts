@@ -51,6 +51,7 @@ const REASON_LABELS: Record<string, string> = {
   EXPIRING_REPLACEMENT: 'péremption proche',
   LOST_SALES: 'ventes perdues',
   SEASONAL_UPTURN: 'saison haute',
+  CUSTOMER_ORDER: 'commande client',
   MANUAL: 'ajout manuel',
 };
 
@@ -59,6 +60,7 @@ const REASON_BADGE: Record<string, string> = {
   EXPIRING_REPLACEMENT: 'badge-info',
   LOST_SALES: 'badge-danger',
   SEASONAL_UPTURN: 'badge-warning',
+  CUSTOMER_ORDER: 'badge-success',
   MANUAL: 'badge-brand',
 };
 
@@ -296,6 +298,17 @@ type Tab = 'proposal' | 'orders';
                   @for (s of suppliers(); track s.id) {
                     <option [ngValue]="s.id">{{ s.details.name }}</option>
                   }
+                </select>
+                <select
+                  class="select w-full sm:w-64"
+                  aria-label="Centrale de chaque produit"
+                  title="Fournisseur préféré, ou centrale qui a livré le stock écoulé"
+                  [(ngModel)]="routing"
+                  (ngModelChange)="loadProposal(true)"
+                  data-testid="sheet-routing"
+                >
+                  <option value="PREFERRED">Par fournisseur préféré</option>
+                  <option value="ORIGIN">Par provenance du stock écoulé</option>
                 </select>
                 <button type="button" class="btn btn-secondary" (click)="loadProposal()">
                   <app-icon name="refresh" [size]="16" />
@@ -632,6 +645,8 @@ export class OrderSheetPage {
     generationPreview(this.merged().lines, this.merged().quantities, this.suppliers()),
   );
   protected supplierId: string | null = null;
+  /** PREFERRED supplier, or ORIGIN: the wholesaler whose deliveries were sold over the period. */
+  protected routing: 'PREFERRED' | 'ORIGIN' = 'PREFERRED';
   /** Supplier chosen for each product that has none yet. */
   protected links: Record<string, string | undefined> = {};
 
@@ -772,6 +787,7 @@ export class OrderSheetPage {
   /** Recomputes the sheet; quantities the pharmacist already changed are kept. */
   protected async loadProposal(keepEdits = false): Promise<void> {
     const params: Record<string, string> = this.supplierId ? { supplierId: this.supplierId } : {};
+    params['routing'] = this.routing;
     try {
       const sheet = await firstValueFrom(
         this.http.get<ProposalSheet>(`${this.api}/proposal`, { params }),
@@ -815,6 +831,7 @@ export class OrderSheetPage {
           supplierId: this.supplierId,
           overrides,
           additions,
+          routing: this.routing,
         }),
       );
       // a product added without any supplier stays on the sheet until it is linked to one

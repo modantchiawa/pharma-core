@@ -34,6 +34,20 @@ export interface CartLine {
   imageVersion?: string | null;
   /** How the patient takes it, typed at the counter; printed on the ticket and the label. */
   posology?: Posology | null;
+  /**
+   * "Bon": the units missing on the shelf are sold and paid now, handed over when the product
+   * arrives (see {@link owedQuantity}).
+   */
+  deferred?: boolean;
+  /** Special order this line collects: the units reserved for the customer. */
+  customerOrderId?: string | null;
+}
+
+/** Units of the line owed to the customer on a bon (none unless the line is marked deferred). */
+export function owedQuantity(
+  line: Pick<CartLine, 'quantity' | 'availableQuantity' | 'deferred'>,
+): number {
+  return line.deferred ? Math.max(line.quantity - Math.max(line.availableQuantity, 0), 0) : 0;
 }
 
 export interface CartPayment {
@@ -207,12 +221,19 @@ export class CartStore {
     for (const alert of this.blockingSafety()) {
       issues.push(`${alert.title} : contre-indication à lever par un pharmacien`);
     }
+    if (this.owedLines().length > 0 && !this.customer() && !this.voucherHolder().phone.trim()) {
+      issues.push("Bon : choisissez le client ou notez son téléphone pour le prévenir à l'arrivée");
+    }
     return issues;
   });
 
+  /** Name and phone written on the bon when the sale has no customer file. */
+  readonly voucherHolder = signal<{ name: string; phone: string }>({ name: '', phone: '' });
+  readonly owedLines = computed(() => this.lines().filter((l) => owedQuantity(l) > 0));
+
   readonly stockWarnings = computed(() =>
     this.lines()
-      .filter((l) => l.quantity > l.availableQuantity)
+      .filter((l) => l.quantity > l.availableQuantity && !l.deferred && !l.customerOrderId)
       .map((l) => `${l.designation} : ${l.availableQuantity} en stock connu localement`),
   );
 
@@ -249,6 +270,44 @@ export class CartStore {
         },
       ];
     });
+  }
+
+  /** Marks the units missing on the shelf as owed on a bon (or takes the mark off). */
+  setDeferred(productId: string, deferred: boolean): void {
+    this.lines.update((lines) =>
+      lines.map((l) => (l.productId === productId ? { ...l, deferred } : l)),
+    );
+  }
+
+  /**
+   * Adds the special order a customer comes to collect: its reserved units become the line,
+   * at the price of the day.
+   */
+  addCustomerOrder(product: CachedProduct, orderId: string, quantity: number): void {
+    if (product.unitPriceCents === null) {
+      throw new Error(`${product.designation} n'a pas de prix de vente`);
+    }
+    const price = product.unitPriceCents;
+    this.lines.update((lines) => [
+      ...lines.filter((l) => l.productId !== product.productId),
+      {
+        productId: product.productId,
+        designation: product.designation,
+        cip13: product.cip13,
+        listing: product.listing,
+        dci: product.dci,
+        atcCode: product.atcCode ?? null,
+        vatRate: product.vatRate,
+        unitPriceCents: price,
+        quantity,
+        discountCents: 0,
+        // the reserved units are the customer's: the shelf count does not limit them
+        availableQuantity: Math.max(product.availableQuantity, 0) + quantity,
+        place: placeOf(product),
+        imageVersion: product.imageVersion ?? null,
+        customerOrderId: orderId,
+      },
+    ]);
   }
 
   setQuantity(productId: string, quantity: number): void {
@@ -399,6 +458,7 @@ export class CartStore {
     this.prescriptionOnFile.set(null);
     this.safetyAlerts.set([]);
     this.safetyOverrides.set(new Map());
+    this.voucherHolder.set({ name: '', phone: '' });
   }
 }
 

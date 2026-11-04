@@ -33,13 +33,16 @@ final class SaleRequests {
                        @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines,
                        @NotNull @Size(max = 10) List<@Valid PaymentRequest> payments,
                        @Valid PrescriptionRequest prescription,
-                       @Size(max = 50) List<@Valid SafetyOverrideRequest> safetyOverrides) {
+                       @Size(max = 50) List<@Valid SafetyOverrideRequest> safetyOverrides,
+                       @Valid VoucherHolderRequest voucherHolder) {
 
         SaleDraft toDraft(SaleOrigin origin) {
             return new SaleDraft(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId,
                     lines.stream().map(line -> new SaleDraft.Line(line.productId(), line.quantity(),
                             line.unitPriceCents(), line.discountCents(),
-                            line.posology() == null ? null : line.posology().toPosology())).toList(),
+                            line.posology() == null ? null : line.posology().toPosology(),
+                            line.deferredQuantity() == null ? 0 : line.deferredQuantity(),
+                            line.customerOrderId())).toList(),
                     payments.stream().map(payment -> new SaleDraft.Payment(payment.method(), payment.amountCents(),
                             payment.thirdPartyCode(), payment.reference(), payment.provider(), payment.policyId()))
                             .toList(),
@@ -47,8 +50,13 @@ final class SaleRequests {
                             prescription.prescriberRpps(), prescription.patientReference(),
                             prescription.prescriptionId()),
                     safetyOverrides == null ? List.of() : safetyOverrides.stream()
-                            .map(o -> new SaleDraft.SafetyOverride(o.alertKey(), o.reason())).toList());
+                            .map(o -> new SaleDraft.SafetyOverride(o.alertKey(), o.reason())).toList(),
+                    voucherHolder == null ? null : new SaleDraft.VoucherHolder(voucherHolder.name(), voucherHolder.phone()));
         }
+    }
+
+    /** Name and phone written on a bon when the sale has no customer file. */
+    record VoucherHolderRequest(@Size(max = 150) String name, @Size(max = 30) String phone) {
     }
 
     /** The pharmacist dispensed despite an alert the terminal showed (see {@code /api/v1/safety/check}). */
@@ -60,7 +68,9 @@ final class SaleRequests {
                        @Positive int quantity,
                        @PositiveOrZero long unitPriceCents,
                        @PositiveOrZero long discountCents,
-                       @Valid PosologyRequest posology) {
+                       @Valid PosologyRequest posology,
+                       @PositiveOrZero Integer deferredQuantity,
+                       UUID customerOrderId) {
     }
 
     /** Units at each moment of the day, duration, food, free instruction (all optional but one). */

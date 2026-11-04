@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { ProposalLine, PurchaseOrder, ReceivingView, Supplier } from '../../core/api/models';
+import {
+  InvoiceImport,
+  ProposalLine,
+  PurchaseOrder,
+  ReceivingView,
+  Supplier,
+} from '../../core/api/models';
 import { parseGs1 } from '../../shared/gs1';
 import {
   applyGs1,
+  applyInvoice,
   daysLate,
   generationPreview,
   matchesProduct,
@@ -373,5 +380,103 @@ describe('purchase order helpers', () => {
     expect(matchesProduct(line, 'eff 1g')).toBe(true);
     expect(matchesProduct(line, 'doliprane')).toBe(false);
     expect(matchesProduct(line, '34009352')).toBe(true);
+  });
+});
+
+describe('wholesaler invoice read back', () => {
+  const draft = () => [
+    {
+      productId: 'p-1',
+      designation: 'DOLIPRANE',
+      cip13: '3400930000001',
+      remaining: 10,
+      quantity: 10,
+      lotNumber: '',
+      expiryDate: '',
+      unitCost: '100',
+      vatRate: '0',
+      sellingPrice: '',
+    },
+    {
+      productId: 'p-2',
+      designation: 'AMOXICILLINE',
+      cip13: '3400930000002',
+      remaining: 5,
+      quantity: 5,
+      lotNumber: '',
+      expiryDate: '',
+      unitCost: '300',
+      vatRate: '0',
+      sellingPrice: '',
+    },
+  ];
+  const row = (overrides: Partial<InvoiceImport['lines'][number]>) => ({
+    row: 1,
+    productId: 'p-1',
+    code: '3400930000001',
+    designation: 'DOLIPRANE',
+    lotNumber: 'L-1',
+    expiryDate: '2028-01-31',
+    quantity: 8,
+    unitCostCents: 120,
+    sellingPriceCents: null,
+    orderLineNo: 1,
+    issue: null,
+    ...overrides,
+  });
+
+  it('fills quantity, lot, expiry and price of the matched products', () => {
+    const lines = draft();
+    const invoice: InvoiceImport = {
+      format: 'XLSX',
+      headers: [],
+      missingColumns: [],
+      matched: 1,
+      unknown: 1,
+      notOrdered: 0,
+      lines: [
+        row({}),
+        row({
+          row: 2,
+          productId: null,
+          code: '999',
+          designation: 'INCONNU',
+          issue: 'Code inconnu',
+        }),
+      ],
+    };
+
+    const result = applyInvoice(lines, invoice, (minor) => minor);
+
+    expect(result.applied).toBe(1);
+    expect(lines[0]).toMatchObject({
+      quantity: 8,
+      lotNumber: 'L-1',
+      expiryDate: '2028-01-31',
+      unitCost: '120',
+    });
+    expect(lines[1].quantity).toBe(5);
+    expect(result.notes).toEqual(['Ligne 2 (INCONNU) : Code inconnu']);
+  });
+
+  it('adds the quantities of a product delivered in several lots and asks to check', () => {
+    const lines = draft();
+    const result = applyInvoice(
+      lines,
+      {
+        format: 'CSV',
+        headers: [],
+        missingColumns: [],
+        matched: 2,
+        unknown: 0,
+        notOrdered: 0,
+        lines: [row({}), row({ row: 2, lotNumber: 'L-2', quantity: 2 })],
+      },
+      (minor) => minor,
+    );
+
+    expect(lines[0].quantity).toBe(10);
+    expect(lines[0].lotNumber).toBe('L-1');
+    expect(result.notes).toEqual(['DOLIPRANE : plusieurs lots livrés, vérifiez le lot retenu']);
   });
 });

@@ -23,6 +23,23 @@ class ColumnMappingTest {
     }
 
     @Test
+    void readsAWholesalerInvoiceLikeLaborex() {
+        var mapping = ColumnMapping.detect(ImportKind.STOCK, List.of("CIP", "Qt/Cd", "Qt/Lv", "Designation", "N° Lot",
+                "Perempt", "Article", "PU HT", "PU Net", "Montant HT", "TVA", "Public"));
+
+        assertThat(mapping.column("code")).contains(0);
+        // the delivered quantity, not the ordered one
+        assertThat(mapping.column("quantity")).contains(2);
+        assertThat(mapping.column("designation")).contains(3);
+        assertThat(mapping.column("lot")).contains(4);
+        assertThat(mapping.column("expiry")).contains(5);
+        // the net price after the wholesaler's discount
+        assertThat(mapping.column("unitCost")).contains(8);
+        assertThat(mapping.column("sellingPrice")).contains(11);
+        assertThat(mapping.missingRequired(ImportKind.STOCK)).isEmpty();
+    }
+
+    @Test
     void reportsMissingRequiredColumnsAndNeverMapsOneColumnTwice() {
         var mapping = ColumnMapping.detect(ImportKind.PRODUCTS, List.of("Prix", "Observations"));
         assertThat(mapping.column("sellingPrice")).contains(0);

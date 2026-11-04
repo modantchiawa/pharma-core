@@ -21,11 +21,11 @@ public enum PredefinedRole {
     PREPARATEUR("Préparateur", new BigDecimal("5"), EnumSet.of(
             SALE_CREATE, SALE_VIEW, PRESCRIPTION_DISPENSE, STOCK_VIEW, STOCK_RECEIVE,
             NETWORK_STOCK_QUERY, NETWORK_CHAT, GUARD_VIEW, CASH_SESSION_MANAGE, CUSTOMER_MANAGE,
-            STOCK_COUNT, INSURANCE_VIEW)),
+            STOCK_COUNT, INSURANCE_VIEW, SALES_VIEW_ALL)),
 
+    /** Sees only their own sales and receipts; the drawer is opened and closed by a manager (V25). */
     CAISSIER("Caissier / Vendeur", new BigDecimal("2"), EnumSet.of(
-            SALE_CREATE, SALE_VIEW, STOCK_VIEW, GUARD_VIEW, CASH_SESSION_MANAGE, CUSTOMER_MANAGE,
-            INSURANCE_VIEW)),
+            SALE_CREATE, SALE_VIEW, STOCK_VIEW, GUARD_VIEW, CUSTOMER_MANAGE, INSURANCE_VIEW)),
 
     GESTIONNAIRE_STOCK("Gestionnaire de stock", BigDecimal.ZERO, EnumSet.of(
             STOCK_VIEW, STOCK_RECEIVE, STOCK_ADJUST, STOCK_PRICE_MANAGE, NETWORK_STOCK_QUERY,

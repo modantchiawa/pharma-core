@@ -1,5 +1,11 @@
 package com.pharmacore.support;
 
+import com.pharmacore.shared.context.Actor;
+import com.pharmacore.shared.context.RequestContext;
+import com.pharmacore.shared.context.TenantContext;
+import com.pharmacore.shared.context.TenantId;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -63,6 +69,12 @@ public abstract class IntegrationTest {
     @Autowired
     protected MockMvc mvc;
 
+    @Autowired
+    private JdbcClient supportJdbc;
+
+    @Autowired
+    private TransactionTemplate supportTx;
+
     protected final String platformToken = JWT.platformOperator("ops-1");
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -90,7 +102,22 @@ public abstract class IntegrationTest {
                 .andExpect(status().isCreated());
         UUID tenantId = UUID.fromString(read(result, "$.id"));
         String temporary = read(result, "$.ownerTemporaryPassword");
-        return new Pharmacy(tenantId, slug, email, temporary, login(slug, email, temporary));
+        String token = login(slug, email, temporary);
+        // Most scenarios sell without going through the drawer: the open-session rule (on for a
+        // real pharmacy) is lifted here and exercised by the tests that open a session themselves
+        requireCashSession(tenantId, false);
+        return new Pharmacy(tenantId, slug, email, temporary, token);
+    }
+
+    /**
+     * Turns the "no sale without an open cash session" rule on or off for the pharmacy. Written
+     * straight to its settings (as a system process), so the fixture leaves no trace in the audit.
+     */
+    protected void requireCashSession(UUID tenantId, boolean required) {
+        var context = RequestContext.of(Actor.SystemProcess.forTenant("test-fixture", new TenantId(tenantId)));
+        TenantContext.run(context, () -> supportTx.executeWithoutResult(status -> supportJdbc.sql(
+                        "UPDATE pharmacy_config SET cash_session_required = :required WHERE tenant_id = :tenant")
+                .param("required", required).param("tenant", tenantId).update()));
     }
 
     /** Local (offline-capable) authentication, exactly as the PWA does it. */

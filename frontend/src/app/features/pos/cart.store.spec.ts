@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PermissionService } from '../../core/auth/permission.service';
 import { CachedProduct } from '../../core/offline/pos-database';
-import { CartStore } from './cart.store';
+import { CartStore, owedQuantity } from './cart.store';
 
 function product(overrides: Partial<CachedProduct> = {}): CachedProduct {
   return {
@@ -164,5 +164,36 @@ describe('CartStore', () => {
     cart.add(product({ availableQuantity: 1 }), 3);
 
     expect(cart.stockWarnings()).toHaveLength(1);
+  });
+
+  it('leaves the missing units owed on a bon, with a way to reach the customer', () => {
+    const cart = TestBed.inject(CartStore);
+    cart.add(product({ availableQuantity: 1 }), 3);
+    expect(cart.owedLines()).toHaveLength(0);
+
+    cart.setDeferred('p-1', true);
+    expect(owedQuantity(cart.lines()[0])).toBe(2);
+    expect(cart.stockWarnings()).toHaveLength(0);
+    // the whole line is still paid now
+    expect(cart.netCents()).toBe(750);
+    cart.addPayment({ method: 'CASH', amountCents: 750 });
+    // nobody to call when the product arrives: the sale waits
+    expect(cart.canCheckout()).toBe(false);
+    cart.voucherHolder.set({ name: 'Awa', phone: '90112233' });
+    expect(cart.canCheckout()).toBe(true);
+
+    cart.clear();
+    expect(cart.voucherHolder()).toEqual({ name: '', phone: '' });
+  });
+
+  it('collects a special order with its reserved units', () => {
+    const cart = TestBed.inject(CartStore);
+    cart.addCustomerOrder(product({ availableQuantity: 0 }), 'order-1', 2);
+
+    const line = cart.lines()[0];
+    expect(line.customerOrderId).toBe('order-1');
+    expect(line.quantity).toBe(2);
+    expect(cart.stockWarnings()).toHaveLength(0);
+    expect(owedQuantity(line)).toBe(0);
   });
 });

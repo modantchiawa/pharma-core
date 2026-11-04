@@ -12,6 +12,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { PaymentCategoryTotal, PaymentJournal, PaymentJournalEntry } from '../../core/api/models';
+import { PermissionService } from '../../core/auth/permission.service';
 import { APP_ENVIRONMENT } from '../../core/config';
 import { ToastService } from '../../core/ui/toast.service';
 import { MoneyPipe } from '../../shared/money.pipe';
@@ -53,7 +54,9 @@ const STATUS_BADGES: Record<
     <div class="page animate-in">
       <header class="page-header">
         <div>
-          <h1 class="page-title">Encaissements par caisse</h1>
+          <h1 class="page-title">
+            {{ seesAll() ? 'Encaissements par caisse' : 'Mes encaissements' }}
+          </h1>
           <p class="page-subtitle">
             Le total et les transactions de chaque mode de paiement : espèces, MyNITA, Airtel Money,
             carte…
@@ -318,6 +321,14 @@ export class PaymentJournalPage {
   private readonly http = inject(HttpClient);
   private readonly api = `${inject(APP_ENVIRONMENT).apiUrl}/v1/payments/journal`;
   private readonly toast = inject(ToastService);
+  private readonly permissions = inject(PermissionService);
+  /** A seller without SALES_VIEW_ALL receives only the receipts of their own sales. */
+  protected readonly seesAll = computed(
+    () =>
+      this.permissions.has('SALES_VIEW_ALL') ||
+      this.permissions.has('PAYMENT_RECONCILE') ||
+      this.permissions.has('REPORT_VIEW'),
+  );
 
   /** Query parameters (router input binding). */
   readonly date = input<string>();

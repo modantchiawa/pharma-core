@@ -55,5 +55,7 @@ public enum Permission {
     /** See and send the patient follow-up messages (V22). */
     FOLLOWUP_VIEW,
     /** Settings of the patient follow-up and of the evening digest (V22). */
-    FOLLOWUP_SETTINGS
+    FOLLOWUP_SETTINGS,
+    /** See the sales and receipts of every seller; without it, a seller sees only their own (V25). */
+    SALES_VIEW_ALL
 }

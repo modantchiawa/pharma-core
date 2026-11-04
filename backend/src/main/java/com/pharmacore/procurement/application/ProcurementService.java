@@ -7,10 +7,12 @@ import com.pharmacore.control.application.ReceivingControlService;
 import com.pharmacore.inventory.application.StockService;
 import com.pharmacore.inventory.application.TenantCalendar;
 import com.pharmacore.inventory.domain.ProductImageRules;
+import com.pharmacore.customerorder.application.CustomerOrderService;
 import com.pharmacore.procurement.domain.OrderGrouping;
 import com.pharmacore.procurement.domain.OrderProposalCalculator;
 import com.pharmacore.procurement.domain.OrderProposalCalculator.Input;
 import com.pharmacore.procurement.domain.OrderProposalCalculator.Proposal;
+import com.pharmacore.procurement.domain.OrderRouting;
 import com.pharmacore.procurement.domain.OrderTracking;
 import com.pharmacore.procurement.persistence.PurchaseOrderRepository;
 import com.pharmacore.procurement.persistence.SupplierProductRepository;
@@ -66,6 +68,7 @@ public class ProcurementService {
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final EntityManager entityManager;
+    private final CustomerOrderService customerOrders;
     private final ReceivingControlService receivingControl;
     private final Clock clock;
 
@@ -73,7 +76,9 @@ public class ProcurementService {
                               PurchaseOrderRepository orders,
                               StockService stock, AccountingPoster accounting, TenantSequenceRepository sequences,
                               TenantCalendar calendar, AuditTrail audit, JdbcClient jdbc, EntityManager entityManager,
-                              ReceivingControlService receivingControl, Clock clock) {
+                              ReceivingControlService receivingControl, Clock clock,
+                              CustomerOrderService customerOrders) {
+        this.customerOrders = customerOrders;
         this.entityManager = entityManager;
         this.receivingControl = receivingControl;
         this.suppliers = suppliers;
@@ -152,12 +157,15 @@ public class ProcurementService {
 
     // ------------------------------------------------------------------ proposal
 
-    /** @param seasonalFactor the coming weeks last year against the yearly average (1 = unknown or flat) */
+    /**
+     * @param seasonalFactor the coming weeks last year against the yearly average (1 = unknown or flat)
+     * @param routing        how the supplier was chosen (ORIGIN: provenance of the stock sold)
+     */
     public record ProposalLine(UUID productId, String cip13, String designation, UUID supplierId, String supplierName,
                                int available, int onOrder, int expiringSoon, long soldLastPeriod, long shortfall,
                                double dailyDemand, int targetStock, int suggestedQuantity, int packSize,
                                Long purchasePriceCents, List<OrderProposalCalculator.Reason> reasons,
-                               double seasonalFactor) {
+                               double seasonalFactor, OrderRouting routing) {
     }
 
     /** The coming weeks, one year ago, compared with the twelve months around them. */
@@ -187,7 +195,17 @@ public class ProcurementService {
      */
     @Transactional(readOnly = true)
     public ProposalSheet proposal(UUID supplierId) {
+        return proposal(supplierId, OrderRouting.PREFERRED);
+    }
+
+    /**
+     * @param routing {@link OrderRouting#ORIGIN} sends each product back to the wholesaler whose
+     *                lots were sold over the period (the provenance of the stock that ran out)
+     */
+    @Transactional(readOnly = true)
+    public ProposalSheet proposal(UUID supplierId, OrderRouting routing) {
         LocalDate today = calendar.today();
+        Map<UUID, Integer> awaited = customerOrders.awaitedByProduct();
         Instant periodStart = today.minusDays(VELOCITY_PERIOD_DAYS).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
         LocalDate windowStart = today.plusDays(1).minusYears(1);
         Instant seasonStart = windowStart.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
@@ -200,6 +218,35 @@ public class ProcurementService {
                                    s.lead_time_days, sp.pack_size, sp.purchase_price_cents
                             FROM supplier_product sp JOIN supplier s ON s.id = sp.supplier_id AND s.active
                             ORDER BY sp.product_id, sp.preferred DESC, sp.last_purchase_at DESC NULLS LAST
+                        ),
+                        -- where the units sold over the period came from: lot -> delivery -> supplier
+                        origin AS (
+                            SELECT DISTINCT ON (product_id) product_id, supplier_id
+                            FROM (
+                                SELECT l.product_id, g.supplier_id, sum(a.quantity) AS qty
+                                FROM sale_line_allocation a
+                                JOIN sale_line l ON l.id = a.sale_line_id
+                                JOIN sale s ON s.id = l.sale_id
+                                JOIN LATERAL (
+                                    SELECT gr.supplier_id FROM goods_receipt_line grl
+                                    JOIN goods_receipt gr ON gr.id = grl.goods_receipt_id
+                                    WHERE grl.lot_id = a.lot_id
+                                    ORDER BY gr.received_at DESC LIMIT 1
+                                ) g ON true
+                                JOIN supplier sup ON sup.id = g.supplier_id AND sup.active
+                                WHERE s.tenant_id = :tenant AND s.status = 'COMPLETED' AND s.occurred_at >= :since
+                                GROUP BY l.product_id, g.supplier_id
+                            ) traced
+                            ORDER BY product_id, qty DESC, supplier_id
+                        ),
+                        routed AS (
+                            SELECT st.product_id,
+                                   coalesce(CASE WHEN :byOrigin THEN origin.supplier_id END, pref.supplier_id) AS supplier_id,
+                                   (:byOrigin AND origin.supplier_id IS NOT NULL) AS by_origin
+                            FROM stock st
+                            LEFT JOIN pref ON pref.product_id = st.product_id
+                            LEFT JOIN origin ON origin.product_id = st.product_id
+                            WHERE st.tenant_id = :tenant
                         ),
                         sold AS (
                             SELECT l.product_id, sum(l.quantity) AS qty
@@ -231,14 +278,19 @@ public class ProcurementService {
                         )
                         SELECT st.product_id, p.cip13, p.designation, st.reorder_threshold, st.reorder_quantity,
                                st.coverage_days, st.safety_days, st.reserved_quantity, st.shortfall_quantity,
-                               pref.supplier_id, pref.supplier_name, coalesce(pref.lead_time_days, 1) AS lead_time_days,
-                               coalesce(pref.pack_size, 1) AS pack_size, pref.purchase_price_cents,
+                               r.supplier_id, rs.name AS supplier_name, coalesce(rs.lead_time_days, 1) AS lead_time_days,
+                               coalesce(rsp.pack_size, 1) AS pack_size,
+                               coalesce(rsp.purchase_price_cents, pref.purchase_price_cents) AS purchase_price_cents,
+                               coalesce(r.by_origin, false) AS by_origin,
                                coalesce(sold.qty, 0) AS sold, coalesce(lost.qty, 0) AS lost, coalesce(ordered.qty, 0) AS on_order,
                                coalesce(l.sellable, 0) AS sellable, coalesce(l.expiring, 0) AS expiring,
                                coalesce(season.window_qty, 0) AS season_window, coalesce(season.year_qty, 0) AS season_year
                         FROM stock st
                         JOIN product p ON p.id = st.product_id AND p.active
                         LEFT JOIN pref ON pref.product_id = st.product_id
+                        LEFT JOIN routed r ON r.product_id = st.product_id
+                        LEFT JOIN supplier rs ON rs.id = r.supplier_id
+                        LEFT JOIN supplier_product rsp ON rsp.supplier_id = r.supplier_id AND rsp.product_id = st.product_id
                         LEFT JOIN sold ON sold.product_id = st.product_id
                         LEFT JOIN lost ON lost.product_id = st.product_id
                         LEFT JOIN ordered ON ordered.product_id = st.product_id
@@ -246,14 +298,15 @@ public class ProcurementService {
                         LEFT JOIN LATERAL (
                             SELECT sum(quantity) FILTER (WHERE expiry_date > :today::date) AS sellable,
                                    sum(quantity) FILTER (WHERE expiry_date > :today::date
-                                        AND expiry_date <= :today::date + (coalesce(pref.lead_time_days, 1) + st.coverage_days) * interval '1 day') AS expiring
+                                        AND expiry_date <= :today::date + (coalesce(rs.lead_time_days, 1) + st.coverage_days) * interval '1 day') AS expiring
                             FROM stock_lot WHERE stock_id = st.id AND quantity > 0
                         ) l ON true
                         WHERE st.tenant_id = :tenant AND NOT st.exclude_from_ordering
-                          AND (:supplier::uuid IS NULL OR pref.supplier_id = :supplier::uuid)
+                          AND (:supplier::uuid IS NULL OR r.supplier_id = :supplier::uuid)
                         ORDER BY p.designation""")
                 .param("tenant", TenantContext.requireTenant().value())
                 .param("supplier", supplierId)
+                .param("byOrigin", routing == OrderRouting.ORIGIN)
                 .param("since", Timestamp.from(periodStart))
                 .param("today", Date.valueOf(today))
                 .param("seasonStart", Timestamp.from(seasonStart))
@@ -274,16 +327,38 @@ public class ProcurementService {
                             rs.getString("supplier_name"), available, rs.getInt("on_order"), rs.getInt("expiring"),
                             rs.getLong("sold"), rs.getLong("lost"), proposal.dailyDemand(), proposal.targetStock(),
                             proposal.quantity(), packSize, (Long) rs.getObject("purchase_price_cents"),
-                            proposal.reasons(), seasonalFactor);
+                            proposal.reasons(), seasonalFactor,
+                            rs.getBoolean("by_origin") ? OrderRouting.ORIGIN : OrderRouting.PREFERRED);
                 })
                 .list()
                 .stream()
+                .map(line -> withCustomerOrders(line, awaited.getOrDefault(line.productId(), 0)))
                 .filter(line -> line.suggestedQuantity() > 0)
                 .toList();
         long total = lines.stream()
                 .mapToLong(l -> l.purchasePriceCents() == null ? 0 : l.purchasePriceCents() * l.suggestedQuantity())
                 .sum();
         return new ProposalSheet(today.plusDays(1), VELOCITY_PERIOD_DAYS, lines, total);
+    }
+
+    /**
+     * Customers waiting for the product (bons, special orders) add to the suggestion what the
+     * supplier orders already on the way do not cover, rounded up to the pack.
+     */
+    public static ProposalLine withCustomerOrders(ProposalLine line, int awaited) {
+        int missing = awaited - line.onOrder();
+        if (missing <= 0) {
+            return line;
+        }
+        int pack = Math.max(line.packSize(), 1);
+        int extra = (missing + pack - 1) / pack * pack;
+        var reasons = new ArrayList<>(line.reasons());
+        reasons.add(OrderProposalCalculator.Reason.CUSTOMER_ORDER);
+        return new ProposalLine(line.productId(), line.cip13(), line.designation(), line.supplierId(),
+                line.supplierName(), line.available(), line.onOrder(), line.expiringSoon(), line.soldLastPeriod(),
+                line.shortfall(), line.dailyDemand(), line.targetStock(), line.suggestedQuantity() + extra,
+                line.packSize(), line.purchasePriceCents(), List.copyOf(reasons), line.seasonalFactor(),
+                line.routing());
     }
 
     /**
@@ -354,7 +429,7 @@ public class ProcurementService {
                             rs.getString("supplier_name"), rs.getInt("available"), rs.getInt("on_order"), 0, sold, 0,
                             (double) sold / VELOCITY_PERIOD_DAYS, 0, 0, rs.getInt("pack_size"),
                             (Long) rs.getObject("purchase_price_cents"),
-                            List.of(OrderProposalCalculator.Reason.MANUAL), 1.0);
+                            List.of(OrderProposalCalculator.Reason.MANUAL), 1.0, OrderRouting.PREFERRED);
                 })
                 .list();
     }
@@ -455,12 +530,19 @@ public class ProcurementService {
 
     @Transactional
     public GenerationView generate(UUID supplierId, Map<UUID, Integer> overrides, List<ManualAddition> additions) {
+        return generate(supplierId, overrides, additions, OrderRouting.PREFERRED);
+    }
+
+    /** @param routing how each product is assigned to a wholesaler (preferred supplier or provenance) */
+    @Transactional
+    public GenerationView generate(UUID supplierId, Map<UUID, Integer> overrides, List<ManualAddition> additions,
+                                   OrderRouting routing) {
         UUID tenant = TenantContext.requireTenant().value();
         // Two pharmacists generating at the same time must not each create a draft for the same supplier
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 7342))")
                 .param("key", tenant + ":purchase-order-generation")
                 .query((RowCallbackHandler) rs -> { });
-        ProposalSheet sheet = proposal(supplierId);
+        ProposalSheet sheet = proposal(supplierId, routing);
         Map<UUID, ProposalLine> proposed = new LinkedHashMap<>();
         sheet.lines().forEach(line -> proposed.put(line.productId(), line));
         Map<UUID, ManualAddition> manual = new LinkedHashMap<>();
@@ -865,6 +947,7 @@ public class ProcurementService {
             case EXPIRING_REPLACEMENT -> "péremption proche";
             case LOST_SALES -> "ventes perdues";
             case SEASONAL_UPTURN -> "saison haute";
+            case CUSTOMER_ORDER -> "commande client";
             case MANUAL -> "ajout manuel";
         }).collect(Collectors.joining(", "));
     }

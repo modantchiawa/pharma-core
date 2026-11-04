@@ -34,6 +34,11 @@ public final class PaymentSmsParser {
     private static final Pattern OUTGOING = Pattern.compile(
             "(VOUS AVEZ (ENVOYE|TRANSFERE|PAYE|RETIRE|ACHETE)|RETRAIT|ENVOI DE|TRANSFERT VERS|SENT TO|WITHDRAW|DEBITE|VOTRE SOLDE EST|ECHEC|FAILED|ANNUL)");
 
+    /** The wording that announces the wallet balance ("Nouveau solde : 125 000 FCFA", "Votre solde est de…"). */
+    private static final Pattern BALANCE = Pattern.compile(
+            "\\b(?:NOUVEAU SOLDE|NOUV\\.? SOLDE|SOLDE(?: DISPONIBLE| ACTUEL| PRINCIPAL| COMPTE)?(?: EST)?(?: DE)?|"
+                    + "NEW BALANCE(?: IS)?|BALANCE(?: IS)?|BAL\\.?)\\s*[:=]?\\s*");
+
     private static final Map<String, List<String>> PROVIDER_KEYWORDS = Map.of(
             "AIRTEL_MONEY", List.of("AIRTEL"),
             "MOOV_MONEY", List.of("MOOV", "FLOOZ"),
@@ -74,6 +79,30 @@ public final class PaymentSmsParser {
             return new PaymentNotice(provider, null, null, phone, false);
         }
         return new PaymentNotice(provider, amount, reference, phone, incoming);
+    }
+
+    /**
+     * The wallet balance a message announces, in minor units of a no-decimal currency; null when
+     * it gives none. The amount must follow the wording closely ("Solde : 125 000 F"), so the
+     * amount of the payment itself is never taken for the balance.
+     */
+    public static Long balance(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String normalized = normalize(text);
+        Matcher keyword = BALANCE.matcher(normalized);
+        while (keyword.find()) {
+            int end = Math.min(normalized.length(), keyword.end() + 30);
+            Matcher value = AMOUNT.matcher(normalized).region(keyword.end(), end);
+            if (value.lookingAt()) {
+                Long amount = amount(value.group());
+                if (amount != null) {
+                    return amount;
+                }
+            }
+        }
+        return null;
     }
 
     /** Operator from the sender name or the wording; null when nothing says. */

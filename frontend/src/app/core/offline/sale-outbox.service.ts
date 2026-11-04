@@ -78,7 +78,9 @@ export class SaleOutboxService {
           .where('productId')
           .equals(line.productId)
           .modify((product) => {
-            product.availableQuantity = Math.max(product.availableQuantity - line.quantity, 0);
+            // units owed on a bon stay at the wholesaler's: only what is handed over leaves the shelf
+            const handedOver = line.quantity - (line.deferredQuantity ?? 0);
+            product.availableQuantity = Math.max(product.availableQuantity - handedOver, 0);
           });
       }
     });

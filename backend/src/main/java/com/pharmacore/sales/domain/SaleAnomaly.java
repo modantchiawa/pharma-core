@@ -23,5 +23,9 @@ public enum SaleAnomaly {
     /** A contraindication (interaction, allergy, patient situation) without the pharmacist's override. */
     SAFETY_CONTRAINDICATION,
     /** The seller overrode a contraindication without the right to do so. */
-    SAFETY_OVERRIDE_NOT_ALLOWED
+    SAFETY_OVERRIDE_NOT_ALLOWED,
+    /** No cash session was open on the terminal when the sale was made (V25). */
+    NO_CASH_SESSION,
+    /** A line leaves units owed to the customer (a "bon") without a way to reach them back (V25). */
+    VOUCHER_HOLDER_MISSING
 }

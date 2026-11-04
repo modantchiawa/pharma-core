@@ -3,6 +3,7 @@ package com.pharmacore.sales.web;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pharmacore.control.application.FourEyesService;
 import com.pharmacore.sales.application.SaleManagementService;
+import com.pharmacore.sales.application.SalesVisibility;
 import com.pharmacore.sales.application.SaleRecordingService;
 import com.pharmacore.sales.application.SaleSyncService;
 import com.pharmacore.sales.application.SupervisorApprovalService;
@@ -86,16 +87,19 @@ class SaleController {
     @PreAuthorize("hasAuthority('SALE_VIEW')")
     List<SaleSummary> period(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-                             @RequestParam(defaultValue = "100") int limit) {
+                             @RequestParam(defaultValue = "100") int limit,
+                             @RequestParam(defaultValue = "false") boolean mine) {
         Instant end = to == null ? Instant.now() : to;
         Instant start = from == null ? end.minus(1, ChronoUnit.DAYS) : from;
-        return management.period(start, end, limit).stream().map(SaleSummary::of).toList();
+        // A seller without SALES_VIEW_ALL only ever gets their own sales, whatever they ask
+        UUID seller = SalesVisibility.sellerFilter(mine).orElse(null);
+        return management.period(start, end, limit, seller).stream().map(SaleSummary::of).toList();
     }
 
     @GetMapping("/api/v1/sales/{saleId}")
     @PreAuthorize("hasAuthority('SALE_VIEW')")
     SaleDetail get(@PathVariable UUID saleId) {
-        return SaleDetail.of(management.get(saleId), management.returnedQuantities(saleId));
+        return SaleDetail.of(management.getVisible(saleId), management.returnedQuantities(saleId));
     }
 
     /** Partial return refunded in cash; a second person signs above the threshold or for a narcotic. */

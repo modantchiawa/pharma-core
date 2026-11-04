@@ -48,6 +48,19 @@ class PaymentSmsParserTest {
     }
 
     @Test
+    void readsTheWalletBalanceAnnounced() {
+        assertThat(PaymentSmsParser.balance(
+                "Vous avez recu 5 000 FCFA de 90123456. Trans ID: PP251027.1432.A12345. Nouveau solde: 125 000 FCFA."))
+                .isEqualTo(125_000);
+        assertThat(PaymentSmsParser.balance("Votre solde est de 45 000 FCFA.")).isEqualTo(45_000);
+        assertThat(PaymentSmsParser.balance("Transfert de 2500F recu. Solde: 30 000F")).isEqualTo(30_000);
+        assertThat(PaymentSmsParser.balance("Your new balance is 1.250.000 FCFA")).isEqualTo(1_250_000);
+        // the payment amount is never taken for the balance
+        assertThat(PaymentSmsParser.balance("Vous avez recu 5 000 FCFA de 90123456. Ref: AB12345")).isNull();
+        assertThat(PaymentSmsParser.balance(null)).isNull();
+    }
+
+    @Test
     void pharmacyPatternsTakePrecedence() {
         var custom = new PaymentSmsParser.CustomPattern("MYNITA",
                 "Credit de (?<amount>[0-9 ]+) F .*? code (?<reference>[A-Z0-9]+) .*? de (?<phone>[0-9 ]{8,})");
