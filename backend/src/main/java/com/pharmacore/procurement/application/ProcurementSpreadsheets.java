@@ -26,7 +26,6 @@ import com.pharmacore.shared.web.BusinessRuleException;
 import com.pharmacore.shared.web.NotFoundException;
 import com.pharmacore.tenant.persistence.TenantRepository;
 import java.sql.Date;
-import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -36,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -287,13 +287,8 @@ public class ProcurementSpreadsheets {
                         SELECT supplier_reference, product_id FROM supplier_product
                         WHERE supplier_id = :supplier AND supplier_reference IS NOT NULL""")
                 .param("supplier", supplierId)
-                .query((ResultSet rs) -> {
-                    while (rs.next()) {
-                        references.putIfAbsent(rs.getString("supplier_reference").trim().toUpperCase(),
-                                rs.getObject("product_id", UUID.class));
-                    }
-                    return null;
-                });
+                .query((RowCallbackHandler) rs -> references.putIfAbsent(
+                        rs.getString("supplier_reference").trim().toUpperCase(), rs.getObject("product_id", UUID.class)));
         return references;
     }
 

@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.event.EventListener;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -361,12 +362,8 @@ public class CustomerOrderService {
                         WHERE tenant_id = :tenant AND status = 'OPEN'
                         GROUP BY product_id""")
                 .param("tenant", TenantContext.requireTenant().value())
-                .query((ResultSet rs) -> {
-                    while (rs.next()) {
-                        awaited.put(rs.getObject("product_id", UUID.class), rs.getInt("qty"));
-                    }
-                    return null;
-                });
+                .query((RowCallbackHandler) rs -> awaited.put(rs.getObject("product_id", UUID.class),
+                        rs.getInt("qty")));
         return awaited;
     }
 

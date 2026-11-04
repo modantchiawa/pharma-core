@@ -29,7 +29,7 @@ class CounterDisciplineIT extends IntegrationTest {
     @Test
     void noTicketWithoutAnOpenDrawerAndTheCashierSeesOnlyTheirOwnSales() throws Exception {
         var pharmacy = onboardPharmacy("Discipline Zinder");
-        requireCashSession(pharmacy.ownerToken(), true);
+        requireCashSession(pharmacy.tenantId(), true);
         var product = createProduct("PARACETAMOL 500MG CPR B/20", "NONE", 500);
         receiveLot(pharmacy, product, "P-1", "2028-01-31", 50);
         String cashier = staff(pharmacy, roleId(pharmacy, "CAISSIER"), "caissier");
@@ -66,12 +66,13 @@ class CounterDisciplineIT extends IntegrationTest {
                 "$[*].id");
         assertThat(ownerOnly).contains(owner).doesNotContain(own);
 
-        // Receipts: the cashier's journal holds the 1 000 F they cashed, not the owner's 500 F
+        // Receipts: the cashier's journal holds what they cashed (the replayed sale and the live
+        // one, 1 500 F), not the owner's 500 F
         call(get("/api/v1/payments/journal"), cashier, null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalCents").value(1_000));
-        call(get("/api/v1/payments/journal"), pharmacy.ownerToken(), null)
                 .andExpect(jsonPath("$.totalCents").value(1_500));
+        call(get("/api/v1/payments/journal"), pharmacy.ownerToken(), null)
+                .andExpect(jsonPath("$.totalCents").value(2_000));
 
         // Closing freezes every operation of the session with its fingerprint
         call(post("/api/v1/cash/sessions/" + session + "/closure"), cashier, """
@@ -94,9 +95,6 @@ class CounterDisciplineIT extends IntegrationTest {
         var scarce = createProduct("AMOXICILLINE 1G CPR B/14", "NONE", 1_000);
         var rare = createProduct("SERUM PHYSIOLOGIQUE 5ML B/40", "NONE", 2_000);
         receiveLot(pharmacy, scarce, "A-1", "2028-01-31", 1);
-        String customer = read(call(post("/api/v1/customers"), pharmacy.ownerToken(), """
-                {"displayName":"Awa Soumana","phone":"+22790112233","creditLimitCents":0}""")
-                .andExpect(status().isCreated()), "$.id");
 
         // 3 boxes sold and paid, 1 on the shelf: 2 owed on a bon, which needs a way to reach the customer
         String noContact = """
@@ -117,7 +115,8 @@ class CounterDisciplineIT extends IntegrationTest {
 
         // A special order for a product never stocked
         String special = read(call(post("/api/v1/customer-orders"), pharmacy.ownerToken(), """
-                {"customerId":"%s","productId":"%s","quantity":2}""".formatted(customer, rare))
+                {"holderName":"Awa Soumana","holderPhone":"+22790112233","productId":"%s","quantity":2}"""
+                .formatted(rare))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("OPEN")), "$.id");
         String bons = body(call(get("/api/v1/customer-orders?pending=true"), pharmacy.ownerToken(), null)
@@ -148,10 +147,9 @@ class CounterDisciplineIT extends IntegrationTest {
                 {"reason":"trop tard"}""").andExpect(status().isUnprocessableContent());
         call(post("/api/v1/sales"), pharmacy.ownerToken(), """
                 {"clientSaleId":"%s","terminalId":"T-TEST","ticketNumber":"T-TEST-S1","occurredAt":"%s",
-                 "customerId":"%s",
                  "lines":[{"productId":"%s","quantity":2,"unitPriceCents":2000,"discountCents":0,"customerOrderId":"%s"}],
                  "payments":[{"method":"CASH","amountCents":4000}]}"""
-                .formatted(UUID.randomUUID(), Instant.now(), customer, rare, special))
+                .formatted(UUID.randomUUID(), Instant.now(), rare, special))
                 .andExpect(status().isCreated());
         call(get("/api/v1/customer-orders/" + special), pharmacy.ownerToken(), null)
                 .andExpect(jsonPath("$.status").value("DELIVERED"));
