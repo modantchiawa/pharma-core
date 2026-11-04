@@ -177,7 +177,7 @@ public class CustomerOrderService {
      * @return the orders the sale collects
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public Set<UUID> releaseForSale(SaleDraft draft, UUID saleId) {
+    public Set<UUID> releaseForSale(SaleDraft draft, UUID sellerId) {
         Set<UUID> collected = new LinkedHashSet<>();
         for (SaleDraft.Line line : draft.lines()) {
             if (line.customerOrderId() == null) {
@@ -193,7 +193,7 @@ public class CustomerOrderService {
             }
             OrderView found = order.get();
             if (found.status() == CustomerOrderStatus.READY) {
-                ledger.release(found.productId(), found.quantity(), reference(found.id(), draft.cashierUserId()));
+                ledger.release(found.productId(), found.quantity(), reference(found.id(), sellerId));
             }
             collected.add(found.id());
         }

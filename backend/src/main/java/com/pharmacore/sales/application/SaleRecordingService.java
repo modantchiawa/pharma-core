@@ -203,7 +203,7 @@ public class SaleRecordingService {
                 .collect(Collectors.toMap(SaleDraft.Line::productId, SaleDraft.Line::handedOverQuantity, Integer::sum,
                         LinkedHashMap::new));
         // Special orders collected by this sale give their reserved units back to it first
-        var collectedOrders = customerOrders.releaseForSale(draft, saleId);
+        var collectedOrders = customerOrders.releaseForSale(draft, seller.userId());
         ShortfallPolicy policy = draft.origin() == SaleOrigin.ONLINE ? ShortfallPolicy.REJECT : ShortfallPolicy.RECORD;
         Map<UUID, AllocationPlan> plans = ledger.withdraw(quantities, policy, StockMovementEntity.Type.SALE,
                 new StockLedger.Reference("SALE", saleId, draft.occurredAt(), seller.userId()));
