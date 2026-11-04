@@ -242,8 +242,12 @@ public class SaleRecordingService {
                 payment.policyId())));
         // save() merges an entity with an assigned id: later changes must go to the managed copy
         SaleEntity managed = sales.save(sale);
-        customerOrders.recordVouchers(managed, draft);
-        customerOrders.markCollected(collectedOrders, managed);
+        if (draft.leavesVouchers() || !collectedOrders.isEmpty()) {
+            // the bons and collected orders point at the sale and its lines in SQL: write them first
+            sales.flush();
+            customerOrders.recordVouchers(managed, draft);
+            customerOrders.markCollected(collectedOrders, managed);
+        }
         safety.recordOverrides(managed, draft, safetyAlerts, seller.userId(), now);
         // A confirmation that arrived before the sale (offline terminal replaying later) settles it now
         paymentNotifications.matchSale(managed);
