@@ -22,13 +22,21 @@ public record SaleDraft(UUID clientSaleId,
                         List<Line> lines,
                         List<Payment> payments,
                         Prescription prescription,
-                        List<SafetyOverride> safetyOverrides) {
+                        List<SafetyOverride> safetyOverrides,
+                        VoucherHolder voucherHolder) {
 
     public SaleDraft(UUID clientSaleId, String terminalId, String ticketNumber, Instant occurredAt, SaleOrigin origin,
                      UUID cashierUserId, UUID customerId, List<Line> lines, List<Payment> payments,
                      Prescription prescription) {
         this(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId, lines, payments,
-                prescription, List.of());
+                prescription, List.of(), null);
+    }
+
+    public SaleDraft(UUID clientSaleId, String terminalId, String ticketNumber, Instant occurredAt, SaleOrigin origin,
+                     UUID cashierUserId, UUID customerId, List<Line> lines, List<Payment> payments,
+                     Prescription prescription, List<SafetyOverride> safetyOverrides) {
+        this(clientSaleId, terminalId, ticketNumber, occurredAt, origin, cashierUserId, customerId, lines, payments,
+                prescription, safetyOverrides, null);
     }
 
     public SaleDraft {
@@ -43,16 +51,33 @@ public record SaleDraft(UUID clientSaleId,
         }
     }
 
-    /** @param posology how the patient takes it, as typed at the counter (optional) */
-    public record Line(UUID productId, int quantity, long unitPriceCents, long discountCents, Posology posology) {
+    /**
+     * @param posology         how the patient takes it, as typed at the counter (optional)
+     * @param deferredQuantity units sold and paid now but handed over later, when the product
+     *                         arrives (a "bon"); the stock gives only the other units
+     * @param customerOrderId  special order this line collects (the units reserved at the
+     *                         delivery are released to the sale)
+     */
+    public record Line(UUID productId, int quantity, long unitPriceCents, long discountCents, Posology posology,
+                       int deferredQuantity, UUID customerOrderId) {
 
         public Line(UUID productId, int quantity, long unitPriceCents, long discountCents) {
             this(productId, quantity, unitPriceCents, discountCents, null);
         }
 
+        public Line(UUID productId, int quantity, long unitPriceCents, long discountCents, Posology posology) {
+            this(productId, quantity, unitPriceCents, discountCents, posology, 0, null);
+        }
+
         public Line {
             if (quantity <= 0) {
                 throw new IllegalArgumentException("Line quantity must be positive");
+            }
+            if (deferredQuantity < 0 || deferredQuantity > quantity) {
+                throw new IllegalArgumentException("Deferred units must be between 0 and the line quantity");
+            }
+            if (deferredQuantity > 0 && customerOrderId != null) {
+                throw new IllegalArgumentException("A line collecting a special order cannot leave units owed");
             }
             if (unitPriceCents < 0 || discountCents < 0) {
                 throw new IllegalArgumentException("Amounts cannot be negative");
@@ -64,6 +89,11 @@ public record SaleDraft(UUID clientSaleId,
 
         public long grossCents() {
             return grossCents(quantity, unitPriceCents);
+        }
+
+        /** Units the customer takes away now. */
+        public int handedOverQuantity() {
+            return quantity - deferredQuantity;
         }
 
         public long netCents() {
@@ -100,6 +130,27 @@ public record SaleDraft(UUID clientSaleId,
         public boolean coveredByPolicy() {
             return method == PaymentMethod.THIRD_PARTY_PAYER && policyId != null;
         }
+    }
+
+    /**
+     * Who to call when the owed units arrive, for a sale without a customer file: the name and
+     * phone written on the bon.
+     */
+    public record VoucherHolder(String name, String phone) {
+
+        public VoucherHolder {
+            name = name == null || name.isBlank() ? null : name.trim();
+            phone = phone == null || phone.isBlank() ? null : phone.trim();
+        }
+
+        public boolean reachable() {
+            return phone != null;
+        }
+    }
+
+    /** Lines leaving units owed to the customer. */
+    public boolean leavesVouchers() {
+        return lines.stream().anyMatch(line -> line.deferredQuantity() > 0);
     }
 
     /** @param prescriptionId renewable prescription on file the dispensing is attached to (optional) */

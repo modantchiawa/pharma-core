@@ -1,5 +1,10 @@
 package com.pharmacore.sales.web;
 
+import com.pharmacore.sales.application.CashSessionArchiveService;
+import com.pharmacore.sales.application.CashSessionArchiveService.ArchiveView;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+
 import com.pharmacore.sales.application.CashSessionService;
 import com.pharmacore.sales.application.CashSessionService.Closing;
 import com.pharmacore.sales.application.CashSessionService.Declared;
@@ -35,9 +40,11 @@ import org.springframework.web.bind.annotation.RestController;
 class CashSessionController {
 
     private final CashSessionService cash;
+    private final CashSessionArchiveService archives;
 
-    CashSessionController(CashSessionService cash) {
+    CashSessionController(CashSessionService cash, CashSessionArchiveService archives) {
         this.cash = cash;
+        this.archives = archives;
     }
 
     @GetMapping("/open")
@@ -85,6 +92,24 @@ class CashSessionController {
     Movement movement(@PathVariable UUID sessionId, @Valid @RequestBody MovementRequest request) {
         return cash.recordMovement(sessionId, request.kind(), request.amountCents(), request.reason(),
                 request.expenseAccount());
+    }
+
+    /** Every operation of a closed session, frozen at its closing, with its fingerprint check. */
+    @GetMapping("/{sessionId}/archive")
+    @PreAuthorize("hasAnyAuthority('CASH_SESSION_MANAGE', 'REPORT_VIEW', 'CASH_APPROVE')")
+    ArchiveView archive(@PathVariable UUID sessionId) {
+        return archives.get(sessionId);
+    }
+
+    @GetMapping(value = "/{sessionId}/archive/xlsx",
+            produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    @PreAuthorize("hasAnyAuthority('CASH_SESSION_MANAGE', 'REPORT_VIEW', 'CASH_APPROVE')")
+    ResponseEntity<byte[]> archiveWorkbook(@PathVariable UUID sessionId) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"session-" + sessionId.toString().substring(0, 8) + ".xlsx\"")
+                .body(archives.workbook(sessionId));
     }
 
     @GetMapping("/{sessionId}")

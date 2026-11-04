@@ -131,6 +131,15 @@ public class StockLedger {
         stock.touch(now);
     }
 
+    /** Sellable units nothing holds yet (reservations deducted); the stock row stays locked until commit. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int available(UUID productId) {
+        var stock = lock(List.of(productId)).get(productId);
+        int sellable = FefoAllocator.sellableQuantity(lots.findAvailableByStockIds(List.of(stock.id())).stream()
+                .map(StockLotEntity::snapshot).toList(), calendar.today());
+        return Math.max(sellable - stock.reservedQuantity(), 0);
+    }
+
     /** Holds units for another pharmacy; they stay physically on the shelf but are no longer sellable. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void reserve(UUID productId, int quantity, Reference reference) {

@@ -3,6 +3,7 @@ package com.pharmacore.sales.application;
 import com.pharmacore.accounting.application.AccountingPoster;
 import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.catalog.persistence.ProductEntity;
+import com.pharmacore.customerorder.application.CustomerOrderService;
 import com.pharmacore.customers.application.CustomerService;
 import com.pharmacore.insurance.application.InsuranceCoverageResolver;
 import com.pharmacore.inventory.application.TenantCalendar;
@@ -65,6 +66,8 @@ public class SaleRecordingService {
     private final SellerProfiles sellers;
     private final CustomerService customers;
     private final CashSessionService cashSessions;
+    private final CashPolicyService cashPolicy;
+    private final CustomerOrderService customerOrders;
     private final AccountingPoster accounting;
     private final CertificationService certification;
     private final InsuranceCoverageResolver coverage;
@@ -84,7 +87,10 @@ public class SaleRecordingService {
                                 InsuranceCoverageResolver coverage, PrescriptionService prescriptions,
                                 PaymentReconciliationService paymentReferences,
                                 PaymentNotificationService paymentNotifications, SafetyCheckService safety,
-                                TenantCalendar calendar, AuditTrail audit, ObjectMapper json, Clock clock) {
+                                TenantCalendar calendar, AuditTrail audit, ObjectMapper json, Clock clock,
+                                CashPolicyService cashPolicy, CustomerOrderService customerOrders) {
+        this.cashPolicy = cashPolicy;
+        this.customerOrders = customerOrders;
         this.coverage = coverage;
         this.paymentNotifications = paymentNotifications;
         this.safety = safety;
@@ -141,6 +147,16 @@ public class SaleRecordingService {
                 && prescriptions.refusalReason(draft.prescriptionId(), draft.customerId(), today).isPresent()) {
             anomalies.add(SaleAnomaly.PRESCRIPTION_RENEWAL_REFUSED);
         }
+        // No ticket without an open drawer: refused live, routed to review when replayed offline
+        if (cashPolicy.current().sessionRequired()
+                && !cashSessions.covers(draft.terminalId(), draft.occurredAt(), draft.origin() == SaleOrigin.ONLINE)) {
+            anomalies.add(SaleAnomaly.NO_CASH_SESSION);
+        }
+        // A bon must say who to call when the product arrives: a customer file or a phone number
+        if (draft.leavesVouchers() && draft.customerId() == null
+                && (draft.voucherHolder() == null || !draft.voucherHolder().reachable())) {
+            anomalies.add(SaleAnomaly.VOUCHER_HOLDER_MISSING);
+        }
         if (hasReusedPaymentReference(draft)) {
             // Whatever the origin: a transaction reference already stored belongs to another sale,
             // and the unique index would refuse the row anyway. The terminal shows it as rejected.
@@ -181,9 +197,13 @@ public class SaleRecordingService {
                                 Set<SaleAnomaly> ruleAnomalies, InsuranceCoverageResolver.Resolution insured,
                                 List<SafetyAlert> safetyAlerts, Instant now, LocalDate today) {
         UUID saleId = UUID.randomUUID();
+        // Units owed on a bon stay on the wholesaler's side: only what is handed over leaves the shelf
         Map<UUID, Integer> quantities = draft.lines().stream()
-                .collect(Collectors.toMap(SaleDraft.Line::productId, SaleDraft.Line::quantity, Integer::sum,
+                .filter(line -> line.handedOverQuantity() > 0)
+                .collect(Collectors.toMap(SaleDraft.Line::productId, SaleDraft.Line::handedOverQuantity, Integer::sum,
                         LinkedHashMap::new));
+        // Special orders collected by this sale give their reserved units back to it first
+        var collectedOrders = customerOrders.releaseForSale(draft, saleId);
         ShortfallPolicy policy = draft.origin() == SaleOrigin.ONLINE ? ShortfallPolicy.REJECT : ShortfallPolicy.RECORD;
         Map<UUID, AllocationPlan> plans = ledger.withdraw(quantities, policy, StockMovementEntity.Type.SALE,
                 new StockLedger.Reference("SALE", saleId, draft.occurredAt(), seller.userId()));
@@ -212,7 +232,7 @@ public class SaleRecordingService {
         for (SaleDraft.Line line : draft.lines()) {
             sale.addLine(new SaleLineEntity(lineNo++, line.productId(), line.quantity(), line.unitPriceCents(),
                     line.discountCents(), catalog.get(line.productId()).vatRate(),
-                    remaining.take(line.productId(), line.quantity()),
+                    remaining.take(line.productId(), line.handedOverQuantity()),
                     line.posology() == null ? null : json.writeValueAsString(line.posology())));
         }
         draft.payments().forEach(payment -> sale.addPayment(new SalePaymentEntity(payment.method(),
@@ -222,6 +242,8 @@ public class SaleRecordingService {
                 payment.policyId())));
         // save() merges an entity with an assigned id: later changes must go to the managed copy
         SaleEntity managed = sales.save(sale);
+        customerOrders.recordVouchers(managed, draft);
+        customerOrders.markCollected(collectedOrders, managed);
         safety.recordOverrides(managed, draft, safetyAlerts, seller.userId(), now);
         // A confirmation that arrived before the sale (offline terminal replaying later) settles it now
         paymentNotifications.matchSale(managed);
@@ -267,6 +289,10 @@ public class SaleRecordingService {
         List<LotAllocation> take(UUID productId, int quantity) {
             var queue = pending.get(productId);
             var taken = new java.util.ArrayList<LotAllocation>();
+            if (queue == null) {
+                // every unit of the product is owed on a bon: nothing left the shelf
+                return taken;
+            }
             int remaining = quantity;
             while (remaining > 0 && !queue.isEmpty()) {
                 var head = queue.poll();

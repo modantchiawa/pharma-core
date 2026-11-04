@@ -74,6 +74,13 @@ public class PaymentReconciliationService {
 
     @Transactional(readOnly = true)
     public List<PendingPayment> list(ConfirmationStatus status, String provider, Instant from, Instant to, int limit) {
+        return list(status, provider, from, to, limit, null);
+    }
+
+    /** @param seller only the payments of this seller's sales (null: every seller) */
+    @Transactional(readOnly = true)
+    public List<PendingPayment> list(ConfirmationStatus status, String provider, Instant from, Instant to, int limit,
+                                     UUID seller) {
         return jdbc.sql("""
                         SELECT p.id, p.sale_id, s.ticket_number, s.occurred_at, p.method, p.provider, p.reference,
                                p.amount_cents, p.confirmation_status, p.rejection_reason
@@ -83,9 +90,11 @@ public class PaymentReconciliationService {
                           AND (:provider::text IS NULL OR p.provider = :provider::text)
                           AND s.occurred_at >= :from AND s.occurred_at < :to
                           AND s.status = 'COMPLETED'
+                          AND (:seller::uuid IS NULL OR s.cashier_user_id = :seller::uuid)
                         ORDER BY s.occurred_at
                         LIMIT :limit""")
                 .param("status", status.name())
+                .param("seller", seller)
                 .param("provider", provider == null || provider.isBlank() ? null : provider)
                 .param("from", Timestamp.from(from))
                 .param("to", Timestamp.from(to))

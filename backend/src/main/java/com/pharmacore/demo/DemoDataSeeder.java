@@ -350,6 +350,9 @@ class DemoDataSeeder {
                 }
             }
             int ticket = 1;
+            // The history predates today's drawer: the open-session rule is lifted while it is
+            // written, then restored once DEMO-1 is opened below
+            setSessionRequired(tenant, false);
             for (int daysAgo = 14; daysAgo >= 0; daysAgo--) {
                 LocalDate day = today.minusDays(daysAgo);
                 int count = 3 + random.nextInt(4);
@@ -404,6 +407,7 @@ class DemoDataSeeder {
                 internalControl.seed(tenant, pharmacy.ownerEmail(), pharmacy.cashierEmail(), products, today);
             }
             cashSessions.openSession(TERMINAL, 50_000);
+            setSessionRequired(tenant, true);
             tx.executeWithoutResult(status -> DemoTerminals.seed(jdbc, tenant, pharmacy.slug(), clock.instant()));
             // the staff opened DEMO-1: every account shows a last login in the console
             auth.login(pharmacy.slug(), pharmacy.cashierEmail(), demo.accountPassword(), TERMINAL);
@@ -501,5 +505,11 @@ class DemoDataSeeder {
         var system = RequestContext.of(Actor.SystemProcess.forTenant("demo-seed", tenant));
         Actor.TenantUser actor = TenantContext.call(system, () -> tx.execute(status -> load.get()));
         return RequestContext.of(actor);
+    }
+
+    private void setSessionRequired(TenantId tenant, boolean required) {
+        tx.executeWithoutResult(status -> jdbc.sql(
+                        "UPDATE pharmacy_config SET cash_session_required = :required WHERE tenant_id = :tenant")
+                .param("required", required).param("tenant", tenant.value()).update());
     }
 }

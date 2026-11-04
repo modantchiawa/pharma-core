@@ -1,5 +1,7 @@
 package com.pharmacore.sales.application;
 
+import com.pharmacore.customerorder.application.CustomerOrderService;
+
 import com.pharmacore.accounting.application.AccountingPoster;
 import com.pharmacore.accounting.application.Postings;
 import com.pharmacore.control.application.FourEyesService;
@@ -52,11 +54,14 @@ public class SaleManagementService {
     private final SupervisorApprovalService approvals;
     private final FourEyesService fourEyes;
     private final JdbcClient jdbc;
+    private final CustomerOrderService customerOrders;
 
     public SaleManagementService(SaleRepository sales, StockLedger ledger, AuditTrail audit, Clock clock,
                                  CustomerService customers, CashSessionService cashSessions,
                                  AccountingPoster accounting, TenantCalendar calendar, CashPolicyService policy,
-                                 SupervisorApprovalService approvals, FourEyesService fourEyes, JdbcClient jdbc) {
+                                 SupervisorApprovalService approvals, FourEyesService fourEyes, JdbcClient jdbc,
+                                 CustomerOrderService customerOrders) {
+        this.customerOrders = customerOrders;
         this.sales = sales;
         this.ledger = ledger;
         this.audit = audit;
@@ -88,7 +93,25 @@ public class SaleManagementService {
 
     @Transactional(readOnly = true)
     public List<SaleEntity> period(Instant from, Instant to, int limit) {
-        return sales.findInPeriod(from, to, PageRequest.of(0, Math.clamp(limit, 1, 500)));
+        return period(from, to, limit, null);
+    }
+
+    /** @param seller only this seller's sales (null: every seller) */
+    @Transactional(readOnly = true)
+    public List<SaleEntity> period(Instant from, Instant to, int limit, UUID seller) {
+        var page = PageRequest.of(0, Math.clamp(limit, 1, 500));
+        return seller == null ? sales.findInPeriod(from, to, page) : sales.findInPeriodBySeller(from, to, seller, page);
+    }
+
+    /** A sale the current user may open: their own, or any when they see every seller. */
+    @Transactional(readOnly = true)
+    public SaleEntity getVisible(UUID saleId) {
+        var sale = get(saleId);
+        var restricted = SalesVisibility.restrictedSeller();
+        if (restricted.isPresent() && !restricted.get().equals(sale.cashierUserId())) {
+            throw new NotFoundException("Sale", saleId);
+        }
+        return sale;
     }
 
     @Transactional(readOnly = true)
@@ -155,8 +178,11 @@ public class SaleManagementService {
         }
         var reference = new StockLedger.Reference("SALE_CANCELLATION", saleId, now, userId);
         for (SaleLineEntity line : sale.lines()) {
-            ledger.restore(line.productId(), line.lotAllocations(), line.uncoveredQuantity(), reference);
+            // units still owed on a bon never left the shelf: they are not a shortfall to clear
+            int shortfall = Math.max(line.uncoveredQuantity() - customerOrders.owedOnLine(line.id()), 0);
+            ledger.restore(line.productId(), line.lotAllocations(), shortfall, reference);
         }
+        customerOrders.onSaleCancelled(saleId, reason);
         sale.cancel(userId, reason, now);
         if (sale.customerId() != null && sale.creditCents() > 0) {
             customers.releaseCredit(sale.customerId(), sale.creditCents());
@@ -278,9 +304,11 @@ public class SaleManagementService {
                     .param("quantity", quantity)
                     .param("refund", refunds.get(line))
                     .update();
+            // Units still owed on a bon are refunded first: they never left the shelf
+            int owed = customerOrders.refundOwed(line.id(), quantity, "Retour ticket " + sale.ticketNumber());
             // Back into the lots the units came from, as far as they were not already returned
             List<LotAllocation> back = new ArrayList<>();
-            int left = quantity;
+            int left = quantity - owed;
             for (LotAllocation allocation : line.lotAllocations()) {
                 int room = allocation.quantity() - backInLots.getOrDefault(allocation.lotId(), 0);
                 int put = Math.min(Math.max(room, 0), left);

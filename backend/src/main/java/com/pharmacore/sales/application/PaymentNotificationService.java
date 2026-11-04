@@ -63,10 +63,13 @@ public class PaymentNotificationService {
     private final ApplicationEventPublisher events;
     private final JdbcClient jdbc;
     private final Clock clock;
+    private final MobileMoneyWalletService wallets;
 
     public PaymentNotificationService(PaymentReconciliationService reconciliation,
                                       PaymentChannelSettingsService settings, AuditTrail audit,
-                                      ApplicationEventPublisher events, JdbcClient jdbc, Clock clock) {
+                                      ApplicationEventPublisher events, JdbcClient jdbc, Clock clock,
+                                      MobileMoneyWalletService wallets) {
+        this.wallets = wallets;
         this.reconciliation = reconciliation;
         this.settings = settings;
         this.audit = audit;
@@ -129,6 +132,11 @@ public class PaymentNotificationService {
                 .update();
         if (inserted == 0) {
             return Optional.empty();
+        }
+        // "Nouveau solde : 125 000 F": the operator tells the wallet's external balance, kept as a reading
+        Long balance = incoming.source() == Source.MANUAL ? null : PaymentSmsParser.balance(incoming.text());
+        if (balance != null && notice.provider() != null) {
+            wallets.recordFromSms(notice.provider(), balance, id, receivedAt);
         }
         audit.record("PAYMENT_NOTIFICATION_RECEIVED", "PAYMENT_NOTIFICATION", id, Map.of(
                 "source", incoming.source().name(), "provider", String.valueOf(notice.provider()),

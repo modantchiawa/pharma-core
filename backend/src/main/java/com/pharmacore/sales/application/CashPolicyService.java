@@ -10,12 +10,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Thresholds above which a supervisor must sign. Zero disables the rule, which is the default
- * of a fresh pharmacy; the owner tightens them from the cash settings.
+ * of a fresh pharmacy; the owner tightens them from the cash settings. {@code sessionRequired}
+ * (on by default) refuses a sale on a terminal whose drawer is not open.
  */
 @Service
 public class CashPolicyService {
 
-    public record CashPolicy(long cashDifferenceThresholdCents, long cancelApprovalThresholdCents) {
+    public record CashPolicy(long cashDifferenceThresholdCents, long cancelApprovalThresholdCents,
+                             boolean sessionRequired) {
     }
 
     private final JdbcClient jdbc;
@@ -29,13 +31,13 @@ public class CashPolicyService {
     @Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
     public CashPolicy current() {
         return jdbc.sql("""
-                        SELECT cash_difference_threshold_cents, cancel_approval_threshold_cents
+                        SELECT cash_difference_threshold_cents, cancel_approval_threshold_cents, cash_session_required
                         FROM pharmacy_config WHERE tenant_id = :tenant""")
                 .param("tenant", TenantContext.requireTenant().value())
                 .query((rs, rowNum) -> new CashPolicy(rs.getLong("cash_difference_threshold_cents"),
-                        rs.getLong("cancel_approval_threshold_cents")))
+                        rs.getLong("cancel_approval_threshold_cents"), rs.getBoolean("cash_session_required")))
                 .optional()
-                .orElse(new CashPolicy(0, 0));
+                .orElse(new CashPolicy(0, 0, true));
     }
 
     @Transactional
@@ -46,15 +48,17 @@ public class CashPolicyService {
         jdbc.sql("""
                         UPDATE pharmacy_config
                         SET cash_difference_threshold_cents = :difference, cancel_approval_threshold_cents = :cancel,
-                            updated_at = now()
+                            cash_session_required = :sessionRequired, updated_at = now()
                         WHERE tenant_id = :tenant""")
                 .param("difference", policy.cashDifferenceThresholdCents())
                 .param("cancel", policy.cancelApprovalThresholdCents())
+                .param("sessionRequired", policy.sessionRequired())
                 .param("tenant", TenantContext.requireTenant().value())
                 .update();
         audit.record("CASH_POLICY_UPDATED", "PHARMACY", TenantContext.requireTenant().value(), Map.of(
                 "cashDifferenceThresholdCents", Long.toString(policy.cashDifferenceThresholdCents()),
-                "cancelApprovalThresholdCents", Long.toString(policy.cancelApprovalThresholdCents())));
+                "cancelApprovalThresholdCents", Long.toString(policy.cancelApprovalThresholdCents()),
+                "sessionRequired", Boolean.toString(policy.sessionRequired())));
         return policy;
     }
 }

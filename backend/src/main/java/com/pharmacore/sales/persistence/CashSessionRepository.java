@@ -22,6 +22,12 @@ public interface CashSessionRepository extends JpaRepository<CashSessionEntity, 
             order by s.closedAt desc""")
     List<CashSessionEntity> findClosedByTerminal(String terminalId, Pageable pageable);
 
+    /** Sessions of the terminal that were open at {@code at}: an offline sale must fall inside one. */
+    @Query("""
+            select count(s) > 0 from CashSessionEntity s
+            where s.terminalId = :terminalId and s.openedAt <= :at and (s.closedAt is null or s.closedAt >= :at)""")
+    boolean existsCovering(String terminalId, java.time.Instant at);
+
     @Query("""
             select s from CashSessionEntity s
             where s.closingRequiresApproval = true and s.approvedAt is null

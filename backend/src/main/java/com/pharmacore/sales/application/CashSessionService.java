@@ -64,10 +64,13 @@ public class CashSessionService {
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final Clock clock;
+    private final CashSessionArchiveService archives;
 
     public CashSessionService(CashSessionRepository sessions, CashMovementRepository movements, SaleRepository sales,
                               AccountingPoster accounting, TenantCalendar calendar, CashPolicyService policy,
-                              AuditTrail audit, JdbcClient jdbc, ObjectMapper json, Clock clock) {
+                              AuditTrail audit, JdbcClient jdbc, ObjectMapper json, Clock clock,
+                              CashSessionArchiveService archives) {
+        this.archives = archives;
         this.sessions = sessions;
         this.movements = movements;
         this.sales = sales;
@@ -144,6 +147,19 @@ public class CashSessionService {
         return sessions.findOpen(terminalId).filter(s -> !s.openedAt().isAfter(at)).map(CashSessionEntity::id);
     }
 
+    /**
+     * Whether a sale made on {@code terminalId} at {@code at} happened inside a cash session:
+     * live, the drawer must be open now; replayed from an offline journal, the drawer must have
+     * been open at that time (it may have been closed since).
+     */
+    @Transactional(readOnly = true)
+    public boolean covers(String terminalId, Instant at, boolean live) {
+        if (terminalId == null) {
+            return false;
+        }
+        return live ? sessionFor(terminalId, at).isPresent() : sessions.existsCovering(terminalId, at);
+    }
+
     /** True when the sale's drawer has already been closed (its Z report is final). */
     @Transactional(readOnly = true)
     public boolean isClosed(UUID sessionId) {
@@ -196,7 +212,11 @@ public class CashSessionService {
                 .param("breakdown", write(closing.denominations()))
                 .param("id", session.id())
                 .update();
+        // Every operation of the session, frozen with its fingerprint (the SQL reads the closed row)
+        sessions.saveAndFlush(session);
+        String archiveHash = archives.capture(session.id());
         audit.record("CASH_SESSION_CLOSED", "CASH_SESSION", session.id(), Map.of(
+                "archiveHash", archiveHash,
                 "expectedCents", Long.toString(expected),
                 "countedCents", Long.toString(counted),
                 "differenceCents", Long.toString(difference),

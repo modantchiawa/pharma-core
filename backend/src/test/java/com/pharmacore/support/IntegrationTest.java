@@ -90,7 +90,19 @@ public abstract class IntegrationTest {
                 .andExpect(status().isCreated());
         UUID tenantId = UUID.fromString(read(result, "$.id"));
         String temporary = read(result, "$.ownerTemporaryPassword");
-        return new Pharmacy(tenantId, slug, email, temporary, login(slug, email, temporary));
+        String token = login(slug, email, temporary);
+        // Most scenarios sell without going through the drawer: the open-session rule (on for a
+        // real pharmacy) is lifted here and exercised by the tests that open a session themselves
+        requireCashSession(token, false);
+        return new Pharmacy(tenantId, slug, email, temporary, token);
+    }
+
+    /** Turns the "no sale without an open cash session" rule on or off for the pharmacy. */
+    protected void requireCashSession(String ownerToken, boolean required) throws Exception {
+        call(put("/api/v1/cash/policy"), ownerToken, """
+                {"cashDifferenceThresholdCents":0,"cancelApprovalThresholdCents":0,"sessionRequired":%s}
+                """.formatted(required))
+                .andExpect(status().isOk());
     }
 
     /** Local (offline-capable) authentication, exactly as the PWA does it. */

@@ -25,6 +25,13 @@ public interface SaleRepository extends JpaRepository<SaleEntity, UUID> {
             order by s.occurredAt desc""")
     List<SaleEntity> findInPeriod(Instant from, Instant to, Pageable pageable);
 
+    /** Sales of one seller: what a cashier without {@code SALES_VIEW_ALL} may see. */
+    @Query("""
+            select s from SaleEntity s
+            where s.occurredAt >= :from and s.occurredAt < :to and s.cashierUserId = :seller
+            order by s.occurredAt desc""")
+    List<SaleEntity> findInPeriodBySeller(Instant from, Instant to, UUID seller, Pageable pageable);
+
     @Query("select s from SaleEntity s where s.reviewRequired = true order by s.occurredAt")
     List<SaleEntity> findReviewQueue(Pageable pageable);
 

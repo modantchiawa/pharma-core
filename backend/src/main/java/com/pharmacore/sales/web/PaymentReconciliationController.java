@@ -1,6 +1,7 @@
 package com.pharmacore.sales.web;
 
 import com.pharmacore.sales.application.CashPolicyService;
+import com.pharmacore.sales.application.SalesVisibility;
 import com.pharmacore.sales.application.CashPolicyService.CashPolicy;
 import com.pharmacore.sales.application.PaymentJournalService;
 import com.pharmacore.sales.application.PaymentJournalService.DayJournal;
@@ -45,16 +46,16 @@ class PaymentReconciliationController {
 
     /** Receipts of the days {@code from}..{@code to} (today by default) by category, for one station or all. */
     @GetMapping("/api/v1/payments/journal")
-    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')")
+    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW', 'SALE_VIEW')")
     DayJournal journal(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
                        @RequestParam(required = false) String terminalId) {
-        return journal.journal(from, to, terminalId);
+        return journal.journal(from, to, terminalId, seller());
     }
 
     /** The transactions behind a category of the journal: {@code method} and, for an operator, {@code provider}. */
     @GetMapping("/api/v1/payments/journal/entries")
-    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW')")
+    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'REPORT_VIEW', 'SALE_VIEW')")
     List<JournalEntry> journalEntries(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
@@ -62,11 +63,11 @@ class PaymentReconciliationController {
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String terminalId,
             @RequestParam(defaultValue = "500") int limit) {
-        return journal.entries(from, to, method == null ? null : method.name(), provider, terminalId, limit);
+        return journal.entries(from, to, method == null ? null : method.name(), provider, terminalId, limit, seller());
     }
 
     @GetMapping("/api/v1/payments/pending")
-    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE')")
+    @PreAuthorize("hasAnyAuthority('PAYMENT_RECONCILE', 'CASH_SESSION_MANAGE', 'SALE_VIEW')")
     List<PendingPayment> pending(@RequestParam(required = false) String provider,
                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
@@ -74,7 +75,15 @@ class PaymentReconciliationController {
                                  @RequestParam(defaultValue = "200") int limit) {
         Instant end = to == null ? Instant.now().plus(1, ChronoUnit.DAYS) : to;
         Instant start = from == null ? end.minus(31, ChronoUnit.DAYS) : from;
-        return payments.list(status, provider, start, end, limit);
+        return payments.list(status, provider, start, end, limit, seller());
+    }
+
+    /**
+     * A seller sees only the receipts of the sales they made; the pharmacist, the managers and
+     * whoever reconciles the operators' statements see every seller.
+     */
+    private static UUID seller() {
+        return SalesVisibility.restrictedSeller("PAYMENT_RECONCILE", "REPORT_VIEW").orElse(null);
     }
 
     @PostMapping("/api/v1/payments/{paymentId}/confirmation")
@@ -90,7 +99,7 @@ class PaymentReconciliationController {
     }
 
     @GetMapping("/api/v1/cash/policy")
-    @PreAuthorize("hasAnyAuthority('CASH_SESSION_MANAGE', 'CASH_APPROVE', 'SALE_CANCEL')")
+    @PreAuthorize("hasAnyAuthority('CASH_SESSION_MANAGE', 'CASH_APPROVE', 'SALE_CANCEL', 'SALE_CREATE')")
     CashPolicy policy() {
         return policy.current();
     }
@@ -98,12 +107,17 @@ class PaymentReconciliationController {
     @PutMapping("/api/v1/cash/policy")
     @PreAuthorize("hasAuthority('CASH_APPROVE')")
     CashPolicy updatePolicy(@Valid @RequestBody PolicyRequest request) {
-        return policy.update(new CashPolicy(request.cashDifferenceThresholdCents(), request.cancelApprovalThresholdCents()));
+        boolean sessionRequired = request.sessionRequired() == null
+                ? policy.current().sessionRequired() : request.sessionRequired();
+        return policy.update(new CashPolicy(request.cashDifferenceThresholdCents(), request.cancelApprovalThresholdCents(),
+                sessionRequired));
     }
 
     record ReasonRequest(@NotBlank @Size(max = 255) String reason) {
     }
 
-    record PolicyRequest(@PositiveOrZero long cashDifferenceThresholdCents, @PositiveOrZero long cancelApprovalThresholdCents) {
+    /** @param sessionRequired left out: unchanged */
+    record PolicyRequest(@PositiveOrZero long cashDifferenceThresholdCents, @PositiveOrZero long cancelApprovalThresholdCents,
+                         Boolean sessionRequired) {
     }
 }

@@ -1,5 +1,13 @@
 package com.pharmacore.insurance.web;
 
+import org.springframework.web.bind.annotation.RequestParam;
+
+import com.pharmacore.shared.web.BusinessRuleException;
+
+import com.pharmacore.shared.context.TenantContext;
+
+import com.pharmacore.shared.context.Actor;
+
 import com.pharmacore.insurance.application.InsuranceStatementService;
 import com.pharmacore.insurance.application.InsuranceStatementService.Receivable;
 import com.pharmacore.insurance.application.InsuranceStatementService.StatementDetail;
@@ -51,9 +59,10 @@ class InsuranceController {
     // ------------------------------------------------------------------ insurers
 
     @GetMapping("/api/v1/insurers")
-    @PreAuthorize("hasAnyAuthority('INSURANCE_VIEW', 'INSURANCE_MANAGE')")
-    List<InsurerView> list() {
-        return insurers.list();
+    @PreAuthorize("hasAnyAuthority('INSURANCE_VIEW', 'INSURANCE_MANAGE', 'SALE_CREATE')")
+    List<InsurerView> list(@RequestParam(defaultValue = "false") boolean activeOnly) {
+        // the counter offers the third-party payers the pharmacy works with
+        return insurers.list().stream().filter(insurer -> !activeOnly || insurer.active()).toList();
     }
 
     @GetMapping("/api/v1/insurers/{insurerId}")
@@ -89,11 +98,24 @@ class InsuranceController {
         return insurers.policiesOfInsurer(insurerId);
     }
 
+    /**
+     * Registers a cover. At the counter (seller without {@code INSURANCE_MANAGE}) the rate is the
+     * insurer's default and no ceiling is set: only the insurance manager decides other terms.
+     */
     @PostMapping("/api/v1/insurers/{insurerId}/policies")
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAuthority('INSURANCE_MANAGE')")
+    @PreAuthorize("hasAnyAuthority('INSURANCE_MANAGE', 'SALE_CREATE')")
     PolicyView createPolicy(@PathVariable UUID insurerId, @Valid @RequestBody PolicyRequest request) {
-        return insurers.createPolicy(insurerId, request.customerId(), request.toDetails());
+        if (request.customerId() == null) {
+            throw new BusinessRuleException("customer-required", "Choisissez d'abord le client assuré");
+        }
+        var details = request.toDetails();
+        if (!(TenantContext.actor() instanceof Actor.TenantUser user) || !user.can("INSURANCE_MANAGE")) {
+            details = new InsurancePolicyEntity.Details(details.policyNumber(), details.beneficiaryName(),
+                    insurers.get(insurerId).details().defaultCoverageRate(), null, details.validFrom(),
+                    details.validUntil(), true);
+        }
+        return insurers.createPolicy(insurerId, request.customerId(), details);
     }
 
     @PutMapping("/api/v1/insurance/policies/{policyId}")

@@ -51,6 +51,12 @@ public class PaymentJournalService {
 
     @Transactional(readOnly = true)
     public DayJournal journal(LocalDate from, LocalDate to, String terminalId) {
+        return journal(from, to, terminalId, null);
+    }
+
+    /** @param seller only the receipts of this seller's sales (null: every seller) */
+    @Transactional(readOnly = true)
+    public DayJournal journal(LocalDate from, LocalDate to, String terminalId, UUID seller) {
         Period period = period(from, to);
         UUID tenant = TenantContext.requireTenant().value();
         String terminal = blankToNull(terminalId);
@@ -66,12 +72,14 @@ public class PaymentJournalService {
                         WHERE s.tenant_id = :tenant AND s.status = 'COMPLETED'
                           AND s.occurred_at >= :from AND s.occurred_at < :to
                           AND (:terminal::text IS NULL OR s.terminal_id = :terminal::text)
+                          AND (:seller::uuid IS NULL OR s.cashier_user_id = :seller::uuid)
                         GROUP BY p.method, p.provider
                         ORDER BY total DESC, p.method, p.provider""")
                 .param("tenant", tenant)
                 .param("from", Timestamp.from(period.start()))
                 .param("to", Timestamp.from(period.end()))
                 .param("terminal", terminal)
+                .param("seller", seller)
                 .query((rs, rowNum) -> new CategoryTotal(rs.getString("method"), rs.getString("provider"),
                         rs.getLong("count"), rs.getLong("total"), rs.getLong("pending"),
                         rs.getLong("rejected_count"), rs.getLong("rejected")))
@@ -81,10 +89,12 @@ public class PaymentJournalService {
                         SELECT DISTINCT s.terminal_id FROM sale s
                         WHERE s.tenant_id = :tenant AND s.status = 'COMPLETED'
                           AND s.occurred_at >= :from AND s.occurred_at < :to
+                          AND (:seller::uuid IS NULL OR s.cashier_user_id = :seller::uuid)
                         ORDER BY s.terminal_id""")
                 .param("tenant", tenant)
                 .param("from", Timestamp.from(period.start()))
                 .param("to", Timestamp.from(period.end()))
+                .param("seller", seller)
                 .query(String.class)
                 .list();
         return new DayJournal(period.from(), period.to(), terminal,
@@ -99,6 +109,13 @@ public class PaymentJournalService {
     @Transactional(readOnly = true)
     public List<JournalEntry> entries(LocalDate from, LocalDate to, String method, String provider, String terminalId,
                                       int limit) {
+        return entries(from, to, method, provider, terminalId, limit, null);
+    }
+
+    /** @param seller only this seller's receipts (null: every seller) */
+    @Transactional(readOnly = true)
+    public List<JournalEntry> entries(LocalDate from, LocalDate to, String method, String provider, String terminalId,
+                                      int limit, UUID seller) {
         Period period = period(from, to);
         return jdbc.sql("""
                         SELECT p.id, p.sale_id, s.ticket_number, s.occurred_at, s.terminal_id, u.display_name,
@@ -111,6 +128,7 @@ public class PaymentJournalService {
                           AND (:method::text IS NULL OR p.method = :method::text)
                           AND (:provider::text IS NULL OR p.provider = :provider::text)
                           AND (:terminal::text IS NULL OR s.terminal_id = :terminal::text)
+                          AND (:seller::uuid IS NULL OR s.cashier_user_id = :seller::uuid)
                         ORDER BY s.occurred_at DESC, s.ticket_number DESC
                         LIMIT :limit""")
                 .param("tenant", TenantContext.requireTenant().value())
@@ -119,6 +137,7 @@ public class PaymentJournalService {
                 .param("method", blankToNull(method))
                 .param("provider", blankToNull(provider))
                 .param("terminal", blankToNull(terminalId))
+                .param("seller", seller)
                 .param("limit", Math.clamp(limit, 1, 2_000))
                 .query((rs, rowNum) -> new JournalEntry(rs.getObject("id", UUID.class),
                         rs.getObject("sale_id", UUID.class), rs.getString("ticket_number"),
