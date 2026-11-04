@@ -184,7 +184,8 @@ public class CustomerOrderService {
                 continue;
             }
             Optional<OrderView> order = find(line.customerOrderId());
-            String refusal = order.map(o -> collectRefusal(o, line)).orElse("Commande client introuvable");
+            // collectRefusal gives null when the order can be collected: no Optional.map here
+            String refusal = order.isEmpty() ? "Commande client introuvable" : collectRefusal(order.get(), line);
             if (refusal != null) {
                 if (draft.origin() == SaleOrigin.ONLINE) {
                     throw new BusinessRuleException("customer-order-not-collectable", refusal);
